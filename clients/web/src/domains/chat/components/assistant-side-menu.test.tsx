@@ -167,6 +167,7 @@ import type { ConversationListFilter } from "@/utils/conversation-list-keys";
 import { AssistantSideMenu } from "@/domains/chat/components/assistant-side-menu";
 import { CONVERSATION_LIST_VIRTUALIZE_THRESHOLD } from "@/domains/chat/components/conversation-nav-section";
 import { useSidebarLayoutStore } from "@/domains/chat/sidebar-layout-store";
+import { saveExpandedSections } from "@/domains/chat/utils/sidebar-group-collapse-storage";
 import type * as UsePinnedApps from "@/hooks/use-pinned-apps";
 import { makeAppSummary } from "@/types/app-summary.test-helper";
 import type { AppSummary } from "@/types/app-types";
@@ -186,7 +187,6 @@ beforeEach(() => {
     sectionOrder: [],
     openCategories: [],
     openCustomGroups: [],
-    expandedSections: [],
   });
 });
 
@@ -1667,8 +1667,8 @@ describe("AssistantSideMenu · equal section treatment", () => {
    * bottom-most section that fills runs a hundred threads down the rail's
    * whole height, so it rests at the same cap the sections above it take
    * and grows to the rail's leftover height only on request (the Expand
-   * control writes the layout store's `expandedSections`). These pin the
-   * rest height and the growth themselves.
+   * control writes `vellum:sidebar-expanded-sections`, which the section
+   * reads on render). These pin the rest height and the growth themselves.
    */
   test("the bottom-most section rests at the mid height; the ones above it cap", () => {
     // Grouped: Pinned, Alpha, Chats, Slack. Slack is bottom-most.
@@ -1782,7 +1782,7 @@ describe("AssistantSideMenu · equal section treatment", () => {
       // height, still hugging its rows rather than filling. Alpha is
       // untouched: the choice is the last section's alone.
       act(() => {
-        useSidebarLayoutStore.getState().setExpandedSections(["recents"]);
+        saveExpandedSections("asst-1", ["recents"]);
       });
       expect(scroller("Chats").style.maxHeight).toBe("");
       expect(scroller("Chats").classList.contains("flex-1")).toBe(false);
@@ -1847,7 +1847,7 @@ describe("AssistantSideMenu · equal section treatment", () => {
   });
 
   test("expanded past the virtualize threshold, Chats windows into a bounded, filling box", () => {
-    // What the Expand control writes; the store hydrates it on mount.
+    // What the Expand control writes.
     localStorage.setItem(
       "vellum:sidebar-expanded-sections:asst-1",
       JSON.stringify(["recents"]),

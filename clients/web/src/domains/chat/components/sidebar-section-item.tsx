@@ -29,12 +29,15 @@ import type { ReactNode } from "react";
 import type { CollapsibleNavSectionDrag } from "@/components/collapsible-nav-section";
 import { AssistantSectionEmptyState } from "@/domains/chat/components/assistant-section-empty-state";
 import { useConversationListContext } from "@/domains/chat/components/conversation-list-context";
+import {
+  saveExpandedSections,
+  useExpandedSections,
+} from "@/domains/chat/utils/sidebar-group-collapse-storage";
 import { SidebarSectionCard } from "@/domains/chat/components/sidebar-section-card";
 import {
   GroupActionsMenu,
   type GroupMenuItemsProps,
 } from "@/domains/chat/components/group-actions-menu";
-import { useSidebarLayoutStore } from "@/domains/chat/sidebar-layout-store";
 import type { SidebarSection } from "@/domains/chat/use-sidebar-state";
 import { useSectionConversations } from "@/domains/chat/use-section-conversations";
 import { sectionIcon } from "@/domains/chat/utils/sidebar-section-icon";
@@ -96,12 +99,17 @@ export function SidebarSectionItem({
   const isAssistantSection = section.type === "assistant";
   const { overlayCards } = useConversationListContext();
 
-  const expandedSections = useSidebarLayoutStore.use.expandedSections();
-  const setExpandedSections = useSidebarLayoutStore.use.setExpandedSections();
+  /* Read from storage on render (see `useExpandedSections`), so a section
+     the user expanded is at its full height on the first paint rather than
+     growing there after a hydration effect. */
+  const expandedSections = useExpandedSections(assistantId);
   const expanded = expandedSections.includes(section.key);
   const onExpandedChange = (next: boolean) => {
+    if (assistantId === null) {
+      return;
+    }
     const rest = expandedSections.filter((key) => key !== section.key);
-    setExpandedSections(next ? [...rest, section.key] : rest);
+    saveExpandedSections(assistantId, next ? [...rest, section.key] : rest);
   };
 
   /* Every section handed to this component renders. Whether a section exists

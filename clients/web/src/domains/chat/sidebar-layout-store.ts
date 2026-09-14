@@ -25,12 +25,10 @@ import { create } from "zustand";
 
 import { createSelectors } from "@/utils/create-selectors";
 import {
-  loadExpandedSections,
   loadOpenCategories,
   loadOpenCustomGroups,
   loadOpenPrimary,
   PRIMARY_SECTION_KEYS,
-  saveExpandedSections,
   saveOpenCategories,
   saveOpenCustomGroups,
   saveOpenPrimary,
@@ -60,12 +58,6 @@ export interface SidebarLayoutState {
    * `mergeSectionOrder`.
    */
   sectionOrder: string[];
-  /**
-   * Sections the user has expanded from their mid height to their full
-   * height (see `expandable` on `ConversationRowList`). Empty by default:
-   * a section rests at its cap until asked for the rest.
-   */
-  expandedSections: string[];
 }
 
 export interface SidebarLayoutActions {
@@ -74,7 +66,6 @@ export interface SidebarLayoutActions {
   setOpenCustomGroups: (next: string[]) => void;
   setOpenPrimary: (next: string[]) => void;
   setSectionOrder: (next: string[]) => void;
-  setExpandedSections: (next: string[]) => void;
 }
 
 export type SidebarLayoutStore = SidebarLayoutState & SidebarLayoutActions;
@@ -91,7 +82,6 @@ const INITIAL_STATE: SidebarLayoutState = {
   // setAssistantId.
   openPrimary: [...PRIMARY_SECTION_KEYS],
   sectionOrder: [],
-  expandedSections: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -111,7 +101,6 @@ const useSidebarLayoutStoreBase = create<SidebarLayoutStore>()((set, get) => ({
       openCustomGroups: loadOpenCustomGroups(assistantId),
       openPrimary: loadOpenPrimary(assistantId),
       sectionOrder: loadSectionOrder(assistantId),
-      expandedSections: loadExpandedSections(assistantId),
     });
   },
 
@@ -144,14 +133,6 @@ const useSidebarLayoutStoreBase = create<SidebarLayoutStore>()((set, get) => ({
     const { assistantId } = get();
     if (assistantId) {
       saveSectionOrder(assistantId, next);
-    }
-  },
-
-  setExpandedSections: (next: string[]) => {
-    set({ expandedSections: next });
-    const { assistantId } = get();
-    if (assistantId) {
-      saveExpandedSections(assistantId, next);
     }
   },
 }));

@@ -150,9 +150,20 @@ export function saveOpenPrimary(
   primaryStorage.save(assistantId, openPrimary);
 }
 
-/** Load the sections the user has expanded past their mid height. */
-export function loadExpandedSections(assistantId: string): string[] {
-  return expandedStorage.load(assistantId);
+/**
+ * Subscribe to the sections one assistant has expanded past their mid
+ * height.
+ *
+ * Storage is the source of truth here, as it is for the view mode, rather
+ * than a value the layout store snapshots in an effect after mount: the
+ * first paint already carries the choice, so a section the user expanded
+ * does not paint at its cap and then grow once the effect runs, and a
+ * change made in one window reaches every other window on the same
+ * assistant. With no assistant there is nothing stored, and the empty key
+ * reads the fallback.
+ */
+export function useExpandedSections(assistantId: string | null): string[] {
+  return expandedStorage.useValue(assistantId ?? "");
 }
 
 export function saveExpandedSections(
