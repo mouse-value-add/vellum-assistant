@@ -750,6 +750,17 @@ export type ResolvedElement =
   | { kind: "backend"; backendNodeId: number; eid: string }
   | { kind: "selector"; selector: string };
 
+function snapshotConversationId(context: ToolContext): string {
+  return context.cdpClient?.conversationId ?? context.conversationId;
+}
+
+function clearBrowserSessionState(context: ToolContext): void {
+  browserManager.clearSnapshotBackendNodeMap(snapshotConversationId(context));
+  if (!context.cdpClient) {
+    browserManager.clearPreferredBackendKind(context.conversationId);
+  }
+}
+
 /**
  * Resolve an element reference (either `element_id` from a prior
  * snapshot or a raw `selector`) for CDP-native tools. Returns a
@@ -759,10 +770,6 @@ export type ResolvedElement =
  * or when an `element_id` is provided but the snapshot map is
  * empty/stale.
  */
-function snapshotConversationId(context: ToolContext): string {
-  return context.cdpClient?.conversationId ?? context.conversationId;
-}
-
 function resolveElement(
   conversationId: string,
   input: Record<string, unknown>,
@@ -1611,8 +1618,7 @@ export async function executeBrowserDetach(
     // Vellum.detach round-trip failed (target gone, transport dropped).
     // browser_detach is the user's recovery path — leaving a stale
     // sticky backend or snapshot map behind would defeat its purpose.
-    browserManager.clearSnapshotBackendNodeMap(snapshotConversationId(context));
-    browserManager.clearPreferredBackendKind(context.conversationId);
+    clearBrowserSessionState(context);
     cdp.dispose();
   }
 }
@@ -1664,8 +1670,7 @@ export async function executeBrowserClose(
         // Tolerate detach failures (already detached, tab closed, etc.)
       }
     }
-    browserManager.clearSnapshotBackendNodeMap(snapshotConversationId(context));
-    browserManager.clearPreferredBackendKind(context.conversationId);
+    clearBrowserSessionState(context);
     return {
       content:
         "Browser session cleared. (Your Chrome tab was not closed — close it yourself if desired.)",
