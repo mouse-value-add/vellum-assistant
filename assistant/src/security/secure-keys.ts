@@ -531,6 +531,8 @@ async function doResolveBackend(): Promise<CredentialBackend> {
   //      direct connection to the CES sibling socket. On success, inject
   //      the client via setCesClient() and re-resolve through the CES RPC
   //      path. On failure, fall through to the encrypted file store.
+  //      Managed pods set CES_BOOTSTRAP_SOCKET_DIR instead of
+  //      CES_LOCAL_SOCKET; that env does not open this gate.
   if (!_cesClient && !_cesReconnect && process.env.CES_LOCAL_SOCKET) {
     const lazyClient = await tryLazyCesConnect();
     if (lazyClient) {

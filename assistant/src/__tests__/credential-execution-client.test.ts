@@ -9,6 +9,7 @@
  */
 
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -30,6 +31,7 @@ import {
   createCesClient,
 } from "../credential-execution/client.js";
 import {
+  discoverCes,
   discoverCesWithRetry,
   discoverManagedCes,
 } from "../credential-execution/executable-discovery.js";
@@ -117,6 +119,46 @@ describe("managed CES discovery", () => {
       } else {
         delete process.env["CES_BOOTSTRAP_SOCKET"];
       }
+    }
+  });
+
+  test("containerized discovery ignores CES_LOCAL_SOCKET and uses the bootstrap dir", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ces-discover-"));
+    const localSock = join(tmp, "local.sock");
+    writeFileSync(localSock, "");
+    const bootstrapDir = join(tmp, "bootstrap");
+    mkdirSync(bootstrapDir);
+
+    const saved = {
+      IS_CONTAINERIZED: process.env.IS_CONTAINERIZED,
+      CES_LOCAL_SOCKET: process.env.CES_LOCAL_SOCKET,
+      CES_BOOTSTRAP_SOCKET_DIR: process.env.CES_BOOTSTRAP_SOCKET_DIR,
+      CES_BOOTSTRAP_SOCKET: process.env.CES_BOOTSTRAP_SOCKET,
+    };
+    try {
+      process.env.IS_CONTAINERIZED = "1";
+      process.env.CES_LOCAL_SOCKET = localSock;
+      process.env.CES_BOOTSTRAP_SOCKET_DIR = bootstrapDir;
+      delete process.env.CES_BOOTSTRAP_SOCKET;
+
+      const result = discoverCes();
+      expect(result.mode).toBe("unavailable");
+      expect((result as { reason: string }).reason).toContain(
+        "CES bootstrap socket not found",
+      );
+    } finally {
+      const restore = (key: keyof typeof saved, value: string | undefined) => {
+        if (value !== undefined) {
+          process.env[key] = value;
+        } else {
+          delete process.env[key];
+        }
+      };
+      restore("IS_CONTAINERIZED", saved.IS_CONTAINERIZED);
+      restore("CES_LOCAL_SOCKET", saved.CES_LOCAL_SOCKET);
+      restore("CES_BOOTSTRAP_SOCKET_DIR", saved.CES_BOOTSTRAP_SOCKET_DIR);
+      restore("CES_BOOTSTRAP_SOCKET", saved.CES_BOOTSTRAP_SOCKET);
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 });

@@ -102,9 +102,9 @@ const BOOTSTRAP_SOCKET_NAME = "ces.sock";
 /**
  * Return the path to the bootstrap Unix socket.
  *
- * In managed mode, CES listens on this socket for exactly one assistant
- * connection, then unlinks it. The path is on a shared `emptyDir` volume
- * visible to both containers.
+ * In managed mode, CES listens on this socket on a shared `emptyDir`
+ * volume visible to both containers. The daemon connects at boot; CES
+ * keeps the listener open for additional clients.
  *
  * Priority:
  * 1. `CES_BOOTSTRAP_SOCKET_DIR` env var (directory) — appends `ces.sock`

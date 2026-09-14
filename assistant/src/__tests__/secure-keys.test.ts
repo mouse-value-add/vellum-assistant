@@ -62,6 +62,7 @@ describe("secure-keys", () => {
     delete process.env.IS_CONTAINERIZED;
     delete process.env.CES_CREDENTIAL_URL;
     delete process.env.CES_LOCAL_SOCKET;
+    delete process.env.CES_BOOTSTRAP_SOCKET_DIR;
   });
 
   afterAll(() => {
@@ -574,6 +575,19 @@ describe("secure-keys", () => {
       const afterAttach = await getSecureKeyResultAsync("openai");
       expect(afterAttach.unreachable).toBe(false);
       expect(getActiveBackendName()).toBe("ces-rpc");
+    });
+
+    test("CES_BOOTSTRAP_SOCKET_DIR does not activate lazy CES RPC", async () => {
+      process.env.IS_CONTAINERIZED = "1";
+      process.env.CES_BOOTSTRAP_SOCKET_DIR = "/run/ces-bootstrap";
+      delete process.env.CES_CREDENTIAL_URL;
+      delete process.env.CES_LOCAL_SOCKET;
+      _resetBackend();
+
+      const result = await getSecureKeyResultAsync("openai");
+      expect(result.value).toBeUndefined();
+      expect(result.unreachable).toBe(true);
+      expect(getActiveBackendName()).toBe("none");
     });
   });
 

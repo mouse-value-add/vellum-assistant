@@ -49,8 +49,8 @@ interface CesStartupResult {
  * handles to the in-flight initialization — callers don't need to await this
  * for startup to continue.
  *
- * The managed sidecar accepts exactly one bootstrap connection, so this must be
- * called at the process level (not per-conversation).
+ * CES RPC is process-scoped, so this must be called at the process level
+ * (not per-conversation).
  */
 function startCesProcess(config: AssistantConfig): CesStartupResult {
   const pm = createCesProcessManager({ assistantConfig: config });
