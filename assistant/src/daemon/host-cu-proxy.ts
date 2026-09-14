@@ -43,20 +43,23 @@ const LOOP_DETECTION_WINDOW = 3;
 const CONSECUTIVE_UNCHANGED_WARNING_THRESHOLD = 2;
 
 /**
- * The tools that actuate the user's desktop. None of them is approved
- * individually any more; they run inside a control session the user approved
- * once at `computer_use_start`, so the proxy refuses them until that approval
- * exists. Observing, waiting, pointing and the terminal tools change nothing
- * on the machine and need no session.
+ * The only computer-use wire names that run without an approved session.
+ * Observing, waiting, pointing and the terminal tools change nothing on the
+ * machine. Everything else actuates the desktop and runs only inside a control
+ * session the user approved once at `computer_use_start`.
+ *
+ * An allowlist, not a list of actuating tools, on purpose: a wire name is not
+ * always the tool the model called (`computer_use_click` goes out as
+ * `computer_use_double_click` or `computer_use_right_click`), and a name this
+ * list has never heard of must be refused rather than waved through.
  */
-const SESSION_REQUIRED_TOOLS: ReadonlySet<string> = new Set([
-  "computer_use_click",
-  "computer_use_type_text",
-  "computer_use_key",
-  "computer_use_scroll",
-  "computer_use_drag",
-  "computer_use_open_app",
-  "computer_use_run_applescript",
+const SESSIONLESS_TOOLS: ReadonlySet<string> = new Set([
+  "computer_use_observe",
+  "computer_use_wait",
+  "computer_use_point_at",
+  "computer_use_done",
+  "computer_use_respond",
+  "computer_use_start",
 ]);
 
 const NO_SESSION_MESSAGE =
@@ -64,9 +67,9 @@ const NO_SESSION_MESSAGE =
 const WRONG_DESKTOP_MESSAGE =
   "This control session was approved for a different desktop. Call computer_use_start for the desktop you want to control.";
 
-/** Whether `toolName` actuates the desktop and so needs an approved session. */
+/** Whether `toolName` needs an approved session before it may reach a desktop. */
 export function requiresSession(toolName: string): boolean {
-  return SESSION_REQUIRED_TOOLS.has(toolName);
+  return !SESSIONLESS_TOOLS.has(toolName);
 }
 
 // computer_use_key combos that change only selection/cursor/clipboard state.

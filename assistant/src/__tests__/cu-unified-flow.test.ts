@@ -323,6 +323,24 @@ describe("surfaceProxyResolver — CU tool routing", () => {
       expect(proxy.actionHistory).toHaveLength(0);
     });
 
+    test.each(["double", "right"])(
+      "a %s click before any start is refused like any other click",
+      async (clickType) => {
+        const ctx = setupWithoutSession();
+
+        const result = await surfaceProxyResolver(
+          ctx,
+          `computer_use_${clickType}_click`,
+          { element_id: 1, reasoning: "click the button" },
+        );
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("No control session is open");
+        expect(sentMessages).toHaveLength(0);
+        expect(proxy.stepCount).toBe(0);
+      },
+    );
+
     test("computer_use_done closes the session and the next click is refused", async () => {
       const ctx = setupProxy();
 

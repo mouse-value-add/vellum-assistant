@@ -1210,6 +1210,29 @@ describe("HostCuProxy", () => {
       }
     });
 
+    test("wire names the model never calls directly still need a session", async () => {
+      // `computer_use_click` goes out as these for double and right clicks.
+      // An exact list of public tool names let them through with no session.
+      for (const toolName of [
+        "computer_use_double_click",
+        "computer_use_right_click",
+        "computer_use_some_future_action",
+      ]) {
+        expect(requiresSession(toolName)).toBe(true);
+      }
+
+      setup(undefined, { session: false });
+      const result = await proxy.request(
+        "computer_use_right_click",
+        { element_id: 3 },
+        "session-1",
+        1,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("No control session is open");
+      expect(sentMessages).toHaveLength(0);
+    });
+
     test.each(["computer_use_observe", "computer_use_wait"])(
       "%s dispatches with no session open",
       async (toolName) => {
