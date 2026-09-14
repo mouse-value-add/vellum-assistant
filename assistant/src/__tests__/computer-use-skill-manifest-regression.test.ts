@@ -29,7 +29,7 @@ const manifestPath = resolve(
 const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
 
 describe("computer-use skill manifest regression", () => {
-  test("manifest has exactly 11 tools", () => {
+  test("manifest tool count matches the harness", () => {
     expect(manifest.tools).toHaveLength(COMPUTER_USE_TOOL_COUNT);
   });
 
@@ -52,19 +52,36 @@ describe("computer-use skill manifest regression", () => {
     }
   });
 
-  test("read-only tools have risk: low, side-effect tools have risk: medium", () => {
-    const readOnlyTools = new Set([
-      "computer_use_observe",
-      "computer_use_wait",
-      "computer_use_done",
-      "computer_use_respond",
-    ]);
+  test("computer_use_start is the session's one approval; every other tool is low risk", () => {
+    // The consent boundary is the session, not the individual click. Flipping
+    // any of these back to medium reinstates a prompt per action, which is the
+    // thing this manifest exists to prevent.
+    const start = manifest.tools.find(
+      (t: { name: string }) => t.name === "computer_use_start",
+    );
+    expect(start).toBeDefined();
+    expect(start.risk).toBe("medium");
+    expect(start.input_schema.required).toEqual(["task"]);
+
     for (const tool of manifest.tools) {
-      if (readOnlyTools.has(tool.name)) {
+      if (tool.name !== "computer_use_start") {
         expect(tool.risk).toBe("low");
-      } else {
-        expect(tool.risk).toBe("medium");
       }
+    }
+  });
+
+  test("manifest risk matches core definitions", async () => {
+    await initializeTools();
+
+    // These two drifted for real once: every definition said low while the
+    // actuating manifest entries said medium. Assert the manifest value
+    // against the definition so they cannot drift again.
+    for (const cuTool of allComputerUseTools) {
+      const manifestTool = manifest.tools.find(
+        (t: { name: string }) => t.name === cuTool.name,
+      );
+      expect(manifestTool).toBeDefined();
+      expect(manifestTool.risk).toBe(cuTool.defaultRiskLevel);
     }
   });
 

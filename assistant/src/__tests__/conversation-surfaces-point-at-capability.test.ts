@@ -30,6 +30,9 @@ function proxyDouble() {
       recordAction: () => {},
       request,
       reset: () => {},
+      // A session is open: the gate is exercised elsewhere, and none of
+      // these tests is about it.
+      sessionGateError: () => undefined,
       stepCount: 0,
     },
   };

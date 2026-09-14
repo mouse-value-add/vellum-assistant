@@ -2,6 +2,28 @@
   "version": 1,
   "tools": [
     {
+      "name": "computer_use_start",
+      "description": "Begin a computer-use session. The user approves control once here, and the actions that follow run without a prompt each. Say plainly what the session will do. Call computer_use_done when finished.",
+      "category": "computer-use",
+      "risk": "medium",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Plain-language description of what this session will do, shown to the user in the approval. This is what they are agreeing to, so name the apps you will drive and anything you will change or send."
+          },
+          "target_client_id": {
+            "type": "string",
+            "description": "ID of the specific client to target. Required when multiple clients support host_cu; omit when only one is connected. Obtain IDs from `assistant clients list --capability host_cu`."
+          }
+        },
+        "required": ["task"]
+      },
+      "executor": "tools/computer-use-start.ts",
+      "execution_target": "host"
+    },
+    {
       "name": "computer_use_observe",
       "description": "Capture the current screen state. Returns the accessibility tree with [ID] element references and optionally a screenshot.\n\nThe accessibility tree shows interactive elements like [3] AXButton 'Save' or [17] AXTextField 'Search'. Use element_id to target these elements in subsequent actions - this is much more reliable than pixel coordinates.\n\nCall this before your first computer use action, or to check screen state without acting.",
       "category": "computer-use",
@@ -29,7 +51,7 @@
       "name": "computer_use_click",
       "description": "Click an element on screen. Prefer element_id (from the accessibility tree) over x/y coordinates.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -68,7 +90,7 @@
       "name": "computer_use_type_text",
       "description": "Type text at the current cursor position. First click a text field (by element_id) to focus it, then call this tool. If a field shows 'FOCUSED', skip the click.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -94,7 +116,7 @@
       "name": "computer_use_key",
       "description": "Press a key or keyboard shortcut. Supported: enter, tab, escape, backspace, delete, up, down, left, right, space, cmd+a, cmd+c, cmd+v, cmd+z, cmd+tab, cmd+w, shift+tab, option+tab. On Windows use ctrl/alt in place of cmd/option.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -120,7 +142,7 @@
       "name": "computer_use_scroll",
       "description": "Scroll within an element by its [ID], or at raw screen coordinates as fallback.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -163,7 +185,7 @@
       "name": "computer_use_drag",
       "description": "Drag from one element or position to another. Use for moving files, resizing windows, rearranging items, or adjusting sliders.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -236,7 +258,7 @@
       "name": "computer_use_open_app",
       "description": "Open or switch to a desktop application by name. Preferred over cmd+tab / alt+tab for switching apps - more reliable and explicit.",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -263,7 +285,7 @@
       "name": "computer_use_run_applescript",
       "description": "Run an AppleScript command. Prefer this over click/type when possible - it doesn't move the cursor or interrupt foreground activity. Never use 'do shell script' inside AppleScript (blocked for security).",
       "category": "computer-use",
-      "risk": "medium",
+      "risk": "low",
       "input_schema": {
         "type": "object",
         "properties": {

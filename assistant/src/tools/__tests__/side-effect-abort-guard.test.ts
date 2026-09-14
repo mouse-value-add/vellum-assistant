@@ -151,6 +151,7 @@ const SKILL_TOOLS: GuardedTool[] = [
   proxied("app_control_click"),
   proxied("app_control_drag"),
 
+  proxied("computer_use_start"),
   proxied("computer_use_click"),
   proxied("computer_use_type_text"),
   proxied("computer_use_key"),

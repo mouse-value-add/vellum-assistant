@@ -23,6 +23,18 @@ The skill is internally preactivated for conversations with a connected desktop 
 Tools in this skill are proxy tools. Execution is forwarded to a connected
 desktop client and is never handled locally by the assistant.
 
+## Control sessions
+
+Open a session with `computer_use_start`, act, then close it with
+`computer_use_done`; clicking, typing, scrolling, dragging, opening an app and
+running AppleScript are all refused until a session is open.
+
+The actions inside a session are not approved one by one, so the `task` string
+passed to `computer_use_start` is the whole of what the user agreed to. Write
+it plainly and completely, name the apps you will drive and anything you will
+change or send, and start a new session rather than stretching an open one to
+cover work the user has not seen described.
+
 ## Window-scoped observation (macOS)
 
 `computer_use_observe` accepts optional `capture_window_id`, a native macOS

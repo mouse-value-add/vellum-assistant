@@ -58,7 +58,8 @@ mock.module("../util/logger.js", () => ({
 
 // Use the REAL pending-interactions module — the proxy self-registers here.
 const pendingInteractions = await import("../runtime/pending-interactions.js");
-const { HostCuProxy } = await import("../daemon/host-cu-proxy.js");
+const { HostCuProxy, requiresSession } =
+  await import("../daemon/host-cu-proxy.js");
 
 function stepTimingsLogs(): Record<string, unknown>[] {
   return infoLogs
@@ -69,7 +70,12 @@ function stepTimingsLogs(): Record<string, unknown>[] {
 describe("HostCuProxy", () => {
   let proxy: InstanceType<typeof HostCuProxy>;
 
-  function setup(maxSteps?: number) {
+  /**
+   * Fresh proxy with a control session already open, because that is the
+   * state every actuating tool runs in. Pass `{ session: false }` to model a
+   * conversation where the user has not approved control yet.
+   */
+  function setup(maxSteps?: number, opts?: { session?: boolean }) {
     sentMessages.length = 0;
     sentOptions.length = 0;
     mockHasClient = false;
@@ -77,6 +83,9 @@ describe("HostCuProxy", () => {
     infoLogs.length = 0;
     pendingInteractions.clear();
     proxy = new HostCuProxy(maxSteps);
+    if (opts?.session !== false) {
+      proxy.startSession("test control session");
+    }
   }
 
   afterEach(() => {
@@ -1148,6 +1157,139 @@ describe("HostCuProxy", () => {
       expect(proxy.actionHistory).toHaveLength(0);
       expect(proxy.previousAXTree).toBeUndefined();
       expect(proxy.consecutiveUnchangedSteps).toBe(0);
+      expect(proxy.sessionTask).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Control session gate
+  // -------------------------------------------------------------------------
+
+  describe("control session gate", () => {
+    const ACTUATING_TOOLS = [
+      "computer_use_click",
+      "computer_use_type_text",
+      "computer_use_key",
+      "computer_use_scroll",
+      "computer_use_drag",
+      "computer_use_open_app",
+      "computer_use_run_applescript",
+    ];
+
+    test.each(ACTUATING_TOOLS)(
+      "%s is refused before a session, silently and for free",
+      async (toolName) => {
+        setup(undefined, { session: false });
+
+        const result = await proxy.request(toolName, {}, "session-1", 1);
+
+        expect(result.isError).toBe(true);
+        expect(result.content).toBe(
+          "No control session is open. Call computer_use_start first, saying what the session will do.",
+        );
+        // Nothing reached the desktop and nothing was spent: the model is
+        // being told to ask first, not being penalized.
+        expect(sentMessages).toHaveLength(0);
+        expect(proxy.stepCount).toBe(0);
+        expect(pendingInteractions.getAll()).toHaveLength(0);
+      },
+    );
+
+    test("looking, waiting, pointing and finishing need no session", () => {
+      for (const toolName of [
+        "computer_use_observe",
+        "computer_use_wait",
+        "computer_use_point_at",
+        "computer_use_done",
+        "computer_use_respond",
+      ]) {
+        expect(requiresSession(toolName)).toBe(false);
+      }
+      for (const toolName of ACTUATING_TOOLS) {
+        expect(requiresSession(toolName)).toBe(true);
+      }
+    });
+
+    test.each(["computer_use_observe", "computer_use_wait"])(
+      "%s dispatches with no session open",
+      async (toolName) => {
+        setup(undefined, { session: false });
+
+        const resultPromise = proxy.request(toolName, {}, "session-1", 1);
+
+        expect(sentMessages).toHaveLength(1);
+        const sent = sentMessages[0] as Record<string, unknown>;
+        proxy.processObservation(sent.requestId as string, {
+          axTree: "Desktop",
+        });
+        expect((await resultPromise).isError).toBe(false);
+      },
+    );
+
+    test("the same click proceeds once a session is open", async () => {
+      setup(undefined, { session: false });
+
+      const refused = await proxy.request(
+        "computer_use_click",
+        { element_id: 7 },
+        "session-1",
+        1,
+      );
+      expect(refused.isError).toBe(true);
+      expect(sentMessages).toHaveLength(0);
+
+      proxy.startSession("Reply to the top email in Mail");
+      expect(proxy.sessionTask).toBe("Reply to the top email in Mail");
+
+      const resultPromise = proxy.request(
+        "computer_use_click",
+        { element_id: 7 },
+        "session-1",
+        1,
+      );
+      expect(sentMessages).toHaveLength(1);
+      const sent = sentMessages[0] as Record<string, unknown>;
+      expect(sent.toolName).toBe("computer_use_click");
+
+      proxy.processObservation(sent.requestId as string, {
+        executionResult: "Clicked element 7",
+      });
+      expect((await resultPromise).isError).toBe(false);
+    });
+
+    test("reset closes the session, so the next click is refused again", async () => {
+      setup();
+
+      proxy.reset();
+
+      const result = await proxy.request(
+        "computer_use_click",
+        {},
+        "session-1",
+        1,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("No control session is open");
+      expect(sentMessages).toHaveLength(0);
+    });
+
+    test("the step budget cannot refuse a call the session gate already did", async () => {
+      setup(1, { session: false });
+
+      for (let i = 0; i < 3; i++) {
+        proxy.recordAction("computer_use_observe", {});
+      }
+      expect(proxy.stepCount).toBeGreaterThan(proxy.maxSteps);
+
+      const result = await proxy.request(
+        "computer_use_click",
+        {},
+        "session-1",
+        proxy.stepCount,
+      );
+      // The session gate runs first, so the model is told the actionable
+      // thing rather than being pointed at a budget it cannot spend anyway.
+      expect(result.content).toContain("No control session is open");
     });
   });
 

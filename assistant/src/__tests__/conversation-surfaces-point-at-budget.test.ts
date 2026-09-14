@@ -24,6 +24,9 @@ function proxyDouble() {
       recordAction,
       request,
       reset: () => {},
+      // A session is open: the gate is exercised elsewhere, and none of
+      // these tests is about it.
+      sessionGateError: () => undefined,
       stepCount: 0,
     },
   };
@@ -99,6 +102,9 @@ describe("the computer-use step budget", () => {
   test("does not stop a mark once it is spent", async () => {
     const { HostCuProxy } = await import("../daemon/host-cu-proxy.js");
     const proxy = new HostCuProxy(1);
+    // The step limit is what must refuse the click below, so open a session
+    // first; otherwise the session gate refuses it for a different reason.
+    proxy.startSession("spend the budget");
     proxy.recordAction("computer_use_click", { element_id: 1 });
     proxy.recordAction("computer_use_click", { element_id: 2 });
     expect(proxy.stepCount).toBeGreaterThan(proxy.maxSteps);

@@ -875,7 +875,9 @@ describe("always-candidate frontmatter parsing", () => {
     // drops trailing hints and the whole avoid-when list.
     const { DEFAULT_CARD_CHARS, buildSkillContent } =
       await import("../plugins/defaults/memory/substrate/skill-content.js");
-    const schedule = loadSkillCatalog().find((skill) => skill.id === "schedule");
+    const schedule = loadSkillCatalog().find(
+      (skill) => skill.id === "schedule",
+    );
     expect(schedule).toBeDefined();
 
     const card = buildSkillContent(schedule!);
@@ -886,7 +888,9 @@ describe("always-candidate frontmatter parsing", () => {
   test("the bundled schedule card carries its monitoring vocabulary", async () => {
     const { buildSkillContent } =
       await import("../plugins/defaults/memory/substrate/skill-content.js");
-    const schedule = loadSkillCatalog().find((skill) => skill.id === "schedule");
+    const schedule = loadSkillCatalog().find(
+      (skill) => skill.id === "schedule",
+    );
     const card = buildSkillContent(schedule!).toLowerCase();
 
     for (const term of ["monitor", "page", "dashboard", "status", "alert"]) {
@@ -1087,15 +1091,16 @@ describe("bundled computer-use skill", () => {
     expect(cuSkill!.bundled).toBe(true);
   });
 
-  test("computer-use skill has a valid tool manifest with 11 tools", () => {
+  test("computer-use skill has a valid tool manifest with 12 tools", () => {
     const catalog = loadSkillCatalog();
     const cuSkill = catalog.find((s) => s.id === "computer-use");
     expect(cuSkill).toBeDefined();
     expect(cuSkill!.toolManifest).toBeDefined();
     expect(cuSkill!.toolManifest!.present).toBe(true);
     expect(cuSkill!.toolManifest!.valid).toBe(true);
-    expect(cuSkill!.toolManifest!.toolCount).toBe(11);
+    expect(cuSkill!.toolManifest!.toolCount).toBe(12);
     expect(cuSkill!.toolManifest!.toolNames).toEqual([
+      "computer_use_start",
       "computer_use_observe",
       "computer_use_click",
       "computer_use_type_text",

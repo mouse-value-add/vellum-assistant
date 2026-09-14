@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { RiskLevel } from "../permissions/types.js";
 import {
   allComputerUseTools,
   computerUseClickTool,
@@ -11,6 +12,7 @@ import {
   computerUseRespondTool,
   computerUseRunAppleScriptTool,
   computerUseScrollTool,
+  computerUseStartTool,
   computerUseTypeTextTool,
   computerUseWaitTool,
 } from "../tools/computer-use/definitions.js";
@@ -37,8 +39,8 @@ const ctx: ToolContext = {
 // ── Tool definitions ────────────────────────────────────────────────
 
 describe("computer-use tool definitions", () => {
-  test("allComputerUseTools contains 11 tools", () => {
-    expect(allComputerUseTools.length).toBe(11);
+  test("allComputerUseTools contains 12 tools", () => {
+    expect(allComputerUseTools.length).toBe(12);
   });
 
   test("all tools belong to computer-use category", () => {
@@ -55,6 +57,22 @@ describe("computer-use tool definitions", () => {
   test("all tools have descriptions", () => {
     for (const tool of allComputerUseTools) {
       expect(tool.description!.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ── start ──────────────────────────────────────────────────
+
+describe("computer_use_start", () => {
+  test("requires the task the user is approving", () => {
+    expect(schema(computerUseStartTool).required).toEqual(["task"]);
+  });
+
+  test("is the only medium-risk computer-use tool", () => {
+    for (const tool of allComputerUseTools) {
+      expect(tool.defaultRiskLevel).toBe(
+        tool.name === "computer_use_start" ? RiskLevel.Medium : RiskLevel.Low,
+      );
     }
   });
 });

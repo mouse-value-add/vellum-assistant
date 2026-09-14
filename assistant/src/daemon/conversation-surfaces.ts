@@ -3164,6 +3164,19 @@ export async function surfaceProxyResolver(
       };
     }
 
+    // Opening a control session resolves immediately too: the approval the
+    // user just gave IS the whole of this call, and there is nothing for the
+    // host to do. What they approved is the `task` string, because the
+    // actions that follow are not prompted individually.
+    if (toolName === "computer_use_start") {
+      const task =
+        typeof input.task === "string" && input.task.trim() !== ""
+          ? input.task.trim()
+          : "Control this computer";
+      hostCuProxy.startSession(task);
+      return { content: `Control session open: ${task}`, isError: false };
+    }
+
     // Terminal tools resolve immediately without a client round-trip
     if (
       toolName === "computer_use_done" ||
@@ -3204,6 +3217,15 @@ export async function surfaceProxyResolver(
       return target.result;
     }
     targetClientId = target.targetClientId;
+
+    // An actuating tool runs only inside a session the user approved. The
+    // proxy is the authoritative gate; refusing here too, after the target
+    // checks and before the step is recorded, keeps a refused call from
+    // burning a step or polluting the action history.
+    const sessionGate = hostCuProxy.sessionGateError(toolName);
+    if (sessionGate) {
+      return sessionGate;
+    }
 
     // Pointing at the screen is not a computer-use step. It drives nothing
     // and the user does the acting, so counting it against

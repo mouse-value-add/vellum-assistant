@@ -40,6 +40,40 @@ function proxyExecute(toolName: string) {
 }
 
 // ---------------------------------------------------------------------------
+// start (the session's one approval)
+// ---------------------------------------------------------------------------
+
+export const computerUseStartTool = {
+  name: "computer_use_start",
+  description:
+    "Begin a computer-use session. The user approves control once here, and the actions that follow run without a prompt each. Say plainly what the session will do. Call computer_use_done when finished.",
+  category: "computer-use",
+  // The only medium-risk tool in the skill, and deliberately so: this approval
+  // is the consent boundary for every action the session goes on to take.
+  defaultRiskLevel: RiskLevel.Medium,
+  executionTarget: "host",
+
+  input_schema: {
+    type: "object",
+    properties: {
+      task: {
+        type: "string",
+        description:
+          "Plain-language description of what this session will do, shown to the user in the approval. This is what they are agreeing to, so name the apps you will drive and anything you will change or send.",
+      },
+      target_client_id: {
+        type: "string",
+        description:
+          "ID of the specific client to target. Required when multiple clients support host_cu; omit when only one is connected. Obtain IDs from `assistant clients list --capability host_cu`.",
+      },
+    },
+    required: ["task"],
+  },
+
+  execute: proxyExecute("computer_use_start"),
+} satisfies ToolDefinition;
+
+// ---------------------------------------------------------------------------
 // click (unified - click_type selects single / double / right)
 // ---------------------------------------------------------------------------
 
@@ -456,7 +490,8 @@ export const computerUseObserveTool = {
         type: "integer",
         minimum: 1,
         maximum: 4294967295,
-        description: "macOS only: capture this native CGWindowID instead of the desktop, including only its accessibility tree. Obtain a current native window ID first; do not guess or use a browser tab ID. Applies to this observation only, not subsequent actions. Requires a desktop helper with window-capture support. Screenshot coordinates are window-relative; use accessibility element IDs for later actions, not desktop scaling.",
+        description:
+          "macOS only: capture this native CGWindowID instead of the desktop, including only its accessibility tree. Obtain a current native window ID first; do not guess or use a browser tab ID. Applies to this observation only, not subsequent actions. Requires a desktop helper with window-capture support. Screenshot coordinates are window-relative; use accessibility element IDs for later actions, not desktop scaling.",
       },
       target_client_id: {
         type: "string",
@@ -475,6 +510,7 @@ export const computerUseObserveTool = {
 // ---------------------------------------------------------------------------
 
 export const allComputerUseTools: ToolDefinition[] = [
+  computerUseStartTool,
   computerUseObserveTool,
   computerUseClickTool,
   computerUseTypeTextTool,

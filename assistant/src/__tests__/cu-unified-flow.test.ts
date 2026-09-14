@@ -135,6 +135,10 @@ describe("surfaceProxyResolver — CU tool routing", () => {
       },
     ];
     proxy = new HostCuProxy(maxSteps);
+    // Every actuating tool runs inside a session the user approved once at
+    // `computer_use_start`; open one so these tests exercise the routing
+    // rather than the session gate, which has its own block below.
+    proxy.startSession("test control session");
     return buildMockContext(proxy);
   }
 
@@ -170,6 +174,7 @@ describe("surfaceProxyResolver — CU tool routing", () => {
         () => {
           attachCalls++;
           proxy = new HostCuProxy();
+          proxy.startSession("test control session");
           (ctx as { hostCuProxy?: unknown }).hostCuProxy = proxy;
         },
       );
@@ -255,6 +260,93 @@ describe("surfaceProxyResolver — CU tool routing", () => {
         { answer: "42" },
       );
       expect(respondResult.isError).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // One approval per control session
+  // -------------------------------------------------------------------------
+
+  describe("control session", () => {
+    /** A proxy with no session open, as a fresh conversation has. */
+    function setupWithoutSession(): Conversation {
+      const ctx = setupProxy();
+      proxy.reset();
+      return ctx;
+    }
+
+    test("computer_use_start opens the session in the daemon, with no round trip", async () => {
+      const ctx = setupWithoutSession();
+
+      const result = await surfaceProxyResolver(ctx, "computer_use_start", {
+        task: "Reply to the top email in Mail",
+      });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toBe(
+        "Control session open: Reply to the top email in Mail",
+      );
+      expect(sentMessages).toHaveLength(0);
+      expect(proxy.sessionTask).toBe("Reply to the top email in Mail");
+      expect(proxy.stepCount).toBe(0);
+    });
+
+    test("a missing or non-string task still opens a described session", async () => {
+      const ctx = setupWithoutSession();
+
+      const result = await surfaceProxyResolver(ctx, "computer_use_start", {
+        task: 42,
+      });
+
+      expect(result.isError).toBe(false);
+      expect(proxy.sessionTask).toBe("Control this computer");
+    });
+
+    test("a click before any start is refused and costs no step", async () => {
+      const ctx = setupWithoutSession();
+
+      const result = await surfaceProxyResolver(ctx, "computer_use_click", {
+        element_id: 1,
+        reasoning: "click the button",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("No control session is open");
+      expect(sentMessages).toHaveLength(0);
+      expect(proxy.stepCount).toBe(0);
+      expect(proxy.actionHistory).toHaveLength(0);
+    });
+
+    test("computer_use_done closes the session and the next click is refused", async () => {
+      const ctx = setupProxy();
+
+      await surfaceProxyResolver(ctx, "computer_use_done", {
+        summary: "Sent the email",
+      });
+      expect(proxy.sessionTask).toBeUndefined();
+
+      const result = await surfaceProxyResolver(ctx, "computer_use_click", {
+        element_id: 1,
+        reasoning: "click again",
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("No control session is open");
+      expect(sentMessages).toHaveLength(0);
+    });
+
+    test("observing needs no session", async () => {
+      const ctx = setupWithoutSession();
+
+      const resultPromise = surfaceProxyResolver(ctx, "computer_use_observe", {
+        reasoning: "look first",
+      });
+
+      expect(sentMessages).toHaveLength(1);
+      const sent = sentMessages[0] as Record<string, unknown>;
+      proxy.processObservation(sent.requestId as string, {
+        axTree: "Desktop",
+      });
+      expect((await resultPromise).isError).toBe(false);
     });
   });
 
@@ -782,6 +874,7 @@ describe("surfaceProxyResolver — CU tool routing", () => {
         },
       ];
       proxy = new HostCuProxy();
+      proxy.startSession("test control session");
       const ctx = buildMockContext(proxy, DEFAULT_PRINCIPAL);
 
       const resultPromise = surfaceProxyResolver(ctx, "computer_use_click", {

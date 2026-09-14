@@ -42,6 +42,31 @@ const MAX_HISTORY_ENTRIES = 10;
 const LOOP_DETECTION_WINDOW = 3;
 const CONSECUTIVE_UNCHANGED_WARNING_THRESHOLD = 2;
 
+/**
+ * The tools that actuate the user's desktop. None of them is approved
+ * individually any more; they run inside a control session the user approved
+ * once at `computer_use_start`, so the proxy refuses them until that approval
+ * exists. Observing, waiting, pointing and the terminal tools change nothing
+ * on the machine and need no session.
+ */
+const SESSION_REQUIRED_TOOLS: ReadonlySet<string> = new Set([
+  "computer_use_click",
+  "computer_use_type_text",
+  "computer_use_key",
+  "computer_use_scroll",
+  "computer_use_drag",
+  "computer_use_open_app",
+  "computer_use_run_applescript",
+]);
+
+const NO_SESSION_MESSAGE =
+  "No control session is open. Call computer_use_start first, saying what the session will do.";
+
+/** Whether `toolName` actuates the desktop and so needs an approved session. */
+export function requiresSession(toolName: string): boolean {
+  return SESSION_REQUIRED_TOOLS.has(toolName);
+}
+
 // computer_use_key combos that change only selection/cursor/clipboard state.
 // The AX tree models none of these, so they always produce an empty diff —
 // exempt them from the "NO VISIBLE EFFECT" signal (mirrors computer_use_wait).
@@ -175,6 +200,12 @@ export class HostCuProxy {
   private _consecutiveUnchangedSteps = 0;
   private _actionHistory: ActionRecord[] = [];
   /**
+   * What the user approved when the control session was opened, or undefined
+   * while no session is open. Scoped to this conversation like the rest of
+   * this proxy's state, and cleared by `reset()`.
+   */
+  private _sessionTask: string | undefined;
+  /**
    * Owned request IDs mapped to whether their observation is scoped and when
    * the request was dispatched. The dispatch time gives the round trip, which
    * is the part of a step the helper's own timings cannot see.
@@ -210,6 +241,36 @@ export class HostCuProxy {
 
   get actionHistory(): readonly ActionRecord[] {
     return this._actionHistory;
+  }
+
+  get sessionTask(): string | undefined {
+    return this._sessionTask;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Control session
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Open a control session. `task` is the plain-language description the user
+   * approved at `computer_use_start`, and it is the whole of what they
+   * approved: the actions that follow are not prompted individually.
+   */
+  startSession(task: string): void {
+    this._sessionTask = task;
+  }
+
+  /**
+   * The refusal owed to an actuating tool called with no session open, or
+   * undefined when the call may proceed. The authoritative check lives in
+   * `request()`; callers that count steps check here first so a refused call
+   * costs neither a step nor a history entry.
+   */
+  sessionGateError(toolName: string): ToolExecutionResult | undefined {
+    if (requiresSession(toolName) && this._sessionTask === undefined) {
+      return { content: NO_SESSION_MESSAGE, isError: true };
+    }
+    return undefined;
   }
 
   // ---------------------------------------------------------------------------
@@ -252,6 +313,14 @@ export class HostCuProxy {
         content: "Aborted",
         isError: true,
       });
+    }
+
+    // Nothing actuates the desktop outside an approved session. Refused
+    // before the budget check so a refusal broadcasts nothing and costs
+    // nothing: the model is being told to ask first, not being penalized.
+    const sessionGate = this.sessionGateError(toolName);
+    if (sessionGate) {
+      return Promise.resolve(sessionGate);
     }
 
     // Pointing at the screen is outside this budget in both directions: it
@@ -495,6 +564,7 @@ export class HostCuProxy {
     this._previousAXTree = undefined;
     this._consecutiveUnchangedSteps = 0;
     this._actionHistory = [];
+    this._sessionTask = undefined;
   }
 
   // ---------------------------------------------------------------------------
