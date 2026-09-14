@@ -3169,10 +3169,17 @@ export async function surfaceProxyResolver(
     // host to do. What they approved is the `task` string, because the
     // actions that follow are not prompted individually.
     if (toolName === "computer_use_start") {
-      const task =
-        typeof input.task === "string" && input.task.trim() !== ""
-          ? input.task.trim()
-          : "Control this computer";
+      // The task is the whole of what the user approved, so a session never
+      // opens on a description broader than the one they saw. A blank or
+      // missing one is refused rather than filled in after the fact.
+      const task = typeof input.task === "string" ? input.task.trim() : "";
+      if (task === "") {
+        return {
+          content:
+            "computer_use_start needs a task: say plainly what this session will do, naming the apps you will drive and anything you will change or send.",
+          isError: true,
+        };
+      }
       // Resolve the desktop now, with the same rules every action uses, and
       // bind the session to it. An action later resolving to any other
       // desktop is refused, so approving one machine never unlocks another.

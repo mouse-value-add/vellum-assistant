@@ -292,15 +292,20 @@ describe("surfaceProxyResolver — CU tool routing", () => {
       expect(proxy.stepCount).toBe(0);
     });
 
-    test("a missing or non-string task still opens a described session", async () => {
-      const ctx = setupWithoutSession();
+    test("a blank, whitespace or non-string task opens no session", async () => {
+      // The task is the consent boundary. Filling one in after the approval
+      // would open a session broader than the description the user saw.
+      for (const task of ["", "   ", 42, undefined]) {
+        const ctx = setupWithoutSession();
+        const result = await surfaceProxyResolver(ctx, "computer_use_start", {
+          task,
+        });
 
-      const result = await surfaceProxyResolver(ctx, "computer_use_start", {
-        task: 42,
-      });
-
-      expect(result.isError).toBe(false);
-      expect(proxy.sessionTask).toBe("Control this computer");
+        expect(result.isError).toBe(true);
+        expect(result.content).toContain("needs a task");
+        expect(proxy.sessionTask).toBeUndefined();
+        expect(sentMessages).toHaveLength(0);
+      }
     });
 
     test("a click before any start is refused and costs no step", async () => {

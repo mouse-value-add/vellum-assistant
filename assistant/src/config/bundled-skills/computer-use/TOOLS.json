@@ -11,6 +11,8 @@
         "properties": {
           "task": {
             "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
             "description": "Plain-language description of what this session will do, shown to the user in the approval. This is what they are agreeing to, so name the apps you will drive and anything you will change or send."
           },
           "target_client_id": {
