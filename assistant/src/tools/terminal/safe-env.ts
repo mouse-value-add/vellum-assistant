@@ -61,27 +61,23 @@ export const SAFE_ENV_VARS = [
   // through CES HTTP (`getSecureKeyAsync` / platform client). They need
   // both the credential URL and the service token.
   //
-  // CES_LOCAL_SOCKET is the local sibling CES path. Managed pods never set
-  // it. They set CES_BOOTSTRAP_SOCKET_DIR (shared emptyDir, default
-  // /run/ces-bootstrap/ces.sock) plus CES HTTP. Lazy CES RPC in
-  // secure-keys.ts only starts when CES_LOCAL_SOCKET is set, so a child
-  // that inherits the bootstrap dir still has no credential backend.
-  // Containerized discoverCes() also ignores CES_LOCAL_SOCKET and looks
-  // up the bootstrap path, so pointing CES_LOCAL_SOCKET at the bootstrap
-  // socket is not enough by itself.
+  // Lazy CES RPC in secure-keys.ts starts when CES_LOCAL_SOCKET is set.
+  // Managed pods do not set it. They set CES_BOOTSTRAP_SOCKET_DIR (shared
+  // emptyDir, default /run/ces-bootstrap/ces.sock) plus CES HTTP. Children
+  // inherit the bootstrap dir, but that env does not open the gate, so a
+  // managed child with no HTTP vars has no credential backend.
   //
-  // To drop these later, children must resolve the same ACTIVE managed
-  // connections without inheriting a reusable vault bearer. That means
-  // lazy CES RPC uses CES_BOOTSTRAP_SOCKET_DIR on managed pods (socket
-  // present, reachable, handshake accepted, sufficient for secure-key /
-  // platform-client reads), or a narrower grant protocol issues a
-  // one-shot provider token, or credential-bearing CLI verbs go through
-  // daemon IPC. Reproduce from a sanitized child on a platform-managed
-  // pod: after `buildSanitizedEnv()`,
-  // `assistant oauth request --provider <key> --json <provider-url>`
-  // must succeed for an ACTIVE connection. Unit tests that only assert
-  // the vars are absent are not enough: also cover skill sandbox and
-  // scheduled-script children.
+  // In a containerized process the CES_LOCAL_SOCKET value is only a
+  // presence flag: tryLazyCesConnect() then dials CES_BOOTSTRAP_SOCKET_DIR
+  // (or the default managed path). Setting CES_LOCAL_SOCKET on the pod, or
+  // injecting any nonempty value into sanitized children, is therefore a
+  // viable later path to drop the reusable CES HTTP bearer. That still
+  // needs a live managed-pod check: handshake accepted, bootstrap socket
+  // reachable from bash / skill sandbox / scheduled-script children, and
+  // secure-key / platform-client reads succeed for an ACTIVE connection.
+  // A narrower one-shot grant or daemon IPC for credential-bearing CLI
+  // verbs is the other option. Unit tests that only assert the HTTP vars
+  // are absent are not enough.
   "CES_CREDENTIAL_URL",
   "CES_SERVICE_TOKEN",
   // Per-instance port of the assistant-managed Qdrant sidecar, so skill and

@@ -122,6 +122,9 @@ describe("managed CES discovery", () => {
     }
   });
 
+  // A nonempty CES_LOCAL_SOCKET still opens lazy connect in a containerized
+  // child. This test only asserts which path is dialed: discoverCes() uses
+  // CES_BOOTSTRAP_SOCKET_DIR, not the CES_LOCAL_SOCKET value.
   test("containerized discovery ignores CES_LOCAL_SOCKET and uses the bootstrap dir", () => {
     const tmp = mkdtempSync(join(tmpdir(), "ces-discover-"));
     const localSock = join(tmp, "local.sock");
