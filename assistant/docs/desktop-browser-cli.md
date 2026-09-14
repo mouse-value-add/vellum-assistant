@@ -1,6 +1,6 @@
 # Streamed desktop browser CLI
 
-`assistant browser --desktop` uses the browser CLI's shared operation handlers against the Chrome process owned by `DesktopSessionManager`. It requires the existing `assistant-desktop` flag, completed desktop setup and an identified guardian conversation. The persistent profile remains `data/desktop-profile`; no data migration or extension installation is required.
+`assistant browser --desktop` uses the browser CLI's shared operation handlers against the Chrome process owned by `DesktopSessionManager`. It requires the `assistant-desktop` flag, completed automatic desktop installation and an identified guardian conversation. Availability is checked before starting or reusing control and after asynchronous startup; loss of the flag or installation readiness cancels active control. Browser commands do not trigger installation. The persistent profile remains `data/desktop-profile`; no data migration or extension installation is required.
 
 ```mermaid
 flowchart LR

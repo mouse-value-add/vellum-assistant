@@ -15,7 +15,7 @@ metadata:
 
 Use `assistant browser --desktop` for webpages in the assistant's streamed Linux desktop. It controls the same Chrome window and profile the guardian watches in the Desktop modal. No connected host app or browser extension is required. Commands run from your identified guardian conversation using the inherited CLI context.
 
-Start with `assistant browser --desktop status`. If setup is required, ask the user to open the Desktop modal and select **Install desktop**. Report other availability errors as returned.
+Desktop automation requires the `assistant-desktop` feature flag to be enabled and automatic desktop installation to be complete. Start with `assistant browser --desktop status`. If setup is required or still running, ask the user to open the Desktop modal and wait for installation to finish before continuing. Report other availability errors as returned.
 
 ## Browser workflow
 

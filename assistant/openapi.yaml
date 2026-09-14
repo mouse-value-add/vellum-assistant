@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Vellum Assistant API
-  version: 0.12.0
+  version: 0.12.1
   description: Auto-generated OpenAPI specification for the Vellum Assistant runtime HTTP server.
 servers:
   - url: http://127.0.0.1:7821
@@ -11714,54 +11714,6 @@ paths:
                   - schedules
                   - timestamp
                 additionalProperties: false
-  /v1/debug/bash:
-    post:
-      operationId: debug_bash_post
-      summary: Execute a shell command in the assistant process
-      description: Developer debugging tool. Requires the assistant to be running with VELLUM_DEBUG=1.
-      tags:
-        - debug
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                command:
-                  type: string
-                  description: Shell command to execute via bash -c
-                timeoutMs:
-                  description: "Execution timeout in milliseconds (default: 30000)"
-                  type: number
-              required:
-                - command
-      responses:
-        "200":
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  stdout:
-                    type: string
-                  stderr:
-                    type: string
-                  exitCode:
-                    anyOf:
-                      - type: number
-                      - type: "null"
-                  timedOut:
-                    type: boolean
-                  error:
-                    type: string
-                required:
-                  - stdout
-                  - stderr
-                  - exitCode
-                  - timedOut
-                additionalProperties: false
   /v1/debug/database:
     get:
       operationId: debug_database_get
@@ -16092,6 +16044,13 @@ paths:
                   type: string
                 userGuidance:
                   type: string
+                timings:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: number
+                  description: Per-phase helper timings in milliseconds
               required:
                 - requestId
       responses:
@@ -22179,6 +22138,9 @@ paths:
                           type: boolean
                         noResponse:
                           type: boolean
+                        cameraFrame:
+                          type: boolean
+                          const: true
                         assistantTextVisibility:
                           type: string
                           enum:

@@ -80,6 +80,17 @@ export class DesktopControl {
       .catch((err) => log.warn({ err }, "Desktop control notification failed"));
   }
 
+  private assertAvailable(): void {
+    if (!this.deps.enabled()) {
+      throw new Error("Desktop control is not available on this assistant");
+    }
+    if (!this.deps.ready()) {
+      throw new Error(
+        "Open the Desktop modal and wait for automatic installation to finish before using desktop control",
+      );
+    }
+  }
+
   async takeControl(): Promise<DesktopControlStatus> {
     this.humanControl = true;
     this.generation += 1;
@@ -93,9 +104,7 @@ export class DesktopControl {
 
   allowAssistant(): Promise<DesktopControlStatus> {
     return this.exclusive(async () => {
-      if (!this.deps.enabled()) {
-        throw new Error("Desktop control is not available on this assistant");
-      }
+      this.assertAvailable();
       this.humanControl = false;
       this.generation += 1;
       this.notify();
@@ -191,7 +200,8 @@ export class DesktopControl {
       try {
         if (
           Date.now() - owner.lastActivity > IDLE_TIMEOUT_MS ||
-          !this.deps.enabled()
+          !this.deps.enabled() ||
+          !this.deps.ready()
         ) {
           cancel();
         }
@@ -204,6 +214,7 @@ export class DesktopControl {
     try {
       await this.deps.manager().ensureDesktopRunning();
       owner.abort.signal.throwIfAborted();
+      this.assertAvailable();
       await this.deps.input.setViewerInput(false);
       await this.releaseInput();
       this.inputCleanupPending = false;
@@ -261,9 +272,11 @@ export class DesktopControl {
         return { content: "Desktop control released.", isError: false };
       }
       context.signal?.throwIfAborted();
-      if (!this.deps.enabled()) {
+      try {
+        this.assertAvailable();
+      } catch (error) {
         await this.release();
-        throw new Error("Desktop control is not available on this assistant");
+        throw error;
       }
       if (this.humanControl || generation !== this.generation) {
         return {
@@ -272,11 +285,6 @@ export class DesktopControl {
           isError: true,
           yieldToUser: true,
         };
-      }
-      if (!this.deps.ready()) {
-        throw new Error(
-          "Open the desktop modal and select Install desktop before using desktop control",
-        );
       }
       if (!this.owner && action.action !== "observe") {
         throw new Error("Observe the desktop before acting");
@@ -291,6 +299,7 @@ export class DesktopControl {
       owner.lastActivity = Date.now();
       signal.throwIfAborted();
       try {
+        this.assertAvailable();
         if (browserOperation) {
           owner.observation = undefined;
           if (++owner.actions > MAX_ACTIONS) {
@@ -306,6 +315,8 @@ export class DesktopControl {
           return result;
         }
         await this.deps.manager().browser?.release();
+        signal.throwIfAborted();
+        this.assertAvailable();
         if (action.action !== "observe") {
           if (action.observation_id !== owner.observation?.id) {
             throw new Error(
@@ -332,6 +343,8 @@ export class DesktopControl {
           }
           await this.deps.input.perform(action, signal);
         }
+        signal.throwIfAborted();
+        this.assertAvailable();
         const observation = await this.deps.input.observe(signal);
         signal.throwIfAborted();
         return this.result(owner, observation);

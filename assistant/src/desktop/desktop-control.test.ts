@@ -158,7 +158,11 @@ describe("assistant desktop control", () => {
       await expect(
         f.control.execute({ action: "observe" }, ctx),
       ).rejects.toBeDefined();
+      const operation = mock(async () => ({ content: "ok", isError: false }));
+      await expect(f.control.runBrowser(ctx, operation)).rejects.toBeDefined();
       expect(f.started).not.toHaveBeenCalled();
+      expect(operation).not.toHaveBeenCalled();
+      expect(f.input.setViewerInput).not.toHaveBeenCalled();
     }
   });
 
@@ -224,6 +228,58 @@ describe("assistant desktop control", () => {
     expect(f.released).toHaveBeenCalledTimes(2);
   });
 });
+
+describe.each(["disable", "uninstall"] as const)(
+  "availability loss: %s",
+  (lose) => {
+    test("rejects browser use when availability changes during startup", async () => {
+      const f = fixture();
+      f.started.mockImplementationOnce(async () => f[lose]());
+      const operation = mock(async () => ({ content: "ok", isError: false }));
+      await expect(
+        f.control.runBrowser(context(), operation),
+      ).rejects.toThrow();
+      expect(operation).not.toHaveBeenCalled();
+      expect(f.input.observe).not.toHaveBeenCalled();
+      expect(f.input.setViewerInput.mock.calls).not.toContainEqual([false]);
+      expect(f.released).toHaveBeenCalledTimes(1);
+    });
+
+    test("releases a retained browser lease before rejecting another command", async () => {
+      const f = fixture();
+      const operation = mock(async () => ({ content: "ok", isError: false }));
+      await f.control.runBrowser(context(), operation);
+      f[lose]();
+      await expect(
+        f.control.runBrowser(context(), operation),
+      ).rejects.toThrow();
+      expect(operation).toHaveBeenCalledTimes(1);
+      expect(f.released).toHaveBeenCalledTimes(1);
+      expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
+      expect(f.control.getStatus().state).toBe("idle");
+    });
+
+    test("cancels an in-flight browser operation and releases control", async () => {
+      const f = fixture();
+      const started = Promise.withResolvers<void>();
+      const operation = f.control.runBrowser(context(), async (signal) => {
+        started.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
+        });
+        return { content: "unexpected", isError: false };
+      });
+      const rejected = operation.catch((error: Error) => error);
+      await started.promise;
+      f[lose]();
+      expect(await rejected).toBeInstanceOf(Error);
+      expect(f.released).toHaveBeenCalledTimes(1);
+      expect(f.control.getStatus().state).toBe("idle");
+    });
+  },
+);
 
 test.each(["releaseInput", "setViewerInput"] as const)(
   "a failed %s remains retryable before handing input back",
