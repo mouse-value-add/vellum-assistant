@@ -248,8 +248,8 @@ describe("ConversationRowList expand", () => {
 
   test("a section that exactly fills its cap has nothing to expand either", () => {
     /* Ten rows stand 300px tall with the card's zero gap: the cap shows
-       every one, so a control here would grow the card into nothing. A
-       count kept apart from the rendered geometry once put it at eight. */
+       every one, so a control here would grow the card into nothing. The
+       boundary case for reading overflow off the rendered geometry. */
     const fitting = MANY_ROWS.slice(0, SIDEBAR_SECTION_MAX_HEIGHT / ROW_HEIGHT);
     const container = renderList(undefined, {
       items: fitting,

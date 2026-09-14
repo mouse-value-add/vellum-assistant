@@ -196,10 +196,10 @@ export function ConversationRowList({
      enough to need it: the rail's last section, with more rows than its
      mid height shows (or more still on the server). "More than it shows"
      is read off the scroller itself, not counted from a row height: the
-     rows' height and gap are set where they render, and a count kept here
-     drifted from them (the card zeroes the list's gap, so ten rows fit the
-     cap, not the eight a copied gap said). A windowed list has outgrown
-     the cap by definition. A section within its cap has nothing to expand
+     rows' height and gap are set where they render (the card zeroes the
+     list's gap, so ten rows fit the cap), and a count kept here would have
+     to be kept in step with both. A windowed list has outgrown the cap by
+     definition. A section within its cap has nothing to expand
      into, and an expanded section that has since shrunk to fit keeps the
      control so it can be put back. */
   const canExpand =

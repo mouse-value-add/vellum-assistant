@@ -1663,12 +1663,12 @@ describe("AssistantSideMenu · equal section treatment", () => {
   /*
    * The test above asks only whether a section scrolls, and every sized
    * section does - so it passes whether the bottom-most one rests at the mid
-   * height or fills the rail. That is the difference users see: the
-   * bottom-most section (Chats, whenever channel grouping is off) once
-   * filled the rail, so a hundred threads ran its whole height; it now rests
-   * at the same cap the sections above it take and grows to the rail's
-   * leftover height only on request (the Expand control writes the layout
-   * store's `expandedSections`). These pin the difference itself.
+   * height or fills the rail. That is the difference users see: a
+   * bottom-most section that fills runs a hundred threads down the rail's
+   * whole height, so it rests at the same cap the sections above it take
+   * and grows to the rail's leftover height only on request (the Expand
+   * control writes the layout store's `expandedSections`). These pin the
+   * rest height and the growth themselves.
    */
   test("the bottom-most section rests at the mid height; the ones above it cap", () => {
     // Grouped: Pinned, Alpha, Chats, Slack. Slack is bottom-most.

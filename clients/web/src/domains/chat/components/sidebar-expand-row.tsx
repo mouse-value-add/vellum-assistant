@@ -34,8 +34,8 @@
  * inset plus the row's own 6px), and its hover pill starts where a row's
  * does. The row is the same 30px as a thread row and sits inside the
  * list's own 8px bottom inset, so the card keeps a little more air under
- * its footer than over its header: a control right on the edge read as
- * cramped.
+ * its footer than over its header: a control right on the edge would read
+ * as cramped.
  */
 
 import { ChevronDown, ChevronUp } from "lucide-react";
