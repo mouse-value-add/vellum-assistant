@@ -124,7 +124,7 @@ export const browserHelp: CliCommandHelp = {
   helpText: `
 Browser operations are executed through the running assistant.
 Use --desktop for the Chrome window in the Desktop modal. This requires
-an identified guardian conversation and shares Take control with desktop input.
+an identified guardian conversation and respects Take control in that modal.
 Start with assistant browser --desktop status. The desktop feature flag and
 completed automatic installation are required; report availability errors.
 The assistant manages Chrome startup. Do not launch a separate desktop stack.

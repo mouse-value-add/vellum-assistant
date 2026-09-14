@@ -226,7 +226,7 @@ export class DesktopSessionManager {
     const port = this.debugPort;
     if (!child || !port) {
       throw new Error(
-        "Desktop Chrome is unavailable. Use desktop_control to inspect it.",
+        "Desktop Chrome is unavailable. Open the Desktop modal to inspect it, then retry the browser command.",
       );
     }
     signal = AbortSignal.any([signal, AbortSignal.timeout(5_000)]);
