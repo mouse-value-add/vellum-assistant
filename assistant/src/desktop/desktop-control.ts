@@ -79,7 +79,7 @@ export class DesktopControl {
         };
         return {
           isError: false,
-          content: `Assistant desktop screenshot: ${observation.width}x${observation.height} pixels. observation_id: ${id}. Use coordinates in this image.`,
+          content: `Assistant desktop screenshot: ${observation.width}x${observation.height} pixels. observation_id: ${id}. Use coordinates in this image. Target: assistant-desktop. Capabilities: screenshot, click, type_text, key, scroll, drag, wait. Accessibility elements, window capture, app launch, AppleScript and sequences are unavailable.`,
           contentBlocks: [
             {
               type: "image",

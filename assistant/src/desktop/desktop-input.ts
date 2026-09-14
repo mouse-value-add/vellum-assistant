@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import { z } from "zod";
 
 import {
@@ -12,6 +14,11 @@ const observed = { observation_id: z.string().uuid() };
 export const desktopActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("observe") }),
   z.object({ action: z.literal("done") }),
+  z.object({
+    action: z.literal("wait"),
+    ...observed,
+    duration_ms: z.number().int().min(0).max(10_000),
+  }),
   z.object({
     action: z.literal("click"),
     ...observed,
@@ -126,6 +133,9 @@ export class X11DesktopInput
       await this.movePointer(action.x, action.y, signal);
     }
     switch (action.action) {
+      case "wait":
+        await delay(action.duration_ms, undefined, { signal });
+        break;
       case "click":
         await run(
           "click",

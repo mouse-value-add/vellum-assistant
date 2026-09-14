@@ -1,4 +1,7 @@
+import { join, resolve } from "node:path";
+
 import type { SkillToolEntry } from "../../config/skills.js";
+import { getBundledSkillsDir } from "../../config/skills.js";
 import { RiskLevel } from "../../permissions/types.js";
 import {
   coerceArrayShapes,
@@ -6,6 +9,7 @@ import {
   coerceStringNumbers,
   validateInputAgainstSchema,
 } from "../../skills/validate-input.js";
+import { computerUseExecutionTarget } from "../computer-use/target.js";
 import { withActivityProperty } from "../schema-transforms.js";
 import { bundledToolInputMisuseMessage } from "../shared/input-misuse.js";
 import { bundledToolInputRepairs } from "../shared/input-repairs.js";
@@ -39,6 +43,10 @@ export function createSkillTool(
     category: entry.category,
     defaultRiskLevel: riskMap[entry.risk],
     executionTarget: entry.execution_target as ExecutionTarget,
+    ...(bundled &&
+    resolve(skillDir) === resolve(join(getBundledSkillsDir(), "computer-use"))
+      ? { getExecutionTarget: computerUseExecutionTarget }
+      : {}),
     supportedClientOs: entry.supported_client_os,
 
     input_schema: entry.input_schema as object,
