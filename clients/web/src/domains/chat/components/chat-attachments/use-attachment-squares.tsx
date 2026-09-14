@@ -24,7 +24,10 @@ import type { ReactNode } from "react";
 import type { DisplayAttachment } from "@/domains/chat/types/types";
 
 import { downloadAttachment } from "@/domains/chat/components/chat-attachments/download-attachment";
-import { MessageAttachmentSquare } from "@/domains/chat/components/chat-attachments/message-attachment-square";
+import {
+  MessageAttachmentSquare,
+  type AttachmentSquareLabels,
+} from "@/domains/chat/components/chat-attachments/message-attachment-square";
 import { useAttachmentPreview } from "@/domains/chat/components/chat-attachments/use-attachment-preview";
 import {
   previewEntryKey,
@@ -46,7 +49,11 @@ interface UseAttachmentSquaresResult {
   /** One attachment square, wired to the preview modal, the downloader, and
    *  the failed-decode fallback. `index` is the position in
    *  {@link displayAttachments}. */
-  renderSquare: (attachment: DisplayAttachment, index: number) => ReactNode;
+  renderSquare: (
+    attachment: DisplayAttachment,
+    index: number,
+    labels?: AttachmentSquareLabels,
+  ) => ReactNode;
   /** Opens the preview modal, for call sites that render their own affordance
    *  alongside the squares (the bubble's large inline images). Pass the
    *  attachment's position in {@link displayAttachments}, which resolves a list
@@ -89,10 +96,15 @@ export function useAttachmentSquares({
   );
 
   const renderSquare = useCallback(
-    (attachment: DisplayAttachment, index: number) => (
+    (
+      attachment: DisplayAttachment,
+      index: number,
+      labels?: AttachmentSquareLabels,
+    ) => (
       <MessageAttachmentSquare
         key={previewEntryKey(attachment.id, index)}
         attachment={attachment}
+        labels={labels}
         onPreview={() => openPreview(attachment, index)}
         // Download falls back to previewUrl when the daemon content fetch is
         // unavailable, so it takes the UNSANITIZED attachment - a blob that
