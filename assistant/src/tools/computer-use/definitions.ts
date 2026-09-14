@@ -70,6 +70,9 @@ export const computerUseStartTool = {
     required: ["task"],
   },
 
+  // Runs alone in its turn. A new session's actions must not run under the
+  // previous session's approval while this start still waits on the user's.
+  exclusive: true,
   execute: proxyExecute("computer_use_start"),
 } satisfies ToolDefinition;
 

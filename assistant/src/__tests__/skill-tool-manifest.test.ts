@@ -185,6 +185,26 @@ describe("parseToolManifest", () => {
     ).toThrow(/supported_client_os/);
   });
 
+  test("reads an exclusive flag", () => {
+    const result = parseToolManifest(
+      makeManifest({ tools: [makeToolEntry({ exclusive: true })] }),
+    );
+    expect(result.tools[0].exclusive).toBe(true);
+  });
+
+  test("leaves exclusive unset when the manifest omits it", () => {
+    const result = parseToolManifest(makeManifest());
+    expect(result.tools[0].exclusive).toBeUndefined();
+  });
+
+  test("rejects a non-boolean exclusive flag", () => {
+    expect(() =>
+      parseToolManifest(
+        makeManifest({ tools: [makeToolEntry({ exclusive: "yes" })] }),
+      ),
+    ).toThrow(/exclusive/);
+  });
+
   test("accepts an empty input_schema object", () => {
     const raw = makeManifest({
       tools: [makeToolEntry({ input_schema: {} })],

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 
 import { RiskLevel } from "../permissions/types.js";
+import { parseToolManifest } from "../skills/tool-manifest.js";
 import { allComputerUseTools } from "../tools/computer-use/definitions.js";
 import {
   __resetRegistryForTesting,
@@ -11,6 +12,7 @@ import {
   registerSkillTools,
   unregisterSkillTools,
 } from "../tools/registry.js";
+import { createSkillTool } from "../tools/skills/skill-tool-factory.js";
 import type { Tool } from "../tools/types.js";
 import {
   COMPUTER_USE_TOOL_COUNT,
@@ -68,6 +70,34 @@ describe("computer-use skill manifest regression", () => {
         expect(tool.risk).toBe("low");
       }
     }
+  });
+
+  test("computer_use_start runs alone in its turn, and nothing else does", () => {
+    // A new session's actions must not ride on the previous session's
+    // approval while this start still waits on the user. The agent loop defers
+    // the siblings of an exclusive tool, so they are re-issued after it lands.
+    for (const tool of manifest.tools) {
+      if (tool.name === "computer_use_start") {
+        expect(tool.exclusive).toBe(true);
+      } else {
+        expect(tool.exclusive).toBeUndefined();
+      }
+    }
+    const start = allComputerUseTools.find(
+      (t) => t.name === "computer_use_start",
+    );
+    expect(start?.exclusive).toBe(true);
+
+    // The loop reads the flag off the projected tool, so it has to survive
+    // parsing and projection, not just sit in the JSON.
+    const parsed = parseToolManifest(manifest);
+    const projected = parsed.tools.map((entry) =>
+      createSkillTool(entry, "/skills/computer-use", "hash", true),
+    );
+    expect(
+      projected.find((t) => t.name === "computer_use_start")?.exclusive,
+    ).toBe(true);
+    expect(projected.filter((t) => t.exclusive === true)).toHaveLength(1);
   });
 
   test("manifest risk matches core definitions", async () => {

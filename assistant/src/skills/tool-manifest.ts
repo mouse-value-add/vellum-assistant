@@ -156,6 +156,14 @@ function parseToolEntry(raw: unknown, prefix: string): SkillToolEntry {
     supported_client_os = [...new Set(entry.supported_client_os as ClientOs[])];
   }
 
+  let exclusive: boolean | undefined;
+  if ("exclusive" in entry) {
+    if (typeof entry.exclusive !== "boolean") {
+      throw new Error(`${prefix}: "exclusive" must be a boolean`);
+    }
+    exclusive = entry.exclusive;
+  }
+
   return {
     name,
     description,
@@ -165,6 +173,7 @@ function parseToolEntry(raw: unknown, prefix: string): SkillToolEntry {
     executor,
     execution_target,
     supported_client_os,
+    exclusive,
   };
 }
 

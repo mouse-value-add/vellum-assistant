@@ -40,6 +40,7 @@ export function createSkillTool(
     defaultRiskLevel: riskMap[entry.risk],
     executionTarget: entry.execution_target as ExecutionTarget,
     supportedClientOs: entry.supported_client_os,
+    exclusive: entry.exclusive,
 
     input_schema: entry.input_schema as object,
 

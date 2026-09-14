@@ -21,6 +21,7 @@
         "required": ["task"]
       },
       "executor": "tools/computer-use-start.ts",
+      "exclusive": true,
       "execution_target": "host"
     },
     {

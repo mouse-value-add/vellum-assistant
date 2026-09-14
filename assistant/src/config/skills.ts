@@ -196,6 +196,11 @@ export interface SkillToolEntry {
   execution_target: "host" | "sandbox";
   /** Client operating systems that may expose this tool. Unset means all. */
   supported_client_os?: ClientOs[];
+  /**
+   * Runs alone in its turn: the agent loop defers any sibling tool calls the
+   * model emitted with it. Unset means false.
+   */
+  exclusive?: boolean;
 }
 
 /**
