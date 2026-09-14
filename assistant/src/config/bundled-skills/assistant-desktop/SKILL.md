@@ -17,6 +17,8 @@ Use `assistant browser --desktop` for webpages in the assistant's streamed Linux
 
 Desktop automation requires the `assistant-desktop` feature flag to be enabled and automatic desktop installation to be complete. Start with `assistant browser --desktop status`. If setup is required or still running, ask the user to open the Desktop modal and wait for installation to finish before continuing. Report other availability errors as returned.
 
+The assistant manages desktop and Chrome startup. Do not launch or restart Xvnc, openbox or Chrome yourself, install desktop packages, or drive webpages with shell-level `xdotool`. Older memory notes describing manual desktop setup are obsolete for this workflow. If the CLI is unavailable, stop and report the error instead of recreating the desktop stack.
+
 ## Browser workflow
 
 ```bash
@@ -29,10 +31,13 @@ assistant browser --desktop press-key --key Enter
 assistant browser --desktop scroll --direction down --amount 400
 assistant browser --desktop tabs list
 assistant browser --desktop tabs select --tab-id 1
+assistant browser --desktop screenshot --output /tmp/desktop-page.jpg
 assistant browser --desktop detach
 ```
 
 Element and tab IDs above are examples. Use IDs returned by the current session. Take a snapshot to identify page elements, then use the CLI's existing click, type, hover, select-option, extract and wait-for commands. Take another snapshot after navigation, tab selection, a page replacement, or a stale-element error. Use `screenshot` when visual verification helps. A failed action may already have happened, so inspect the result before repeating it.
+
+Browser screenshots come directly from Chrome over CDP as color JPEGs of the page. Read the saved image with `file_read` to inspect or share it. A `snapshot` contains page structure and element IDs, not an image. For a whole-desktop image, use `desktop_control` with `action: "observe"`. Never capture with shell-level `xwd` or custom screenshot conversion scripts.
 
 A purple pointer animates between CDP mouse coordinates inside the page, making clicks, hovers and scrolling visible in the stream. It is a page overlay, not the operating system pointer. Typing and programmatic page operations do not necessarily move it. Browser toolbar controls, native dialogs and other apps require `desktop_control`.
 

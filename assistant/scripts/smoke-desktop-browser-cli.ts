@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { IpcFrameReader, writeMessage } from "@vellumai/ipc-server-utils";
 import { Command } from "commander";
+import sharp from "sharp";
 
 import { executeBrowserOperation } from "../src/browser/operations.js";
 import type { BrowserOperation } from "../src/browser/types.js";
@@ -56,7 +57,7 @@ const page = Bun.serve({
       return Response.json({ ok: true });
     }
     return new Response(
-      `<!doctype html><html><head><title>Desktop browser CLI</title><style>body{font:24px sans-serif;padding:70px;background:#f3f4f8}input,button{font:inherit;padding:12px;margin:16px}#result{color:#5140bd}</style></head><body><h1>Streamed desktop browser</h1><label>Example text<input id="text"></label><button id="save" onclick="fetch('/save');document.getElementById('result').textContent='Saved '+document.getElementById('text').value">Save</button><p id="result"></p></body></html>`,
+      `<!doctype html><html><head><title>Desktop browser CLI</title><style>body{font:24px sans-serif;padding:70px;background:#f3f4f8}input,button{font:inherit;padding:12px;margin:16px}#result{color:#5140bd}#colors{position:fixed;left:0;top:0;display:flex}#colors span{width:100px;height:50px}</style></head><body><div id="colors"><span style="background:#ff0000"></span><span style="background:#00ff00"></span><span style="background:#0000ff"></span></div><h1>Streamed desktop browser</h1><label>Example text<input id="text"></label><button id="save" onclick="fetch('/save');document.getElementById('result').textContent='Saved '+document.getElementById('text').value">Save</button><p id="result"></p></body></html>`,
       {
         headers: {
           "content-type": "text/html",
@@ -98,7 +99,15 @@ const ipc = createServer((socket) => {
           },
           body.operation === "detach",
         );
-        writeMessage(socket, { id: request.id, result });
+        const screenshots = (result.contentBlocks ?? []).flatMap((block) =>
+          block.type === "image" && block.source.type === "base64"
+            ? [{ mediaType: block.source.media_type, data: block.source.data }]
+            : [],
+        );
+        writeMessage(socket, {
+          id: request.id,
+          result: { ...result, screenshots },
+        });
       } catch (error) {
         writeMessage(socket, { id: request.id, error: String(error) });
       }
@@ -167,6 +176,22 @@ try {
   const saved = await cli("extract");
   assert.match(saved, /Saved Hello café 世界/);
   assert.equal(submissions, 1);
+  const screenshotPath = join(tmpdir(), "desktop-browser-cli-page.jpg");
+  await cli("screenshot", "--output", screenshotPath);
+  const { data: pixels, info } = await sharp(screenshotPath)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  for (let channel = 0; channel < 3; channel++) {
+    const offset = (25 * info.width + 50 + channel * 100) * info.channels;
+    for (let component = 0; component < 3; component++) {
+      const expected = component === channel ? 255 : 0;
+      assert(
+        Math.abs(pixels[offset + component] - expected) < 10,
+        `Incorrect screenshot color for swatch ${channel}, channel ${component}`,
+      );
+    }
+  }
   await control.runBrowser(context, async (signal) => {
     const cdp = await manager.browser.client(context.conversationId, signal);
     const pointer = await cdp.send<{ result: { value: boolean } }>(
@@ -197,7 +222,7 @@ try {
   });
   await control.takeControl();
   console.log(
-    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, visible cursor, detach cleanup and takeover",
+    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, visible cursor, detach cleanup and takeover",
   );
 } finally {
   await control.takeControl();

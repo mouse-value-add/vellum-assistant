@@ -125,6 +125,11 @@ export const browserHelp: CliCommandHelp = {
 Browser operations are executed through the running assistant.
 Use --desktop for the Chrome window in the Desktop modal. This requires
 an identified guardian conversation and shares Take control with desktop input.
+Start with assistant browser --desktop status. The desktop feature flag and
+completed automatic installation are required; report availability errors.
+The assistant manages Chrome startup. Do not launch a separate desktop stack.
+With --desktop, screenshot captures the page directly from Chrome over CDP
+as a color JPEG. Use --output to save it; no XWD conversion is needed.
 Run assistant browser --desktop detach when finished.
 Each subcommand maps to a browser operation and communicates
 with the assistant process.
@@ -139,6 +144,8 @@ local. Useful for debugging or when deterministic backend selection
 is required.
 
 Examples:
+  $ assistant browser --desktop status
+  $ assistant browser --desktop screenshot --output /tmp/desktop-page.jpg
   $ assistant browser navigate --url https://example.com
   $ assistant browser snapshot
   $ assistant browser click --selector "#login"
