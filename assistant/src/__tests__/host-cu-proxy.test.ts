@@ -84,7 +84,7 @@ describe("HostCuProxy", () => {
     pendingInteractions.clear();
     proxy = new HostCuProxy(maxSteps);
     if (opts?.session !== false) {
-      proxy.startSession("test control session");
+      proxy.startSession("test control session", undefined);
     }
   }
 
@@ -1238,7 +1238,7 @@ describe("HostCuProxy", () => {
       expect(refused.isError).toBe(true);
       expect(sentMessages).toHaveLength(0);
 
-      proxy.startSession("Reply to the top email in Mail");
+      proxy.startSession("Reply to the top email in Mail", undefined);
       expect(proxy.sessionTask).toBe("Reply to the top email in Mail");
 
       const resultPromise = proxy.request(
@@ -1659,6 +1659,7 @@ describe("HostCuProxy", () => {
 
     test("succeeds when caller and target share the same actor principal", async () => {
       setup();
+      proxy.startSession("test control session", "cu-client");
       mockClients = [
         {
           clientId: "cu-client",

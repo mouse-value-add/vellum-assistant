@@ -104,7 +104,7 @@ describe("the computer-use step budget", () => {
     const proxy = new HostCuProxy(1);
     // The step limit is what must refuse the click below, so open a session
     // first; otherwise the session gate refuses it for a different reason.
-    proxy.startSession("spend the budget");
+    proxy.startSession("spend the budget", undefined);
     proxy.recordAction("computer_use_click", { element_id: 1 });
     proxy.recordAction("computer_use_click", { element_id: 2 });
     expect(proxy.stepCount).toBeGreaterThan(proxy.maxSteps);

@@ -3173,7 +3173,22 @@ export async function surfaceProxyResolver(
         typeof input.task === "string" && input.task.trim() !== ""
           ? input.task.trim()
           : "Control this computer";
-      hostCuProxy.startSession(task);
+      // Resolve the desktop now, with the same rules every action uses, and
+      // bind the session to it. An action later resolving to any other
+      // desktop is refused, so approving one machine never unlocks another.
+      const startTarget = resolveHostCuTarget({
+        toolName,
+        targetClientId:
+          typeof input.target_client_id === "string" &&
+          input.target_client_id !== ""
+            ? input.target_client_id
+            : undefined,
+        sourceActorPrincipalId: turnActorPrincipalId(ctx),
+      });
+      if (startTarget.kind === "error") {
+        return startTarget.result;
+      }
+      hostCuProxy.startSession(task, startTarget.targetClientId);
       return { content: `Control session open: ${task}`, isError: false };
     }
 
@@ -3222,7 +3237,7 @@ export async function surfaceProxyResolver(
     // proxy is the authoritative gate; refusing here too, after the target
     // checks and before the step is recorded, keeps a refused call from
     // burning a step or polluting the action history.
-    const sessionGate = hostCuProxy.sessionGateError(toolName);
+    const sessionGate = hostCuProxy.sessionGateError(toolName, targetClientId);
     if (sessionGate) {
       return sessionGate;
     }

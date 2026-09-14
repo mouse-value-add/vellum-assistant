@@ -136,9 +136,10 @@ describe("surfaceProxyResolver — CU tool routing", () => {
     ];
     proxy = new HostCuProxy(maxSteps);
     // Every actuating tool runs inside a session the user approved once at
-    // `computer_use_start`; open one so these tests exercise the routing
-    // rather than the session gate, which has its own block below.
-    proxy.startSession("test control session");
+    // `computer_use_start`, for the desktop it resolved to; open one for the
+    // default client so these tests exercise the routing rather than the
+    // session gate, which has its own block below.
+    proxy.startSession("test control session", "mock-client-1");
     return buildMockContext(proxy);
   }
 
@@ -174,7 +175,7 @@ describe("surfaceProxyResolver — CU tool routing", () => {
         () => {
           attachCalls++;
           proxy = new HostCuProxy();
-          proxy.startSession("test control session");
+          proxy.startSession("test control session", "mock-client-1");
           (ctx as { hostCuProxy?: unknown }).hostCuProxy = proxy;
         },
       );
@@ -332,6 +333,98 @@ describe("surfaceProxyResolver — CU tool routing", () => {
       expect(result.isError).toBe(true);
       expect(result.content).toContain("No control session is open");
       expect(sentMessages).toHaveLength(0);
+    });
+
+    test("a session approved for one desktop cannot drive another", async () => {
+      const ctx = setupWithoutSession();
+      mockCuClients = [
+        {
+          clientId: "client-a",
+          capabilities: ["host_cu"],
+          actorPrincipalId: DEFAULT_PRINCIPAL,
+        },
+        {
+          clientId: "client-b",
+          capabilities: ["host_cu"],
+          actorPrincipalId: DEFAULT_PRINCIPAL,
+        },
+      ];
+
+      const started = await surfaceProxyResolver(ctx, "computer_use_start", {
+        task: "Tidy the Desktop folder",
+        target_client_id: "client-a",
+      });
+      expect(started.isError).toBe(false);
+
+      const result = await surfaceProxyResolver(ctx, "computer_use_click", {
+        element_id: 1,
+        reasoning: "click on the other machine",
+        target_client_id: "client-b",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain("approved for a different desktop");
+      expect(sentMessages).toHaveLength(0);
+      expect(proxy.stepCount).toBe(0);
+      expect(proxy.actionHistory).toHaveLength(0);
+    });
+
+    test("the session drives the desktop it was approved for", async () => {
+      const ctx = setupWithoutSession();
+      mockCuClients = [
+        {
+          clientId: "client-a",
+          capabilities: ["host_cu"],
+          actorPrincipalId: DEFAULT_PRINCIPAL,
+        },
+        {
+          clientId: "client-b",
+          capabilities: ["host_cu"],
+          actorPrincipalId: DEFAULT_PRINCIPAL,
+        },
+      ];
+
+      await surfaceProxyResolver(ctx, "computer_use_start", {
+        task: "Tidy the Desktop folder",
+        target_client_id: "client-a",
+      });
+      const resultPromise = surfaceProxyResolver(ctx, "computer_use_click", {
+        element_id: 1,
+        reasoning: "click on the approved machine",
+        target_client_id: "client-a",
+      });
+
+      expect(sentMessages).toHaveLength(1);
+      const sent = sentMessages[0] as Record<string, unknown>;
+      expect(sent.targetClientId).toBe("client-a");
+      proxy.processObservation(sent.requestId as string, {
+        executionResult: "ok",
+      });
+      expect((await resultPromise).isError).toBe(false);
+    });
+
+    test("starting a new session does not inherit the old one's budget or history", async () => {
+      const ctx = setupProxy(2);
+      for (const id of [1, 2]) {
+        const p = surfaceProxyResolver(ctx, "computer_use_click", {
+          element_id: id,
+          reasoning: "spend a step",
+        });
+        const sent = sentMessages.at(-1) as Record<string, unknown>;
+        proxy.processObservation(sent.requestId as string, {
+          executionResult: "ok",
+        });
+        await p;
+      }
+      expect(proxy.stepCount).toBe(2);
+
+      await surfaceProxyResolver(ctx, "computer_use_start", {
+        task: "A different task",
+      });
+
+      expect(proxy.sessionTask).toBe("A different task");
+      expect(proxy.stepCount).toBe(0);
+      expect(proxy.actionHistory).toHaveLength(0);
     });
 
     test("observing needs no session", async () => {
@@ -614,6 +707,8 @@ describe("surfaceProxyResolver — CU tool routing", () => {
 
     test("proceeds when multiple clients connected and target_client_id is given", async () => {
       const ctx = setupProxy();
+      // The session is approved for the desktop this test targets.
+      proxy.startSession("test control session", "client-a");
       mockCuClients = [
         {
           clientId: "client-a",
@@ -733,6 +828,8 @@ describe("surfaceProxyResolver — CU tool routing", () => {
 
     test("dispatches and records action when targetClientId is valid", async () => {
       const ctx = setupProxy();
+      // The session is approved for the desktop this test targets.
+      proxy.startSession("test control session", "cu-client");
       mockCuClients = [
         {
           clientId: "cu-client",
@@ -874,7 +971,7 @@ describe("surfaceProxyResolver — CU tool routing", () => {
         },
       ];
       proxy = new HostCuProxy();
-      proxy.startSession("test control session");
+      proxy.startSession("test control session", "cu-mine");
       const ctx = buildMockContext(proxy, DEFAULT_PRINCIPAL);
 
       const resultPromise = surfaceProxyResolver(ctx, "computer_use_click", {

@@ -61,6 +61,8 @@ const SESSION_REQUIRED_TOOLS: ReadonlySet<string> = new Set([
 
 const NO_SESSION_MESSAGE =
   "No control session is open. Call computer_use_start first, saying what the session will do.";
+const WRONG_DESKTOP_MESSAGE =
+  "This control session was approved for a different desktop. Call computer_use_start for the desktop you want to control.";
 
 /** Whether `toolName` actuates the desktop and so needs an approved session. */
 export function requiresSession(toolName: string): boolean {
@@ -205,6 +207,8 @@ export class HostCuProxy {
    * this proxy's state, and cleared by `reset()`.
    */
   private _sessionTask: string | undefined;
+  /** The client the open session was approved for, as target resolution named it. */
+  private _sessionTargetClientId: string | undefined;
   /**
    * Owned request IDs mapped to whether their observation is scoped and when
    * the request was dispatched. The dispatch time gives the round trip, which
@@ -256,8 +260,13 @@ export class HostCuProxy {
    * approved at `computer_use_start`, and it is the whole of what they
    * approved: the actions that follow are not prompted individually.
    */
-  startSession(task: string): void {
+  startSession(task: string, targetClientId: string | undefined): void {
+    // A new task starts from nothing. Carrying over the old step count, action
+    // history or unchanged-step streak would hand it a spent budget and loop
+    // or no-effect warnings earned by work it never did.
+    this.reset();
     this._sessionTask = task;
+    this._sessionTargetClientId = targetClientId;
   }
 
   /**
@@ -266,9 +275,21 @@ export class HostCuProxy {
    * `request()`; callers that count steps check here first so a refused call
    * costs neither a step nor a history entry.
    */
-  sessionGateError(toolName: string): ToolExecutionResult | undefined {
-    if (requiresSession(toolName) && this._sessionTask === undefined) {
+  sessionGateError(
+    toolName: string,
+    resolvedTargetClientId: string | undefined,
+  ): ToolExecutionResult | undefined {
+    if (!requiresSession(toolName)) {
+      return undefined;
+    }
+    if (this._sessionTask === undefined) {
       return { content: NO_SESSION_MESSAGE, isError: true };
+    }
+    // The approval covers the desktop it was given for. With several of the
+    // same user's desktops connected, a session approved for one must not
+    // drive another, so the resolved target has to match exactly.
+    if (resolvedTargetClientId !== this._sessionTargetClientId) {
+      return { content: WRONG_DESKTOP_MESSAGE, isError: true };
     }
     return undefined;
   }
@@ -315,12 +336,12 @@ export class HostCuProxy {
       });
     }
 
-    // Nothing actuates the desktop outside an approved session. Refused
-    // before the budget check so a refusal broadcasts nothing and costs
-    // nothing: the model is being told to ask first, not being penalized.
-    const sessionGate = this.sessionGateError(toolName);
-    if (sessionGate) {
-      return Promise.resolve(sessionGate);
+    // A missing session is refused ahead of the budget check, because it
+    // needs no target to decide and a refusal should cost nothing: the model
+    // is being told to ask first, not being penalized. Whether the session
+    // covers this particular desktop is checked once the target is resolved.
+    if (requiresSession(toolName) && this._sessionTask === undefined) {
+      return Promise.resolve({ content: NO_SESSION_MESSAGE, isError: true });
     }
 
     // Pointing at the screen is outside this budget in both directions: it
@@ -345,6 +366,14 @@ export class HostCuProxy {
       return Promise.resolve(target.result);
     }
     const resolvedTargetClientId = target.targetClientId;
+
+    // Nothing actuates a desktop outside a session approved for that desktop.
+    // Checked once the target is known and before anything is broadcast, so a
+    // refusal reaches no client.
+    const sessionGate = this.sessionGateError(toolName, resolvedTargetClientId);
+    if (sessionGate) {
+      return Promise.resolve(sessionGate);
+    }
 
     const hasWindowTarget = Object.hasOwn(input, "capture_window_id");
     if (hasWindowTarget) {
@@ -565,6 +594,7 @@ export class HostCuProxy {
     this._consecutiveUnchangedSteps = 0;
     this._actionHistory = [];
     this._sessionTask = undefined;
+    this._sessionTargetClientId = undefined;
   }
 
   // ---------------------------------------------------------------------------

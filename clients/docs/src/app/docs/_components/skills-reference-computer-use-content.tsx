@@ -45,7 +45,10 @@ export function SkillsReferenceComputerUseContent() {
           <ul className="mb-0 list-disc space-y-2 pl-6 text-zinc-600">
             <li>Accessibility (mouse/keyboard control)</li>
             <li>Screen capture (seeing screen content)</li>
-            <li>Each action is prompted individually for approval</li>
+            <li>
+              You approve a control session once, when it starts, for the task the
+              assistant describes. The actions inside it are not prompted one by one
+            </li>
           </ul>
         </section>
 
@@ -127,7 +130,8 @@ export function SkillsReferenceComputerUseContent() {
             <li>No configuration needed</li>
             <li>Step limit of 50 actions per session</li>
             <li>
-              Each action requires approval unless you create trust rules via the Allow button
+              A session covers one described task on one desktop. Starting another task or
+              controlling a different desktop asks again
             </li>
           </ul>
         </section>
