@@ -774,3 +774,30 @@ describe("a turn that sends more than one reply", () => {
     ]);
   });
 });
+
+describe("camera-frame echoes", () => {
+  test("preserves the marker and deterministic saved-time estimate through replay", () => {
+    const frame = env(1, {
+      type: "user_message_echo",
+      messageId: "frame-1",
+      text: "(camera frame)",
+      cameraFrame: true,
+    });
+    const events = [frame, userEcho(2, "user-1", "What is this?")];
+    const replay = applyEventsToHistory(SEED, events);
+    const incremental = events.reduce(
+      (snapshot, event) => applyEventsToHistory(snapshot, [event]),
+      SEED,
+    );
+
+    expect(replay).toEqual(incremental);
+    expect(replay.messages[0]).toMatchObject({
+      id: "frame-1",
+      isCameraFrame: true,
+      timestamp: stampOf(1),
+    });
+    expect(replay.messages[1]?.isCameraFrame).toBeUndefined();
+    expect(applyEventsToHistory(replay, events)).toEqual(replay);
+    expect(SEED.messages).toEqual([]);
+  });
+});

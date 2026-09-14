@@ -494,7 +494,12 @@ function findOptimisticUserEchoIdx(
  */
 export function applyUserMessageEcho(
   prev: DisplayMessage[],
-  event: { text: string; messageId?: string; clientMessageId?: string },
+  event: {
+    text: string;
+    messageId?: string;
+    clientMessageId?: string;
+    cameraFrame?: true;
+  },
   at: number = Date.now(),
 ): DisplayMessage[] {
   const serverId = event.messageId;
@@ -510,7 +515,10 @@ export function applyUserMessageEcho(
     }
   }
 
-  const optimisticIdx = findOptimisticUserEchoIdx(prev, event.clientMessageId);
+  // Ambient camera frames never confirm a typed send.
+  const optimisticIdx = event.cameraFrame
+    ? -1
+    : findOptimisticUserEchoIdx(prev, event.clientMessageId);
   if (optimisticIdx !== -1) {
     if (serverId === undefined) {
       return prev;
@@ -538,6 +546,7 @@ export function applyUserMessageEcho(
         ? { clientMessageId: event.clientMessageId }
         : {}),
       role: "user",
+      ...(event.cameraFrame ? { isCameraFrame: true } : {}),
       textSegments: [event.text],
       contentOrder: [{ type: "text", id: "0" }],
       contentBlocks: [{ type: "text", text: event.text }],
