@@ -27,11 +27,22 @@ export class DesktopControl {
       getDesktopSessionManager().browser.release(),
   ) {}
 
-  execute(
+  async execute(
     input: Record<string, unknown>,
     context: ToolContext,
   ): Promise<ToolExecutionResult> {
-    const action = desktopActionSchema.parse(input);
+    const parsed = desktopActionSchema.safeParse(input);
+    if (!parsed.success) {
+      await this.lease.run(
+        context,
+        async () => {
+          throw parsed.error;
+        },
+        { done: true },
+      );
+      throw parsed.error;
+    }
+    const action = parsed.data;
     return this.lease.run(
       context,
       async ({ signal, leaseId, sequence, assertAvailable }) => {

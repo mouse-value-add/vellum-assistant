@@ -10,8 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 
-import { addMinesDockPinMigration } from "../workspace/migrations/155-add-mines-dock-pin.js";
-import { runWorkspaceMigrations } from "../workspace/migrations/runner.js";
+import { migrateDesktopDockMigration } from "../workspace/migrations/157-migrate-desktop-dock.js";
+import { addMinesDockPinMigration } from "../workspace/migrations/158-add-mines-dock-pin.js";
+import { WORKSPACE_MIGRATIONS } from "../workspace/migrations/registry.js";
+import {
+  loadCheckpoints,
+  rollbackWorkspaceMigrations,
+  runWorkspaceMigrations,
+} from "../workspace/migrations/runner.js";
 import { writeDesktopPanelConfig } from "./desktop-panel-config.js";
 
 const workspaces: string[] = [];
@@ -109,4 +115,42 @@ test("leaves a workspace without desktop support untouched", async () => {
   rmSync(f.configDir, { recursive: true });
   await addMinesDockPinMigration.run(f.workspace);
   expect(existsSync(f.configDir)).toBe(false);
+});
+
+test("rollback to the pre-desktop registry ceiling removes both new checkpoints", async () => {
+  const f = setup();
+  const desktopIds = new Set([
+    migrateDesktopDockMigration.id,
+    addMinesDockPinMigration.id,
+  ]);
+  const applied = Object.fromEntries(
+    WORKSPACE_MIGRATIONS.filter(
+      (migration) => !desktopIds.has(migration.id),
+    ).map((migration) => [
+      migration.id,
+      { status: "completed", appliedAt: new Date().toISOString() },
+    ]),
+  );
+  writeFileSync(
+    join(f.workspace, "data", ".workspace-migrations.json"),
+    JSON.stringify({ applied }),
+  );
+  expect(
+    (await runWorkspaceMigrations(f.workspace, WORKSPACE_MIGRATIONS)).applied,
+  ).toBe(2);
+  await rollbackWorkspaceMigrations(
+    f.workspace,
+    WORKSPACE_MIGRATIONS,
+    "156-extract-workspace-mcp-json",
+  );
+  const rolledBack = loadCheckpoints(f.workspace).applied;
+  for (const id of desktopIds) {
+    expect(rolledBack[id]).toBeUndefined();
+  }
+  expect(rolledBack["156-extract-workspace-mcp-json"]?.status).toBe(
+    "completed",
+  );
+  expect(
+    (await runWorkspaceMigrations(f.workspace, WORKSPACE_MIGRATIONS)).applied,
+  ).toBe(2);
 });

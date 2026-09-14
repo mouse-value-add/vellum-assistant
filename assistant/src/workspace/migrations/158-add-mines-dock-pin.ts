@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import type { WorkspaceMigration } from "./types.js";
 
 export const addMinesDockPinMigration: WorkspaceMigration = {
-  id: "155-add-mines-dock-pin",
+  id: "158-add-mines-dock-pin",
   description: "Add Mines to existing desktop docks",
   retryFailedCheckpoint: true,
   run(workspaceDir: string): void {

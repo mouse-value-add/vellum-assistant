@@ -425,3 +425,28 @@ test.each(["browser", "desktop"] as const)(
     expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
   },
 );
+
+test("malformed actions release only the caller's lease without starting a desktop", async () => {
+  const f = fixture();
+  await expect(
+    f.control.execute({ action: "click" }, context()),
+  ).rejects.toThrow();
+  expect(f.started).not.toHaveBeenCalled();
+  const id = await observe(f.control);
+  await expect(
+    f.control.execute(
+      { action: "click", observation_id: id, x: 100 },
+      { ...context(), sourceActorPrincipalId: "user-456" },
+    ),
+  ).rejects.toThrow("Another conversation");
+  expect(f.lease.getStatus().state).toBe("assistant");
+  await expect(
+    f.control.execute(
+      { action: "click", observation_id: id, x: 100 },
+      context(),
+    ),
+  ).rejects.toThrow();
+  expect(f.input.perform).not.toHaveBeenCalled();
+  expect(f.lease.getStatus().state).toBe("idle");
+  expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
+});
