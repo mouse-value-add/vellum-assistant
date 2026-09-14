@@ -220,25 +220,28 @@ export const Chats: Story = {
  * stretching to the frame, and past thirty rows the list windows
  * (virtualizes) with the control still in place.
  */
+/* Synthetic titles at the widths a real list runs to, from a few words to
+   one that truncates, so the rows read as a list rather than a repeated
+   placeholder. Nothing here is drawn from anyone's conversations. */
 const LONG_TITLES = [
-  "Wait Interaction",
-  "ESP32 Power Wiring",
-  "Foot Pain & Pace Plan",
-  "Burry Substack Commentary",
-  "Emp Reservation Planning",
-  "Upper-Body Session Notes",
-  "Tech Adoption Ladder",
-  "Milestone Run Victory",
-  "Pancake Recipe Substitutions",
-  "Getting Started Plans",
-  "Run Schedule Shift",
-  "Columbus Weekend Itinerary",
-  "I-70 Eyeball Confusion",
-  "Soldering Tools for Tiny Boards",
-  "Columbus Climbing Gyms",
-  "ChatGPT Memory Star",
-  "ai eng + design",
-  "Weekend Running Plan",
+  "Draft the release notes",
+  "Onboarding checklist review",
+  "Sample conversation three",
+  "Weekly sync agenda and follow-ups",
+  "Example thread five",
+  "Quarterly roadmap questions",
+  "Bug triage walkthrough",
+  "Example thread eight",
+  "Rename the staging environment",
+  "Placeholder conversation ten",
+  "Design review notes",
+  "Migration plan for the test suite",
+  "Sample conversation thirteen",
+  "Choosing a chart library",
+  "Example thread fifteen",
+  "Long title that runs past the rail and truncates",
+  "Retro action items",
+  "Placeholder conversation eighteen",
 ];
 
 const MANY_CHATS: Conversation[] = Array.from({ length: 36 }, (_, index) =>
