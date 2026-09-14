@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getConfig } from "../../config/loader.js";
-import { desktopControl } from "../../desktop/desktop-control.js";
+import { desktopControlLease } from "../../desktop/desktop-control-lease.js";
 import { isAssistantDesktopEnabled } from "../../desktop/desktop-feature.js";
 import { GATEWAY_PRINCIPALS } from "../auth/route-policy.js";
 import { NotFoundError } from "./errors.js";
@@ -24,11 +24,11 @@ export const ROUTES: RouteDefinition[] = ["GET", "POST"].map((method) => ({
       );
     }
     if (method === "GET") {
-      return desktopControl.getStatus();
+      return desktopControlLease.getStatus();
     }
     return request.parse(body).action === "take"
-      ? desktopControl.takeControl()
-      : desktopControl.allowAssistant();
+      ? desktopControlLease.takeControl()
+      : desktopControlLease.allowAssistant();
   },
   summary:
     method === "GET"

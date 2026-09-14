@@ -5,7 +5,7 @@
 ```mermaid
 flowchart LR
   CLI[assistant browser --desktop] --> IPC[Existing browser IPC routes]
-  IPC --> Lease[DesktopControl conversation and actor lease]
+  IPC --> Lease[DesktopControlLease conversation and actor lease]
   Lease --> Shared[Shared browser operation handlers]
   Shared --> CDP[Scoped desktop CDP client]
   CDP --> Chrome[Managed Chrome on display :99]
@@ -29,4 +29,4 @@ The client records key and mouse presses before dispatch. On release it opens a 
 
 `--use-active-tab` and personal browser targeting are rejected with `--desktop`. Download waiting is unsupported. Browser operations are bounded to two minutes and share the desktop lease's action budget and idle expiry.
 
-Validation: focused client tests exercise shared snapshot/click behavior, namespace isolation, stale references, target changes, cancellation and uncertain-input cleanup. Desktop-control tests cover ownership and takeover across both interfaces. The Linux smoke script exercises real Chrome, the CLI and visible pointer feedback.
+Validation: focused client tests exercise shared snapshot/click behavior, namespace isolation, stale references, target changes, cancellation and uncertain-input cleanup. Lease tests cover browser ownership and takeover independently of native input. Computer-control tests cover ownership across both interfaces. The Linux smoke script exercises real Chrome, the CLI and visible pointer feedback.

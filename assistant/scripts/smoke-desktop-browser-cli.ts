@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +11,9 @@ import sharp from "sharp";
 import { executeBrowserOperation } from "../src/browser/operations.js";
 import type { BrowserOperation } from "../src/browser/types.js";
 import { registerBrowserCommand } from "../src/cli/commands/browser.js";
-import { DesktopControl } from "../src/desktop/desktop-control.js";
-import { X11DesktopInput } from "../src/desktop/desktop-input.js";
+import { DesktopControlLease } from "../src/desktop/desktop-control-lease.js";
 import { DesktopSessionManager } from "../src/desktop/desktop-session-manager.js";
+import { DesktopViewerInput } from "../src/desktop/desktop-viewer-input.js";
 import { getAssistantSocketPath } from "../src/ipc/socket-path.js";
 
 if (
@@ -27,14 +27,14 @@ if (
 }
 const executable = process.argv[2];
 const directory = await mkdtemp(join(tmpdir(), "desktop-browser-cli-"));
-const input = new X11DesktopInput();
+const input = new DesktopViewerInput();
 const manager = new DesktopSessionManager({
   resolveChromePath: async () => executable,
   profileDir: join(directory, "profile"),
   panelConfigDir: join(directory, "panel"),
   renderWallpaper: async () => null,
 });
-const control = new DesktopControl({
+const control = new DesktopControlLease({
   enabled: () => true,
   ready: () => true,
   manager: () => manager,
@@ -201,10 +201,6 @@ try {
       },
     );
     assert.equal(pointer.result.value, true);
-    await writeFile(
-      join(tmpdir(), "desktop-browser-cli-smoke.png"),
-      (await input.observe(signal)).png,
-    );
     return { content: "verified", isError: false };
   });
   await cli("detach");

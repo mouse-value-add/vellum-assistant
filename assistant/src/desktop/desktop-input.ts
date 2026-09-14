@@ -1,11 +1,10 @@
-import { execFile } from "node:child_process";
-
 import { z } from "zod";
 
 import {
-  DESKTOP_DISPLAY,
-  DESKTOP_INPUT_PARAMETERS,
-} from "./desktop-display.js";
+  DesktopViewerInput,
+  runDesktopCommand,
+} from "./desktop-viewer-input.js";
+export { runDesktopCommand } from "./desktop-viewer-input.js";
 import { desktopScreenshot } from "./desktop-screenshot.js";
 
 const point = { x: z.number().int().min(0), y: z.number().int().min(0) };
@@ -57,38 +56,13 @@ export interface DesktopInput {
   releaseInput(): Promise<void>;
 }
 
-export function runDesktopCommand(
-  command: string,
-  args: string[],
-  signal?: AbortSignal,
-  input?: string,
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      `/usr/bin/${command}`,
-      args,
-      {
-        env: {
-          PATH: "/usr/bin:/bin",
-          DISPLAY: DESKTOP_DISPLAY,
-          LANG: "C.UTF-8",
-        },
-        encoding: "buffer",
-        timeout: 15_000,
-        maxBuffer: 16 * 1024 * 1024,
-        killSignal: "SIGKILL",
-        windowsHide: true,
-        signal,
-      },
-      (err, stdout) => (err ? reject(err) : resolve(stdout)),
-    );
-    child.stdin?.on("error", () => {});
-    child.stdin?.end(input);
-  });
-}
-
-export class X11DesktopInput implements DesktopInput {
-  constructor(private readonly runCommand = runDesktopCommand) {}
+export class X11DesktopInput
+  extends DesktopViewerInput
+  implements DesktopInput
+{
+  constructor(runCommand = runDesktopCommand) {
+    super(runCommand);
+  }
 
   async observe(signal: AbortSignal): Promise<DesktopObservation> {
     return desktopScreenshot(
@@ -193,24 +167,6 @@ export class X11DesktopInput implements DesktopInput {
           await this.runCommand("xdotool", ["mouseup", "1"]);
         }
         break;
-    }
-  }
-
-  async setViewerInput(enabled: boolean): Promise<void> {
-    const value = enabled ? "1" : "0";
-    await this.runCommand("tigervncconfig", [
-      "-set",
-      ...DESKTOP_INPUT_PARAMETERS.map((name) => `${name}=${value}`),
-    ]);
-    for (const name of DESKTOP_INPUT_PARAMETERS) {
-      const actual = await this.runCommand("tigervncconfig", ["-get", name]);
-      if (
-        !new Set(enabled ? ["1", "true", "on"] : ["0", "false", "off"]).has(
-          actual.toString().trim().toLowerCase(),
-        )
-      ) {
-        throw new Error(`Could not update desktop input: ${name}`);
-      }
     }
   }
 

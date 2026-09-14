@@ -10,6 +10,7 @@ import { skillLoadTool } from "../tools/skills/load.js";
 import { createSkillTool } from "../tools/skills/skill-tool-factory.js";
 import type { ToolContext } from "../tools/types.js";
 import { DesktopControl, desktopControl } from "./desktop-control.js";
+import { DesktopControlLease } from "./desktop-control-lease.js";
 import { isAssistantDesktopEnabled } from "./desktop-feature.js";
 import type { DesktopSessionManager } from "./desktop-session-manager.js";
 
@@ -54,7 +55,7 @@ test("the desktop flag enables skill loading and local control without a host cl
     setViewerInput: mock(async () => {}),
   };
   const started = mock(async () => {});
-  const control = new DesktopControl({
+  const lease = new DesktopControlLease({
     enabled: () => isAssistantDesktopEnabled(getConfig(), true),
     ready: () => true,
     manager: () =>
@@ -66,6 +67,7 @@ test("the desktop flag enables skill loading and local control without a host cl
     input,
     notify: async () => {},
   });
+  const control = new DesktopControl(lease, input, async () => {});
   const execute = spyOn(desktopControl, "execute").mockImplementation(
     (args, ctx) => control.execute(args, ctx),
   );
@@ -99,7 +101,7 @@ test("the desktop flag enables skill loading and local control without a host cl
     expect(denied.isError).toBe(true);
     expect(input.observe).toHaveBeenCalledTimes(2);
   } finally {
-    await control.takeControl();
+    await lease.takeControl();
     execute.mockRestore();
   }
 });

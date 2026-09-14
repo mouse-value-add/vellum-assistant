@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import type { ToolContext } from "../tools/types.js";
 import { DesktopControl } from "./desktop-control.js";
+import { DesktopControlLease } from "./desktop-control-lease.js";
 import type { DesktopInput } from "./desktop-input.js";
 import type {
   DesktopSessionManager,
@@ -48,16 +49,18 @@ function fixture() {
     releaseAutomationSlot: released,
     ensureDesktopRunning: started,
   } as unknown as DesktopSessionManager;
-  const control = new DesktopControl({
+  const lease = new DesktopControlLease({
     enabled: () => enabled,
     ready: () => ready,
     manager: () => manager,
     input,
     notify: async () => {},
   });
-  cleanups.push(() => control.takeControl());
+  const control = new DesktopControl(lease, input, browserRelease);
+  cleanups.push(() => lease.takeControl());
   return {
     control,
+    lease,
     browserRelease,
     input,
     started,
@@ -159,7 +162,7 @@ describe("assistant desktop control", () => {
         f.control.execute({ action: "observe" }, ctx),
       ).rejects.toBeDefined();
       const operation = mock(async () => ({ content: "ok", isError: false }));
-      await expect(f.control.runBrowser(ctx, operation)).rejects.toBeDefined();
+      await expect(f.lease.runBrowser(ctx, operation)).rejects.toBeDefined();
       expect(f.started).not.toHaveBeenCalled();
       expect(operation).not.toHaveBeenCalled();
       expect(f.input.setViewerInput).not.toHaveBeenCalled();
@@ -191,15 +194,15 @@ describe("assistant desktop control", () => {
       { action: "key", key: "Return", observation_id: id },
       context(),
     );
-    await f.control.takeControl();
+    await f.lease.takeControl();
     expect(await rejected).toBeInstanceOf(Error);
     expect((await queued).yieldToUser).toBe(true);
     expect(f.input.perform).toHaveBeenCalledTimes(1);
-    expect(f.control.getStatus().state).toBe("human");
+    expect(f.lease.getStatus().state).toBe("human");
     expect(
       (await f.control.execute({ action: "observe" }, context())).yieldToUser,
     ).toBe(true);
-    await f.control.allowAssistant();
+    await f.lease.allowAssistant();
     await observe(f.control);
     expect(f.started).toHaveBeenCalledTimes(2);
   });
@@ -209,7 +212,7 @@ describe("assistant desktop control", () => {
     const abort = new AbortController();
     await observe(f.control, context(abort.signal));
     abort.abort();
-    await f.control.allowAssistant();
+    await f.lease.allowAssistant();
     expect(f.released).toHaveBeenCalledTimes(1);
     expect(f.input.releaseInput).toHaveBeenCalledTimes(2);
   });
@@ -218,7 +221,7 @@ describe("assistant desktop control", () => {
     const f = fixture();
     await observe(f.control);
     f.lose();
-    await f.control.allowAssistant();
+    await f.lease.allowAssistant();
     expect(f.released).toHaveBeenCalledTimes(1);
     await observe(f.control);
     f.disable();
@@ -236,9 +239,7 @@ describe.each(["disable", "uninstall"] as const)(
       const f = fixture();
       f.started.mockImplementationOnce(async () => f[lose]());
       const operation = mock(async () => ({ content: "ok", isError: false }));
-      await expect(
-        f.control.runBrowser(context(), operation),
-      ).rejects.toThrow();
+      await expect(f.lease.runBrowser(context(), operation)).rejects.toThrow();
       expect(operation).not.toHaveBeenCalled();
       expect(f.input.observe).not.toHaveBeenCalled();
       expect(f.input.setViewerInput.mock.calls).not.toContainEqual([false]);
@@ -248,21 +249,19 @@ describe.each(["disable", "uninstall"] as const)(
     test("releases a retained browser lease before rejecting another command", async () => {
       const f = fixture();
       const operation = mock(async () => ({ content: "ok", isError: false }));
-      await f.control.runBrowser(context(), operation);
+      await f.lease.runBrowser(context(), operation);
       f[lose]();
-      await expect(
-        f.control.runBrowser(context(), operation),
-      ).rejects.toThrow();
+      await expect(f.lease.runBrowser(context(), operation)).rejects.toThrow();
       expect(operation).toHaveBeenCalledTimes(1);
       expect(f.released).toHaveBeenCalledTimes(1);
       expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
-      expect(f.control.getStatus().state).toBe("idle");
+      expect(f.lease.getStatus().state).toBe("idle");
     });
 
     test("cancels an in-flight browser operation and releases control", async () => {
       const f = fixture();
       const started = Promise.withResolvers<void>();
-      const operation = f.control.runBrowser(context(), async (signal) => {
+      const operation = f.lease.runBrowser(context(), async (signal) => {
         started.resolve();
         await new Promise<void>((_resolve, reject) => {
           signal.addEventListener("abort", () => reject(new Error("aborted")), {
@@ -276,7 +275,7 @@ describe.each(["disable", "uninstall"] as const)(
       f[lose]();
       expect(await rejected).toBeInstanceOf(Error);
       expect(f.released).toHaveBeenCalledTimes(1);
-      expect(f.control.getStatus().state).toBe("idle");
+      expect(f.lease.getStatus().state).toBe("idle");
     });
   },
 );
@@ -289,13 +288,13 @@ test.each(["releaseInput", "setViewerInput"] as const)(
     f.input[operation].mockImplementationOnce(async () => {
       throw new Error("X server busy");
     });
-    await expect(f.control.takeControl()).rejects.toThrow("X server busy");
-    expect(f.control.getStatus().state).toBe("assistant");
+    await expect(f.lease.takeControl()).rejects.toThrow("X server busy");
+    expect(f.lease.getStatus().state).toBe("assistant");
     expect(
       (await f.control.execute({ action: "observe" }, context())).yieldToUser,
     ).toBe(true);
-    await f.control.takeControl();
-    expect(f.control.getStatus().state).toBe("human");
+    await f.lease.takeControl();
+    expect(f.lease.getStatus().state).toBe("human");
     expect(f.released).toHaveBeenCalledTimes(1);
   },
 );
@@ -320,13 +319,13 @@ test("browser commands share ownership and invalidate X11 observations", async (
   const id = await observe(f.control);
   const operation = mock(async () => ({ content: "clicked", isError: false }));
   await expect(
-    f.control.runBrowser(
+    f.lease.runBrowser(
       { ...context(), conversationId: "conv-other" },
       operation,
     ),
   ).rejects.toThrow("Another conversation");
   expect(operation).not.toHaveBeenCalled();
-  await f.control.runBrowser(context(), operation);
+  await f.lease.runBrowser(context(), operation);
   expect(f.started).toHaveBeenCalledTimes(1);
   await expect(
     f.control.execute(
@@ -340,7 +339,7 @@ test("browser commands share ownership and invalidate X11 observations", async (
 test("takeover cancels active and queued browser commands", async () => {
   const f = fixture();
   const started = Promise.withResolvers<void>();
-  const running = f.control
+  const running = f.lease
     .runBrowser(context(), async (signal) => {
       started.resolve();
       await new Promise((_, reject) =>
@@ -356,44 +355,46 @@ test("takeover cancels active and queued browser commands", async () => {
     content: "unexpected",
     isError: false,
   }));
-  const queued = f.control.runBrowser(context(), operation);
-  await f.control.takeControl();
+  const queued = f.lease.runBrowser(context(), operation);
+  await f.lease.takeControl();
   expect(await running).toBeInstanceOf(Error);
   expect((await queued).yieldToUser).toBe(true);
   expect(operation).not.toHaveBeenCalled();
-  expect(f.control.getStatus().state).toBe("human");
-  await f.control.allowAssistant();
-  await f.control.runBrowser(context(), operation);
+  expect(f.lease.getStatus().state).toBe("human");
+  await f.lease.allowAssistant();
+  await f.lease.runBrowser(context(), operation);
   expect(operation).toHaveBeenCalledTimes(1);
 });
 
 test("browser cleanup failure keeps its slot and still releases X11 input", async () => {
   const f = fixture();
-  await f.control.runBrowser(context(), async () => ({
+  await observe(f.control);
+  await f.lease.runBrowser(context(), async () => ({
     content: "ok",
     isError: false,
   }));
   f.browserRelease.mockRejectedValueOnce(new Error("Chrome busy"));
-  await expect(f.control.takeControl()).rejects.toThrow("Chrome busy");
+  await expect(f.lease.takeControl()).rejects.toThrow("Chrome busy");
   expect(f.released).not.toHaveBeenCalled();
   expect(f.input.releaseInput).toHaveBeenCalledTimes(2);
-  expect(f.control.getStatus().state).toBe("assistant");
-  await f.control.takeControl();
+  expect(f.lease.getStatus().state).toBe("assistant");
+  await f.lease.takeControl();
   expect(f.released).toHaveBeenCalledTimes(1);
-  expect(f.control.getStatus().state).toBe("human");
+  expect(f.lease.getStatus().state).toBe("human");
 });
 
 test("desktop loss clears a failed cleanup lease so the next session can restart", async () => {
   const f = fixture();
-  await f.control.runBrowser(context(), async () => ({
+  await observe(f.control);
+  await f.lease.runBrowser(context(), async () => ({
     content: "ok",
     isError: false,
   }));
   f.input.releaseInput.mockRejectedValueOnce(new Error("X server unavailable"));
-  await expect(f.control.takeControl()).rejects.toThrow("X server unavailable");
+  await expect(f.lease.takeControl()).rejects.toThrow("X server unavailable");
   f.lose();
-  await f.control.allowAssistant();
-  expect(f.control.getStatus().state).toBe("idle");
+  await f.lease.allowAssistant();
+  expect(f.lease.getStatus().state).toBe("idle");
   await observe(f.control);
   expect(f.started).toHaveBeenCalledTimes(2);
 });
@@ -406,7 +407,7 @@ test.each(["browser", "desktop"] as const)(
     const second = new AbortController();
     const run = (signal: AbortSignal) =>
       mode === "browser"
-        ? f.control.runBrowser(context(signal), async () => ({
+        ? f.lease.runBrowser(context(signal), async () => ({
             content: "ok",
             isError: false,
           }))
@@ -414,12 +415,12 @@ test.each(["browser", "desktop"] as const)(
     await run(first.signal);
     await run(second.signal);
     first.abort();
-    await f.control.allowAssistant();
-    expect(f.control.getStatus().state).toBe("assistant");
+    await f.lease.allowAssistant();
+    expect(f.lease.getStatus().state).toBe("assistant");
     expect(f.released).not.toHaveBeenCalled();
     second.abort();
-    await f.control.allowAssistant();
-    expect(f.control.getStatus().state).toBe("idle");
+    await f.lease.allowAssistant();
+    expect(f.lease.getStatus().state).toBe("idle");
     expect(f.released).toHaveBeenCalledTimes(1);
     expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
   },

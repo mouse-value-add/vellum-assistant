@@ -1,7 +1,7 @@
 import { executeBrowserOperation } from "../browser/operations.js";
 import type { BrowserOperation } from "../browser/types.js";
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
-import { desktopControl } from "./desktop-control.js";
+import { desktopControlLease } from "./desktop-control-lease.js";
 import { getDesktopSessionManager } from "./desktop-session-manager.js";
 
 export function executeDesktopBrowserOperation(
@@ -29,7 +29,7 @@ export function executeDesktopBrowserOperation(
       "Download waiting is unavailable for the streamed desktop browser",
     );
   }
-  return desktopControl.runBrowser(
+  return desktopControlLease.runBrowser(
     context,
     async (signal) => {
       const cdpClient = await getDesktopSessionManager().browser.client(
@@ -84,7 +84,7 @@ export function executeDesktopBrowserTabs(
   },
   context: ToolContext,
 ): Promise<ToolExecutionResult> {
-  return desktopControl.runBrowser(context, async (signal) => {
+  return desktopControlLease.runBrowser(context, async (signal) => {
     const cdpClient = await getDesktopSessionManager().browser.client(
       context.conversationId,
       signal,
