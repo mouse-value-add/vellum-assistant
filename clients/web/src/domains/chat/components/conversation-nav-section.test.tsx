@@ -14,7 +14,15 @@
  */
 
 import { fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test";
 import { createElement } from "react";
 
 import { SIDEBAR_SECTION_MAX_HEIGHT } from "@/components/sidebar-nav-geometry";
@@ -95,6 +103,53 @@ const MANY_ROWS: Conversation[] = Array.from({ length: 25 }, (_, index) => ({
 
 afterEach(() => {
   mock.restore();
+});
+
+/* happy-dom lays nothing out, so a scroller never overflows on its own.
+   The Expand control reads `scrollHeight > clientHeight` off the scroller,
+   so the two are modelled here from what the real rail renders: rows of
+   `ROW_HEIGHT` stacked with no gap (the card zeroes the list's), inside
+   a box no taller than its own `max-height`. */
+const ROW_HEIGHT = 30;
+const heightDescriptors = {
+  scrollHeight: Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  ),
+  clientHeight: Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientHeight",
+  ),
+};
+
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return rowsIn(this).length * ROW_HEIGHT;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const cap = Number.parseFloat(this.style.maxHeight);
+      return Number.isNaN(cap)
+        ? this.scrollHeight
+        : Math.min(this.scrollHeight, cap);
+    },
+  });
+});
+
+afterAll(() => {
+  for (const [name, descriptor] of Object.entries(heightDescriptors)) {
+    if (descriptor) {
+      Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)[
+        name
+      ];
+    }
+  }
 });
 
 describe("ConversationRowList load-more seam", () => {
@@ -189,6 +244,31 @@ describe("ConversationRowList expand", () => {
     expect(scrollerOf(container)?.style.maxHeight).toBe(
       `${SIDEBAR_SECTION_MAX_HEIGHT}px`,
     );
+  });
+
+  test("a section that exactly fills its cap has nothing to expand either", () => {
+    /* Ten rows stand 300px tall with the card's zero gap: the cap shows
+       every one, so a control here would grow the card into nothing. A
+       count kept apart from the rendered geometry once put it at eight. */
+    const fitting = MANY_ROWS.slice(0, SIDEBAR_SECTION_MAX_HEIGHT / ROW_HEIGHT);
+    const container = renderList(undefined, {
+      items: fitting,
+      isLast: true,
+      expandable: true,
+    });
+
+    expect(rowsIn(container)).toHaveLength(10);
+    expect(expandButton(container)).toBeNull();
+  });
+
+  test("one row past the cap offers Expand", () => {
+    const container = renderList(undefined, {
+      items: MANY_ROWS.slice(0, SIDEBAR_SECTION_MAX_HEIGHT / ROW_HEIGHT + 1),
+      isLast: true,
+      expandable: true,
+    });
+
+    expect(expandButton(container)).not.toBeNull();
   });
 
   test("a short section paging from the server still offers Expand", () => {

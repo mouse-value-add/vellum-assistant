@@ -95,7 +95,7 @@ export const SIDEBAR_SECTION_INDENT = 0;
  * notion of "this section needs the room," so giving every open section a
  * share stretched a two-row group into a mostly-empty box the same size as
  * a busy one beside it. Every section above the last one gets this fixed
- * cap instead: about nine desktop rows (30px each plus their 4px gap),
+ * cap instead: ten desktop rows (30px each, the card zeroes their gap),
  * enough to read as a list rather than a preview while still leaving room
  * for its neighbours. It is also the mid height an expandable last section
  * (Chats) rests at until the reader expands it (see `expandable` on
@@ -103,24 +103,6 @@ export const SIDEBAR_SECTION_INDENT = 0;
  * before it scrolls, wherever it sits.
  */
 export const SIDEBAR_SECTION_MAX_HEIGHT = 300;
-
-/** A conversation row's height on the rail (`ConversationRow`: `h-[30px]`). */
-export const SIDEBAR_ROW_HEIGHT = 30;
-
-/** The gap between two rows on the rail (`SideMenu.SubList`: `gap-[4px]`). */
-export const SIDEBAR_ROW_GAP = 4;
-
-/**
- * How many rail rows fit inside {@link SIDEBAR_SECTION_MAX_HEIGHT} without
- * scrolling. A section whose rows run past this has more than its cap can
- * show, which is what an expandable section (Chats, a channel section: see
- * `expandable` on `ConversationRowList`) reads to decide whether to offer
- * its Expand control at all.
- */
-export const SIDEBAR_SECTION_ROWS_WITHIN_CAP = Math.floor(
-  (SIDEBAR_SECTION_MAX_HEIGHT + SIDEBAR_ROW_GAP) /
-    (SIDEBAR_ROW_HEIGHT + SIDEBAR_ROW_GAP),
-);
 
 /**
  * The gap between any two stacked entries in the sidebar: the built-in nav's

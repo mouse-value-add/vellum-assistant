@@ -44,7 +44,7 @@
  * (via `ConversationRow`), so neither takes them as props.
  */
 
-import { type ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useState } from "react";
 
 import { type LucideIcon } from "lucide-react";
 
@@ -55,10 +55,7 @@ import {
   CollapsibleNavSection,
   type CollapsibleNavSectionDrag,
 } from "@/components/collapsible-nav-section";
-import {
-  SIDEBAR_SECTION_MAX_HEIGHT,
-  SIDEBAR_SECTION_ROWS_WITHIN_CAP,
-} from "@/components/sidebar-nav-geometry";
+import { SIDEBAR_SECTION_MAX_HEIGHT } from "@/components/sidebar-nav-geometry";
 import { useConversationListContext } from "@/domains/chat/components/conversation-list-context";
 import { ConversationRow } from "@/domains/chat/components/conversation-row";
 import { LoadMoreSentinel } from "@/domains/chat/components/load-more-sentinel";
@@ -138,6 +135,40 @@ export interface ConversationRowListProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
+/**
+ * Whether a scroller's content runs past its box, kept live. A callback ref
+ * (stored in state, as `useElementSize` does) so it re-measures when the
+ * scroller mounts, and a `ResizeObserver` so it follows the box: the cap
+ * coming and going with `expanded`, the rail squeezing the last section.
+ * Content changes reach it through the same observer when they move the
+ * box, and through `contentKey` when they do not (a row added under a
+ * capped box grows `scrollHeight` alone).
+ */
+function useOverflows(contentKey: number): {
+  ref: (el: HTMLDivElement | null) => void;
+  overflows: boolean;
+} {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!el) {
+      setOverflows(false);
+      return;
+    }
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, contentKey]);
+
+  return { ref: setEl, overflows };
+}
+
 export function ConversationRowList({
   items,
   scrollParent,
@@ -158,15 +189,26 @@ export function ConversationRowList({
      rows into the body's reserved padding. */
   const scrollWithBody = overlayCards === true || listScrollParent != null;
 
+  const windows =
+    !unbounded && items.length > CONVERSATION_LIST_VIRTUALIZE_THRESHOLD;
+
   /* The control appears only where there is a height to change and rows
      enough to need it: the rail's last section, with more rows than its
-     mid height shows (or more still on the server). A section within its
-     cap has nothing to expand into, and an expanded section that has since
-     shrunk to fit keeps the control so it can be put back. */
+     mid height shows (or more still on the server). "More than it shows"
+     is read off the scroller itself, not counted from a row height: the
+     rows' height and gap are set where they render, and a count kept here
+     drifted from them (the card zeroes the list's gap, so ten rows fit the
+     cap, not the eight a copied gap said). A windowed list has outgrown
+     the cap by definition. A section within its cap has nothing to expand
+     into, and an expanded section that has since shrunk to fit keeps the
+     control so it can be put back. */
   const canExpand =
     expandable === true && isLast === true && !unbounded && !scrollWithBody;
+  const { ref: scrollerRef, overflows: scrollerOverflows } = useOverflows(
+    items.length,
+  );
   const overflowsCap =
-    items.length > SIDEBAR_SECTION_ROWS_WITHIN_CAP || onEndReached !== undefined;
+    windows || scrollerOverflows || onEndReached !== undefined;
   const expandRow =
     canExpand && (overflowsCap || expanded) ? (
       <SidebarExpandRow
@@ -190,9 +232,6 @@ export function ConversationRowList({
     </SideMenu.SubList>
   );
 
-  const windows =
-    !unbounded && items.length > CONVERSATION_LIST_VIRTUALIZE_THRESHOLD;
-
   if (!windows) {
     if (unbounded || scrollWithBody) {
       return rows;
@@ -207,6 +246,7 @@ export function ConversationRowList({
     return isLast ? (
       <>
         <div
+          ref={scrollerRef}
           className="min-h-0 overflow-y-auto"
           style={
             atMidHeight ? { maxHeight: SIDEBAR_SECTION_MAX_HEIGHT } : undefined
