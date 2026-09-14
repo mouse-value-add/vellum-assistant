@@ -13,32 +13,32 @@
  *
  * A `Button` in the section-title ink, not a `PanelItem` row: a row would
  * sit in the list as one more thread, and a thread is what the reader is
- * scanning for. The paired chevrons and the quieter ink are what say "this
- * is the card's own control". `shrink-0` holds its height when the rail
- * squeezes the scroller beside it.
+ * scanning for. The chevron and the quieter ink are what say "this is the
+ * card's own control". `shrink-0` holds its height when the rail squeezes
+ * the scroller beside it.
  *
  * It is set in the rows' own type (`text-body-medium-lighter`, the
  * `PanelItem` size), not the compact button's 12px/500: smaller, bolder and
  * greyer all at once read as a foreign element, and the ink alone is enough
  * to say "control" once the size and weight match its neighbours. The
- * chevrons go in as a child rather than `rightIcon`, which the compact size
- * pins to 10px inline: at that size the sparse glyph is a thin mark shorter
- * than the text's x-height, floating off the word behind the 6px icon gap.
- * A 16px glyph with a 4px gap sits with the word, after it, so the label
- * starts where every thread title starts.
+ * chevron goes in as a child rather than `rightIcon`, which the compact size
+ * pins to 10px inline: at that size the glyph is a thin mark shorter than
+ * the text's x-height, floating off the word behind the 6px icon gap. A
+ * 16px glyph with a 4px gap sits with the word, after it, so the label
+ * starts where every thread title starts. A single chevron, down to expand
+ * and up to collapse, rather than a paired pair: it points where the card
+ * is about to grow.
  *
  * Left-aligned with the rows: the button's 5px lead-in plus its 1px border
  * puts its label on the same x as a `PanelItem`'s text (the row list's
  * inset plus the row's own 6px), and its hover pill starts where a row's
- * does. Flush with the
- * card's bottom edge: the row is the same 30px as a thread row and its
- * `-mb-2` swallows the list's own 8px bottom inset, so the control's
- * centre sits 15px from the edge exactly as the header's title does from
- * the top. With the inset kept the card carried 8px more air under its
- * footer than over its header and read as bottom-heavy.
+ * does. The row is the same 30px as a thread row and sits inside the
+ * list's own 8px bottom inset, so the card keeps a little more air under
+ * its footer than over its header: a control right on the edge read as
+ * cramped.
  */
 
-import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 import { Button } from "@vellumai/design-library";
 
@@ -58,7 +58,7 @@ export function SidebarExpandRow({
   return (
     <div
       data-slot="sidebar-expand-row"
-      className="mt-1 -mb-2 flex h-[30px] shrink-0 items-center"
+      className="mt-1 flex h-[30px] shrink-0 items-center"
     >
       <Button
         variant="ghost"
@@ -71,9 +71,9 @@ export function SidebarExpandRow({
           ? t("sidebarExpandRow.collapse")
           : t("sidebarExpandRow.expand")}
         {expanded ? (
-          <ChevronsDownUp className="size-4" aria-hidden="true" />
+          <ChevronUp className="size-4" aria-hidden="true" />
         ) : (
-          <ChevronsUpDown className="size-4" aria-hidden="true" />
+          <ChevronDown className="size-4" aria-hidden="true" />
         )}
       </Button>
     </div>
