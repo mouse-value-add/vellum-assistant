@@ -4,6 +4,7 @@ import { runSanitizedBash } from "../sanitized-bash.js";
 
 describe("runSanitizedBash", () => {
   const priorToken = process.env.CES_SERVICE_TOKEN;
+  const priorUrl = process.env.CES_CREDENTIAL_URL;
   const priorSocket = process.env.CES_LOCAL_SOCKET;
 
   afterEach(() => {
@@ -11,6 +12,11 @@ describe("runSanitizedBash", () => {
       delete process.env.CES_SERVICE_TOKEN;
     } else {
       process.env.CES_SERVICE_TOKEN = priorToken;
+    }
+    if (priorUrl == null) {
+      delete process.env.CES_CREDENTIAL_URL;
+    } else {
+      process.env.CES_CREDENTIAL_URL = priorUrl;
     }
     if (priorSocket == null) {
       delete process.env.CES_LOCAL_SOCKET;
@@ -27,12 +33,17 @@ describe("runSanitizedBash", () => {
     expect(result.stdout.trim()).toBe("hello");
   });
 
-  test("strips CES_SERVICE_TOKEN from the child environment", async () => {
+  test("forwards CES HTTP credentials to the child environment", async () => {
     process.env.CES_SERVICE_TOKEN = "vault-bearer";
-    const result = await runSanitizedBash("printenv CES_SERVICE_TOKEN", 5_000);
-    expect(result.error).toBeUndefined();
-    expect(result.stdout.trim()).toBe("");
-    expect(result.exitCode).not.toBe(0);
+    process.env.CES_CREDENTIAL_URL = "http://127.0.0.1:8090";
+    const token = await runSanitizedBash("printenv CES_SERVICE_TOKEN", 5_000);
+    expect(token.error).toBeUndefined();
+    expect(token.exitCode).toBe(0);
+    expect(token.stdout.trim()).toBe("vault-bearer");
+    const url = await runSanitizedBash("printenv CES_CREDENTIAL_URL", 5_000);
+    expect(url.error).toBeUndefined();
+    expect(url.exitCode).toBe(0);
+    expect(url.stdout.trim()).toBe("http://127.0.0.1:8090");
   });
 
   test("forwards CES_LOCAL_SOCKET to the child", async () => {
