@@ -1,17 +1,23 @@
 import { Button } from "@vellumai/design-library";
-import { ChevronsRight, Monitor } from "lucide-react";
+import { Monitor } from "lucide-react";
 
 import { useTranslation } from "@/i18n";
 import { useAssistantFeatureFlagStore } from "@/stores/assistant-feature-flag-store";
 import { useResolvedAssistantsStore } from "@/stores/resolved-assistants-store";
+import { usePointerCoarse } from "@/utils/pointer";
 
-import { useDesktopSidebarStore } from "./desktop-sidebar-store";
+import { useDesktopPreviewStore } from "./desktop-preview-store";
 
-export function AssistantDesktopAffordance() {
+export function AssistantDesktopAffordance({
+  onToggle,
+}: {
+  onToggle?: () => void;
+}) {
   const { t } = useTranslation("chat");
   const enabled = useAssistantFeatureFlagStore.use.assistantDesktop();
   const assistantId = useResolvedAssistantsStore.use.activeAssistantId();
-  const session = useDesktopSidebarStore.use.session();
+  const session = useDesktopPreviewStore.use.session();
+  const fullscreenOnly = usePointerCoarse();
 
   if (enabled !== true || assistantId === null) {
     return null;
@@ -19,18 +25,24 @@ export function AssistantDesktopAffordance() {
 
   const open = session?.assistantId === assistantId;
   const label = open
-    ? t("assistantDesktop.collapseAria")
+    ? t("assistantDesktop.hideAria")
     : t("assistantDesktop.openAria");
 
   return (
     <Button
       variant="ghost"
-      iconOnly={open ? <ChevronsRight /> : <Monitor />}
+      active={open}
+      iconOnly={<Monitor />}
       aria-label={label}
       tooltip={label}
       aria-expanded={open}
-      aria-controls="assistant-desktop-sidebar"
-      onClick={() => useDesktopSidebarStore.getState().toggle(assistantId)}
+      aria-controls={
+        fullscreenOnly ? "assistant-desktop-modal" : "assistant-desktop-preview"
+      }
+      onClick={() => {
+        useDesktopPreviewStore.getState().toggle(assistantId);
+        onToggle?.();
+      }}
     />
   );
 }

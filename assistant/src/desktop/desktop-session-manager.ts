@@ -25,6 +25,7 @@ import {
   findDesktopBrowserPid,
 } from "./desktop-browser-endpoint.js";
 import { writeDesktopChromePolicy } from "./desktop-chrome-policy.js";
+import { configureDesktopChromeFrame } from "./desktop-chrome-session.js";
 import {
   desktopChromePath,
   resolveDesktopBinaries,
@@ -580,6 +581,11 @@ export class DesktopSessionManager {
       }
       mkdirSync(this.profileDir, { recursive: true });
       this.debugPort = debugPort;
+      try {
+        configureDesktopChromeFrame(this.profileDir);
+      } catch (err) {
+        log.warn({ err }, "Desktop Chrome frame could not be configured");
+      }
       this.startPanel(executable, env);
       this.launch(
         "browser",

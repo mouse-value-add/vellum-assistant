@@ -94,8 +94,13 @@
     "earlierActivity": "Actividad anterior"
   },
   "assistantDesktop": {
-    "resizeAria": "Cambiar el ancho del panel del escritorio",
-    "collapseAria": "Contraer el panel del escritorio",
+    "fitView": "Ajustar",
+    "panView": "Desplazar",
+    "controlView": "Controlar",
+    "panHint": "Arrastra para desplazarte. Toca para hacer clic.",
+    "hideAria": "Ocultar escritorio",
+    "closeAria": "Cerrar vista previa del escritorio",
+    "moveAria": "Mover vista previa del escritorio (teclas de flecha)",
     "expandAria": "Ampliar escritorio",
     "busy": "Otro usuario está usando el escritorio.",
     "connecting": "Conectando con el escritorio…",
@@ -111,7 +116,6 @@
     "installingPackages": "Instalando componentes del escritorio…",
     "installingChrome": "Instalando Google Chrome…",
     "checkingInstall": "Comprobando la instalación…",
-    "installBackground": "La instalación continúa si cierras esta ventana.",
     "installFailed": "La instalación falló. Inténtalo de nuevo para terminar.",
     "setupRequestFailed": "No se pudo comprobar la instalación. Vuelve a conectar para intentarlo de nuevo.",
     "setupUnsupported": "La instalación requiere un contenedor Linux x64 o ARM64 con acceso de administrador.",
@@ -1243,6 +1247,7 @@
     "defaultDescription": "Conecta {name} para que pueda usarlo en esta tarea.",
     "dismiss": "Descartar",
     "missingDetails": "Faltan detalles del asistente o del proveedor.",
+    "tenantHostInvalid": "Introduce un {label} válido, por ejemplo {placeholder}",
     "thisAccount": "esta cuenta",
     "waiting": "Esperando...",
     "yourAssistant": "Tu asistente"
@@ -1564,10 +1569,6 @@
   },
   "singleActivity": {
     "webSearch": "Búsqueda web"
-  },
-  "skillCreatedCard": {
-    "view": "Ver",
-    "viewAria": "Ver {name}"
   },
   "skillDetailPanel": {
     "actionsAria": "Acciones de habilidad",

@@ -25,6 +25,14 @@ import {
 } from "@testing-library/react";
 
 type Listener = (event: unknown) => void;
+let touch = false;
+mock.module("@/utils/pointer", () => ({
+  usePointerCoarse: () => touch,
+  isPointerCoarse: () => touch,
+}));
+beforeEach(() => {
+  touch = false;
+});
 
 class FakeRFB {
   static instances: FakeRFB[] = [];
@@ -33,6 +41,7 @@ class FakeRFB {
   resizeSession = false;
   viewOnly = false;
   clipViewport = true;
+  dragViewport = false;
   disconnectCalls = 0;
   pasted: string[] = [];
   private listeners = new Map<string, Listener[]>();
@@ -407,6 +416,31 @@ test("assistant control disables viewer input and resumes it without reconnectin
   expect(FakeRFB.instances).toHaveLength(count);
 });
 
+test("touch viewport controls switch modes without reconnecting the live session", async () => {
+  touch = true;
+  const { rerender } = render(<DesktopViewer assistantId="asst-1" />);
+  await flush();
+  act(() => rfb().emit("connect"));
+  expect(
+    screen.getByRole("button", { name: "Pan" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+  expect(
+    screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Control" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Control" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  rerender(<DesktopViewer assistantId="asst-1" viewOnly />);
+  expect(screen.queryByRole("button", { name: "Pan" })).toBeNull();
+  expect(FakeRFB.instances).toHaveLength(1);
+  expect(rfb().disconnectCalls).toBe(0);
+  expect(rfb().scaleViewport).toBe(true);
+});
+
 test("preview suppresses clipboard traffic and expands without reconnecting", async () => {
   const written: string[] = [];
   Object.defineProperty(navigator, "clipboard", {
@@ -417,10 +451,7 @@ test("preview suppresses clipboard traffic and expands without reconnecting", as
       },
     },
   });
-  const onExpand = mock(() => {});
-  const { rerender } = render(
-    <DesktopViewer assistantId="asst-1" viewOnly onExpand={onExpand} />,
-  );
+  const { rerender } = render(<DesktopViewer assistantId="asst-1" viewOnly />);
   await flush();
   act(() => rfb().emit("connect"));
   const node = document.createTextNode("selected text");
@@ -434,11 +465,7 @@ test("preview suppresses clipboard traffic and expands without reconnecting", as
   await flush();
   expect(written).toEqual([]);
   expect(rfb().pasted).toEqual([]);
-  fireEvent.click(screen.getByRole("button", { name: "Expand desktop" }));
-  expect(onExpand).toHaveBeenCalledTimes(1);
-  rerender(
-    <DesktopViewer assistantId="asst-1" viewOnly={false} onExpand={onExpand} />,
-  );
+  rerender(<DesktopViewer assistantId="asst-1" viewOnly={false} />);
   act(() => {
     rfb().emit("clipboard", { text: "remote text" });
     window.dispatchEvent(new Event("copy"));

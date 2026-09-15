@@ -11,9 +11,7 @@ import {
 
 import { client } from "@/generated/daemon/client.gen";
 
-import type { OpenDesktopSessionArgs } from "./desktop-session";
-
-const open = mock((_args: OpenDesktopSessionArgs) => ({
+const open = mock(() => ({
   close: mock(() => {}),
   setViewOnly: mock(() => {}),
 }));
@@ -111,21 +109,4 @@ test("older assistants keep their existing streaming flow without an install req
   mount();
   await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   expect(postCalls).toBe(0);
-});
-
-test("a ready inline preview stays read-only and forwards its expand action", async () => {
-  state = "ready";
-  const expand = mock(() => {});
-  render(
-    <QueryClientProvider client={queryClient}>
-      <DesktopPanel assistantId="assistant-123" viewOnly onExpand={expand} />
-    </QueryClientProvider>,
-  );
-  await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
-  const session = open.mock.calls[0]![0];
-  expect(session.viewOnly).toBe(true);
-  act(() => session.onState({ kind: "connected" }));
-  fireEvent.click(screen.getByRole("button", { name: "Expand desktop" }));
-  expect(expand).toHaveBeenCalledTimes(1);
-  expect(open).toHaveBeenCalledTimes(1);
 });

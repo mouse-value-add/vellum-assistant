@@ -94,8 +94,13 @@
     "earlierActivity": "更早的活动"
   },
   "assistantDesktop": {
-    "resizeAria": "调整桌面侧栏宽度",
-    "collapseAria": "收起桌面侧栏",
+    "fitView": "适应屏幕",
+    "panView": "平移",
+    "controlView": "控制",
+    "panHint": "拖动以平移，轻点以单击。",
+    "hideAria": "隐藏桌面",
+    "closeAria": "关闭桌面预览",
+    "moveAria": "移动桌面预览（方向键）",
     "expandAria": "展开桌面",
     "busy": "桌面正在被其他用户使用。",
     "connecting": "正在连接桌面…",
@@ -111,7 +116,6 @@
     "installingPackages": "正在安装桌面组件…",
     "installingChrome": "正在安装 Google Chrome…",
     "checkingInstall": "正在检查安装…",
-    "installBackground": "关闭此窗口后，安装仍会继续。",
     "installFailed": "安装失败。请重试以完成设置。",
     "setupRequestFailed": "无法检查桌面设置。请重新连接后重试。",
     "setupUnsupported": "桌面安装需要具有管理员权限的 Linux x64 或 ARM64 容器。",
@@ -1281,6 +1285,7 @@
     "defaultDescription": "连接 {name}，以便我能将其用于此任务。",
     "dismiss": "忽略",
     "missingDetails": "缺少助手或提供商详细信息。",
+    "tenantHostInvalid": "请输入有效的{label}，例如 {placeholder}",
     "thisAccount": "此账户",
     "waiting": "等待中...",
     "yourAssistant": "您的助手"
@@ -1602,10 +1607,6 @@
   },
   "singleActivity": {
     "webSearch": "网页搜索"
-  },
-  "skillCreatedCard": {
-    "view": "查看",
-    "viewAria": "查看 {name}"
   },
   "skillDetailPanel": {
     "actionsAria": "技能操作",
