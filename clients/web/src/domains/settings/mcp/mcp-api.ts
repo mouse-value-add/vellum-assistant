@@ -205,17 +205,6 @@ export async function pollMcpAuthStatus(
   };
 }
 
-export async function reloadMcpServers(assistantId: string): Promise<void> {
-  const { response } = await client.post({
-    url: "/v1/assistants/{assistant_id}/internal/mcp/reload" as "/v1/assistants/{assistant_id}/config",
-    path: { assistant_id: assistantId },
-    body: {} as Record<string, unknown>,
-  });
-  if (!response?.ok) {
-    throw new Error(`Failed to reload MCP servers: ${response?.status}`);
-  }
-}
-
 export async function cancelMcpAuth(
   assistantId: string,
   serverId: string,

@@ -165,9 +165,7 @@ const meta: Meta<typeof IntegrationsPage> = {
   decorators: [
     (Story) => (
       <QueryClientProvider client={queryClient}>
-        <div className="mx-auto max-w-3xl">
-          <Story />
-        </div>
+        <Story />
       </QueryClientProvider>
     ),
   ],

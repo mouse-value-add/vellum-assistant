@@ -11,7 +11,6 @@ import {
   addMcpServer,
   fetchMcpServers,
   fetchMcpToolsSummary,
-  reloadMcpServers,
   removeMcpServer,
   updateMcpServer,
 } from "./mcp-api";
@@ -117,14 +116,6 @@ export function useMcpConnections(assistantId: string) {
       );
     },
   });
-  const reload = useMutation({
-    mutationFn: () => reloadMcpServers(assistantId),
-    onSuccess: invalidate,
-    onError: (error) => {
-      captureError(error, { context: "mcp.reload" });
-      toast.error(t("mcpPage.toastReloadFailed"));
-    },
-  });
   const addCustom = (config: McpCustomConfig) => {
     if (config.autoAuth) {
       auth.connect(config.name, async () => {
@@ -167,7 +158,6 @@ export function useMcpConnections(assistantId: string) {
     add,
     save,
     remove,
-    reload,
     addCustom,
     addOpen,
     setAddOpen,

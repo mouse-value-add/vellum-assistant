@@ -19,8 +19,6 @@ describe("integration presentation", () => {
     ];
     const items = buildIntegrationItems([oauthProvider()], accounts, []);
     expect(items[0]?.connected).toBe(true);
-    expect(filterIntegrationItems(items, "", "connected")).toHaveLength(1);
-    expect(filterIntegrationItems(items, "", "available")).toHaveLength(0);
     expect(items[0]?.kind === "oauth" && items[0].connections).toEqual(
       accounts,
     );
@@ -42,7 +40,7 @@ describe("integration presentation", () => {
       [oauthConnection({ provider: "discord" })],
       [],
     );
-    expect(filterIntegrationItems(items, "other", "all")).toHaveLength(0);
+    expect(filterIntegrationItems(items, "other")).toHaveLength(0);
   });
 
   test("authoritative runtime state wins over a legacy connected status", () => {
@@ -52,7 +50,6 @@ describe("integration presentation", () => {
       [mcpServer({ lifecycleState: "connecting" })],
     );
     expect(items[0]?.connected).toBe(false);
-    expect(filterIntegrationItems(items, "", "available")).toHaveLength(1);
   });
 
   test("orders configured connections before available providers", () => {
@@ -62,7 +59,7 @@ describe("integration presentation", () => {
       [mcpServer({ id: "Zebra", lifecycleState: "error" })],
     );
     expect(
-      filterIntegrationItems(items, "", "all").map((item) => item.id),
+      filterIntegrationItems(items, "").map((item) => item.id),
     ).toEqual(["mcp:Zebra", "oauth:notion"]);
   });
 

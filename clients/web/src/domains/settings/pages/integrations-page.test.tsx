@@ -97,7 +97,6 @@ mock.module("@/domains/settings/mcp/mcp-api", () => ({
   addMcpServer: async () => {},
   updateMcpServer: async () => {},
   removeMcpServer: async () => {},
-  reloadMcpServers: async () => {},
   startMcpAuth: async () => ({}),
   pollMcpAuthStatus: async () => ({}),
   cancelMcpAuth: async () => ({}),

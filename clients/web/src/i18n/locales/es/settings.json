@@ -900,12 +900,7 @@
     "addCustom": "Añadir integración personalizada",
     "connectFailedToast": "No se pudo conectar {providerLabel}.",
     "connectFailedToastGeneric": "No se pudo conectar. Inténtalo de nuevo.",
-    "emptyFilter": "Ninguna integración coincide con este filtro.",
     "emptySearchSubtitle": "Ninguna integración coincide con \"{query}\"",
-    "filterAll": "Todas",
-    "filterAriaLabel": "Filtrar integraciones",
-    "filterAvailable": "Disponibles",
-    "filterConnected": "Conectadas",
     "loading": "Cargando...",
     "mcpUnavailable": "No se pudieron cargar las conexiones MCP. Las demás integraciones siguen disponibles.",
     "oauthErrorDenied": "Se denegó la autorización. Inténtalo de nuevo.",
@@ -1025,12 +1020,10 @@
     "urlPlaceholder": "https://example.com/mcp"
   },
   "mcpPage": {
-    "reloadButton": "Actualizar",
     "removeDialogConfirm": "Eliminar",
     "removeDialogMessage": "¿Seguro que quieres eliminar \"{serverId}\"? Esto desconectará todas las herramientas proporcionadas por este servidor.",
     "removeDialogTitle": "Eliminar servidor MCP",
     "setupPrompt": "Ayúdame a configurar un servidor MCP para ampliarte con herramientas externas.",
-    "toastReloadFailed": "No se pudieron recargar los servidores MCP",
     "toastRemoveFailed": "No se pudo eliminar {serverId}",
     "toastRemoved": "Se eliminó {serverId}"
   },

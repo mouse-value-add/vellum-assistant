@@ -6,7 +6,6 @@ import type { OauthProvidersGetResponse } from "@/generated/daemon/types.gen";
 import type { McpServerEntry } from "./mcp/mcp-api";
 import type { McpCatalogEntry } from "./mcp/mcp-catalog-api";
 
-export type IntegrationFilter = "all" | "connected" | "available";
 export type OAuthProvider = OauthProvidersGetResponse["providers"][number];
 
 export interface CatalogMethod {
@@ -219,23 +218,15 @@ export function buildIntegrationItems(
 export function filterIntegrationItems(
   items: IntegrationItem[],
   searchText: string,
-  filter: IntegrationFilter,
 ): IntegrationItem[] {
   const needle = searchText.trim().toLocaleLowerCase();
   return items
-    .filter((item) => {
-      if (filter === "connected" && !item.connected) {
-        return false;
-      }
-      if (filter === "available" && item.connected) {
-        return false;
-      }
-      return (
+    .filter(
+      (item) =>
         !needle ||
         item.name.toLocaleLowerCase().includes(needle) ||
-        item.description.toLocaleLowerCase().includes(needle)
-      );
-    })
+        item.description.toLocaleLowerCase().includes(needle),
+    )
     .sort(
       (a, b) =>
         Number(b.configured) - Number(a.configured) ||
