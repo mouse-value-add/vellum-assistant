@@ -108,7 +108,9 @@ Platform-hosted assistants retain managed callback registration and the existing
 Velay route-claim flow. Missing or disabled self-hosted ingress returns HTTP 422
 with `PUBLIC_INGRESS_NOT_CONFIGURED` or `PUBLIC_INGRESS_DISABLED`. The web client
 maps these codes to setup guidance and retains generic copy for unknown errors
-from older assistants. Saved connections and credentials are not migrated.
+from older assistants. The platform CLI preserves these errors; channel readiness
+and Telegram registration use the same self-hosted ingress prerequisite.
+Saved connections and credentials are not migrated.
 
 ## Acknowledgement boundaries
 
