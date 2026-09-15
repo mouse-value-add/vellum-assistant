@@ -37,7 +37,7 @@ modal manage installation; never install or start the desktop stack yourself.
 
 Use `assistant browser --desktop` for webpages in the streamed Chrome window.
 Use this skill for browser chrome, native dialogs, other applications, and
-whole-desktop screenshots. Load `assistant-desktop` for browser CLI guidance.
+whole-desktop screenshots. Run `assistant browser --help` for browser CLI guidance.
 
 1. Call `computer_use_observe` with `target: "assistant-desktop"`.
 2. Use the screenshot's pixel coordinates and latest `observation_id` for
