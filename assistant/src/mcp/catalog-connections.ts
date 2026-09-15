@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { loadRawConfig, saveRawConfig } from "../config/loader.js";
 import type { McpConfig } from "../config/schemas/mcp.js";
 import { reloadMcpServers } from "../daemon/mcp-reload-service.js";
+import { resolveOauthCallbackUrl } from "../inbound/oauth-callback-url.js";
 import {
   BadRequestError,
   InternalError,
@@ -56,6 +57,8 @@ export async function connectMcpCatalogEntry(
       "This integration's server definition is unavailable",
     );
   }
+
+  await resolveOauthCallbackUrl();
 
   const result = await withMcpConfigWrite(async () => {
     const raw = loadRawConfig();
