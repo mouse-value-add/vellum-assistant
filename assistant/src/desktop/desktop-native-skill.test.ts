@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 
 import { getBundledSkillsDir } from "../config/skills.js";
+import * as permissionChecker from "../permissions/checker.js";
+import { RiskLevel } from "../permissions/types.js";
 import { parseToolManifestFile } from "../skills/tool-manifest.js";
 import { computeSkillVersionHash } from "../skills/version-hash.js";
 import { resolveExecutionTarget } from "../tools/execution-target.js";
@@ -414,4 +416,50 @@ test("unsupported native observation features release the owner without touching
   expect(result.isError).toBe(true);
   expect(f.lease.getStatus().state).toBe("idle");
   expect(proxy).not.toHaveBeenCalled();
+});
+
+test("permission simulation passes the invocation target to the policy checker", async () => {
+  const { ROUTES } = await import("../runtime/routes/settings-routes.js");
+  const handler = ROUTES.find(
+    (route) => route.operationId === "tools_simulate_permission_post",
+  )!.handler;
+  const f = fixture();
+  registerSkillTools("computer-use", f.tools);
+  const classify = spyOn(permissionChecker, "classifyRisk").mockResolvedValue({
+    level: RiskLevel.Low,
+    reason: "Test classification",
+    matchType: "registry",
+    scopeOptions: [],
+  });
+  const check = spyOn(permissionChecker, "check").mockResolvedValue({
+    decision: "allow",
+    reason: "Test policy",
+  });
+  try {
+    for (const [input, expected] of [
+      [{ target: "assistant-desktop" }, "sandbox"],
+      [{ target: "connected-computer" }, "host"],
+      [{}, "host"],
+      [{ target: "invalid" }, "host"],
+    ] as const) {
+      await handler({
+        body: {
+          toolName: "computer_use_observe",
+          input,
+          workingDir: context.workingDir,
+        },
+      });
+      expect(check.mock.calls.at(-1)?.slice(0, 4)).toEqual([
+        "computer_use_observe",
+        input,
+        context.workingDir,
+        { executionTarget: expected, executionContext: "conversation" },
+      ]);
+    }
+    expect(f.started).not.toHaveBeenCalled();
+  } finally {
+    check.mockRestore();
+    classify.mockRestore();
+    unregisterSkillTools("computer-use");
+  }
 });
