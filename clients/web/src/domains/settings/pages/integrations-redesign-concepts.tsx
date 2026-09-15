@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   Plus,
   Puzzle,
-  RefreshCw,
   Search,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -453,16 +452,9 @@ function Toolbar({
         />
       ) : null}
       {compact ? null : (
-        <>
-          <Button variant="outlined" leftIcon={<Plus />}>
-            Add custom
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly={<RefreshCw />}
-            aria-label="Reload integrations"
-          />
-        </>
+        <Button variant="outlined" leftIcon={<Plus />}>
+          Add custom
+        </Button>
       )}
     </div>
   );
@@ -890,16 +882,9 @@ export function ConceptOverviewColumns() {
             act across them.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="primary" leftIcon={<Plus />}>
-            Add custom
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly={<RefreshCw />}
-            aria-label="Reload integrations"
-          />
-        </div>
+        <Button variant="primary" leftIcon={<Plus />}>
+          Add custom
+        </Button>
       </header>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatSquare
