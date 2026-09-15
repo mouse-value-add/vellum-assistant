@@ -244,12 +244,12 @@ export const McpOAuthHint: Story = {
   args: { plan: buildConnectPlan(item("catalog:[\"fathom\",\"fathom\"]"), PLATFORM_HOSTED) },
 };
 
-/** MCP catalog entry with admin preconditions, surfaced as a warning. */
+/** Admin preconditions exist for Ashby but stay out of the way until a connect fails. */
 export const McpOAuthRequirements: Story = {
   args: { plan: buildConnectPlan(item("catalog:[\"ashby\",\"ashby\"]"), PLATFORM_HOSTED) },
 };
 
-/** Instructions that mix guidance and a requirement split into both. */
+/** Mixed instructions: the guidance sentence shows, the precondition waits for a failure. */
 export const McpOAuthMixed: Story = {
   args: { plan: buildConnectPlan(item("catalog:[\"stripe\",\"stripe\"]"), PLATFORM_HOSTED) },
 };
@@ -304,6 +304,7 @@ export const SignInWindowClosed: Story = {
   },
 };
 
+/** A failure lists the provider preconditions as the likely causes. */
 export const ConnectFailed: Story = {
   args: {
     plan: buildConnectPlan(item("catalog:[\"ashby\",\"ashby\"]"), PLATFORM_HOSTED),

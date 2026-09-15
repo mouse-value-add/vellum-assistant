@@ -318,26 +318,11 @@ function MethodBody({
           {t("integrationConnect.unsupportedNotice", { name })}
         </Notice>
       ) : null}
-      {method.requirements.length > 0 ? (
-        <Notice
-          tone="warning"
-          title={t("integrationConnect.requirementsTitle")}
-        >
-          {method.requirements.length === 1 ? (
-            method.requirements[0]
-          ) : (
-            <ul className="list-disc space-y-1 pl-4">
-              {method.requirements.map((requirement) => (
-                <li key={requirement}>{requirement}</li>
-              ))}
-            </ul>
-          )}
-        </Notice>
-      ) : null}
       {attempt ? (
         <AttemptNotice
           name={name}
           attempt={attempt}
+          requirements={method.requirements}
           onCancel={onCancelAttempt}
           onRetry={onRetryAttempt}
         />
@@ -361,14 +346,22 @@ function MethodBody({
   );
 }
 
+/**
+ * In-flight and failed states for the method on screen. Provider
+ * preconditions (an admin has to enable MCP, a plan tier is required) only
+ * surface here, after a failure, as the likely causes. Up front they are
+ * noise for the many users they do not apply to.
+ */
 function AttemptNotice({
   name,
   attempt,
+  requirements,
   onCancel,
   onRetry,
 }: {
   name: string;
   attempt: ConnectAttempt;
+  requirements: string[];
   onCancel: () => void;
   onRetry: () => void;
 }) {
@@ -411,7 +404,19 @@ function AttemptNotice({
         </div>
       }
     >
-      {message}
+      <div className="space-y-2">
+        <p>{message}</p>
+        {failed && requirements.length > 0 ? (
+          <div className="space-y-1 text-body-small-default">
+            <p>{t("integrationConnect.failureCauses")}</p>
+            <ul className="list-disc space-y-1 pl-4">
+              {requirements.map((requirement) => (
+                <li key={requirement}>{requirement}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
     </Notice>
   );
 }
