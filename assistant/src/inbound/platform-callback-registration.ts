@@ -222,8 +222,8 @@ export async function registerLocalWebhookRoute(
  *
  *   1. **Platform pods** (`IS_PLATFORM`) with the `velay-webhooks` flag off
  *      always register with the platform gateway. With the flag on, they try
- *      the direct supplier first — the gateway's Velay client publishes the
- *      tunnel URL into `ingress.publicBaseUrl` — and fall back to platform
+ *      the direct supplier first (the gateway's Velay client publishes the
+ *      tunnel URL into `ingress.publicBaseUrl`) and fall back to platform
  *      registration on any failure, including an explicit
  *      `ingress.enabled: false`: a pod owner toggling that flag must not
  *      lose webhooks entirely. The subpath is claimed on the gateway before
@@ -236,10 +236,8 @@ export async function registerLocalWebhookRoute(
  *
  * Off a pod, an explicit `ingress.enabled: false` is a decision not to accept
  * inbound webhooks at all, so `PublicIngressDisabledError` propagates instead
- * of being routed around. Ingress precedes the platform fallback because any
- * logged-in local assistant holds platform credentials for the LLM proxy:
- * treating credential presence as "managed" would silently reroute an
- * explicitly configured self-hosted callback through the platform.
+ * of being routed around. Platform credentials alone do not make a
+ * self-hosted assistant reachable for callbacks.
  *
  * The `directUrl` parameter is a **lazy supplier** (a function returning a
  * string). This is necessary because

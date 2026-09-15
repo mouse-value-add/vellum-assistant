@@ -104,6 +104,26 @@ describe("catalog connection identity", () => {
     expect(publish).toHaveBeenCalledTimes(1);
   });
 
+  test("reuses a saved connection when callback registration is unavailable", async () => {
+    const first = await connectMcpCatalogEntry(request);
+    const before = loadRawConfig();
+    callback.mockReset();
+    callback.mockImplementation(async () => {
+      throw new Error("Callback unavailable");
+    });
+    reload.mockClear();
+    publish.mockClear();
+
+    expect(await connectMcpCatalogEntry(request)).toEqual({
+      serverId: first.serverId,
+      created: false,
+    });
+    expect(callback).not.toHaveBeenCalled();
+    expect(loadRawConfig()).toEqual(before);
+    expect(reload).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   test("rejects stale definitions and unknown catalog identities before writing", async () => {
     await expect(
       connectMcpCatalogEntry({ ...request, definitionDigest: "0".repeat(64) }),

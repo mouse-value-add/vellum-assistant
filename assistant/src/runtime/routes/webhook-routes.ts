@@ -226,7 +226,7 @@ export const ROUTES: RouteDefinition[] = [
     },
     summary: "Register a webhook callback URL",
     description:
-      "Resolves a stable callback URL for a webhook type. On platform-managed assistants, registers the route with the platform gateway. Otherwise uses the configured ingress.publicBaseUrl, falling back to the platform gateway when no ingress is configured and the assistant is connected to the platform.",
+      "Resolves a stable callback URL for a webhook type. Platform-managed assistants use managed routing. Self-hosted assistants require an enabled public ingress URL; missing or disabled ingress returns a 422 setup error.",
     tags: ["webhooks"],
     requestBody: WebhooksRegisterRequestSchema,
     responseBody: WebhooksRegisterResponseSchema,
