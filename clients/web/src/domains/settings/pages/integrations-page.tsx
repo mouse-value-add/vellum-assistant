@@ -39,7 +39,7 @@ import { useMcpConnections } from "../mcp/use-mcp-connections";
 type SettingsTranslate = ReturnType<typeof useTranslation<"settings">>["t"];
 
 const CONNECTED_GRID =
-  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(22rem,1fr))]";
+  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(28rem,1fr))]";
 const AVAILABLE_GRID =
   "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]";
 
