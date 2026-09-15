@@ -4209,6 +4209,8 @@ paths:
                   minLength: 1
                 desktop:
                   type: boolean
+                browserMode:
+                  type: string
                 tabId:
                   type: number
                 url:

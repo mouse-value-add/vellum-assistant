@@ -1,3 +1,4 @@
+import { resolveTurnClientOs } from "../../daemon/conversation-client-surface.js";
 import { findConversation } from "../../daemon/conversation-registry.js";
 import type { ToolContext } from "../../tools/types.js";
 import { resolveActorPrincipalIdForLocalGuardian } from "../local-actor-identity.js";
@@ -28,7 +29,7 @@ export async function resolveBrowserContext(
       ? conversationId!
       : browserCliConversationKey(sessionId),
     trustClass: conversation?.trustContext?.trustClass ?? "unknown",
-    transportInterface: conversation?.transportInterface,
+    ...(conversation ? resolveTurnClientOs(conversation) : {}),
     sourceActorPrincipalId: actor,
     signal: signals.length ? AbortSignal.any(signals) : undefined,
   };

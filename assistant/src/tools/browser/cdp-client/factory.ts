@@ -1,3 +1,4 @@
+import { isNativeBrowserClient } from "../../../browser/client-surface.js";
 import {
   type BrowserBackend,
   BrowserSessionManager,
@@ -556,7 +557,7 @@ export function buildCandidateList(
     );
   }
 
-  // 2. cdp-inspect -- opt-in via config OR desktop-auto for macOS turns.
+  // 2. cdp-inspect -- opt-in via config or desktop-auto for native clients.
   const cdpInspectConfig = getConfig().hostBrowser.cdpInspect;
   if (cdpInspectConfig.enabled) {
     // Explicitly enabled in config -- always include regardless of platform.
@@ -579,10 +580,10 @@ export function buildCandidateList(
       },
     });
   } else if (
-    context.transportInterface === "macos" &&
+    isNativeBrowserClient(context) &&
     cdpInspectConfig.desktopAuto.enabled
   ) {
-    // macOS desktop-auto: include cdp-inspect as a candidate unless
+    // Native desktop-auto: include cdp-inspect as a candidate unless
     // the cooldown from a recent failure is still active. The extension
     // candidate is already first in the list, so it wins when connected.
     const { cooldownMs } = cdpInspectConfig.desktopAuto;
@@ -598,7 +599,7 @@ export function buildCandidateList(
     } else {
       candidates.push({
         kind: "cdp-inspect",
-        reason: "desktopAuto: macOS turn, cdp-inspect auto-attempted",
+        reason: "desktopAuto: native client, cdp-inspect auto-attempted",
         create() {
           const client = createCdpInspectClient(conversationId, {
             host: cdpInspectConfig.host,

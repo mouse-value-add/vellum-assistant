@@ -699,3 +699,24 @@ describe("streamed desktop routing", () => {
     expect(lastIpcCall).toBeNull();
   });
 });
+
+test.each([
+  { args: ["list"] },
+  { args: ["select", "--tab-id", "1"] },
+  { args: ["new", "--url", "https://example.com"] },
+  { args: ["close", "--tab-id", "1"] },
+])(
+  "tab command $args forwards an explicit backend override",
+  async ({ args }) => {
+    mockIpcResult = { ok: true, result: { ok: true, tabs: [] } };
+    await runCommand([
+      "browser",
+      "--browser-mode",
+      "extension",
+      "tabs",
+      ...args,
+    ]);
+    expect(lastIpcCall?.method).toBe("browser_tabs");
+    expect(lastBody().browserMode).toBe("extension");
+  },
+);

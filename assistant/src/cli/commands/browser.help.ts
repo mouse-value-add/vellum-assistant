@@ -123,6 +123,13 @@ export const browserHelp: CliCommandHelp = {
   ],
   helpText: `
 Browser operations are executed through the running assistant.
+In the web client, automatic selection prefers the streamed desktop Chrome
+when its feature is enabled, installation is ready and the conversation has
+an identified guardian. In the macOS and Windows apps, it prefers the user's
+Chrome through the connected extension or desktop bridge. Existing browser
+sessions and explicit --browser-mode / --target-client-id choices take priority.
+--browser-mode local (alias playwright) means the assistant's Playwright browser,
+not the user's Chrome. Use --desktop to choose streamed Chrome from any client.
 Use --desktop for the Chrome window in the Desktop modal. This requires
 an identified guardian conversation and respects Take control in that modal.
 Start with assistant browser --desktop status. The desktop feature flag and

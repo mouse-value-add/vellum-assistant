@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 
+import { shouldUseDesktopBrowser } from "../../browser/desktop-target.js";
 import { executeBrowserOperation } from "../../browser/operations.js";
 import {
   BROWSER_OPERATIONS,
@@ -73,7 +74,7 @@ async function handleBrowserExecute({
     headers,
     abortSignal,
   );
-  const execute = desktop
+  const execute = shouldUseDesktopBrowser(desktop, input, context)
     ? executeDesktopBrowserOperation
     : executeBrowserOperation;
   const result = await execute(operation as BrowserOperation, input, context);

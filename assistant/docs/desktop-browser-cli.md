@@ -2,6 +2,8 @@
 
 `assistant browser --desktop` uses the browser CLI's shared operation handlers against the Chrome process owned by `DesktopSessionManager`. It requires the `assistant-desktop` flag, completed automatic desktop installation and an identified guardian conversation. Availability is checked before starting or reusing control and after asynchronous startup; loss of the flag or installation readiness cancels active control. Browser commands do not trigger installation. The persistent profile remains `data/desktop-profile`; no data migration or extension installation is required.
 
+Automatic browser selection in web conversations uses the streamed Chrome when the desktop flag is enabled, installation is ready, and the actor is an identified guardian. The macOS and Windows apps prefer the user's Chrome through the extension or host bridge, with direct CDP and then Playwright as the existing fallbacks. Their shared renderer reports a `web` transport, so selection also reads the active turn's frozen `clientOs`; it does not change transport identity or host capability checks. Explicit `--desktop`, `--browser-mode`, `--target-client-id` and active-tab requests override the default. Existing personal-browser sessions and tab pins remain on their selected browser. Tab commands use the same streamed-browser default as page commands. `--browser-mode local` selects assistant-side Playwright, not the user's Chrome.
+
 ```mermaid
 flowchart LR
   CLI[assistant browser --desktop] --> IPC[Existing browser IPC routes]

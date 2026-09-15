@@ -356,6 +356,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "list").action(async (opts: { pretty?: boolean }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -382,6 +383,9 @@ export function registerBrowserCommand(program: Command): void {
               command: "list",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
             },
@@ -428,6 +432,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "select").action(async (opts: { tabId: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -445,6 +450,9 @@ export function registerBrowserCommand(program: Command): void {
               command: "select",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               tabId,
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
@@ -477,6 +485,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "new").action(async (opts: { url?: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -497,6 +506,9 @@ export function registerBrowserCommand(program: Command): void {
               command: "new",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               ...(opts.url ? { url: opts.url } : {}),
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
@@ -535,6 +547,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "close").action(async (opts: { tabId: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -556,6 +569,9 @@ export function registerBrowserCommand(program: Command): void {
               command: "close",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               tabId,
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
