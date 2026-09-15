@@ -28,6 +28,8 @@ export class DesktopBrowserClient {
   private nextTab = 1;
   private held = new Map<string, HeldInput>();
   private conversation?: string;
+  private cursorPositions = new Map<string, { x: number; y: number }>();
+  private cursorRestored: Promise<void> = Promise.resolve();
   generation = 0;
 
   constructor(
@@ -59,6 +61,21 @@ export class DesktopBrowserClient {
       }
       this.transport = transport;
       transport.addEventListener((event) => {
+        if (event.method === "Page.domContentEventFired" && event.sessionId) {
+          const sessionId = event.sessionId;
+          this.cursorRestored = this.cursorRestored.then(async () => {
+            const position = this.cursorPositions.get(sessionId);
+            if (this.transport === transport && position) {
+              await this.drawCursor(
+                transport,
+                sessionId,
+                position.x,
+                position.y,
+                AbortSignal.timeout(3_000),
+              );
+            }
+          });
+        }
         if (
           [
             "Page.frameNavigated",
@@ -72,6 +89,9 @@ export class DesktopBrowserClient {
         }
         if (event.method === "Target.detachedFromTarget") {
           const detached = (event.params as { sessionId?: string })?.sessionId;
+          if (detached) {
+            this.cursorPositions.delete(detached);
+          }
           for (const [target, session] of this.sessions) {
             if (session === detached) {
               this.sessions.delete(target);
@@ -249,21 +269,15 @@ export class DesktopBrowserClient {
     const sessionId =
       (targetId && this.sessions.get(targetId)) ||
       (await this.session(transport, signal));
-    if (
+    const pointer =
       method === "Input.dispatchMouseEvent" &&
       typeof params.x === "number" &&
       typeof params.y === "number"
-    ) {
-      await transport
-        .send(
-          "Runtime.evaluate",
-          {
-            expression: desktopCursorExpression(params.x, params.y),
-            awaitPromise: true,
-          },
-          { sessionId, signal },
-        )
-        .catch(() => {});
+        ? { x: params.x, y: params.y }
+        : undefined;
+    if (pointer) {
+      await this.drawCursor(transport, sessionId, pointer.x, pointer.y, signal);
+      this.cursorPositions.set(sessionId, pointer);
       signal.throwIfAborted();
     }
     if (method.startsWith("Input.") && generation !== this.generation) {
@@ -300,6 +314,19 @@ export class DesktopBrowserClient {
       if (params.type === "keyUp" || params.type === "mouseReleased") {
         this.held.delete(key);
       }
+      if (
+        pointer &&
+        params.type === "mouseReleased" &&
+        generation === this.generation
+      ) {
+        await this.drawCursor(
+          transport,
+          sessionId,
+          pointer.x,
+          pointer.y,
+          signal,
+        );
+      }
       return result;
     } catch (error) {
       if (
@@ -324,7 +351,28 @@ export class DesktopBrowserClient {
     }
   }
 
+  private async drawCursor(
+    transport: CdpWsTransport,
+    sessionId: string,
+    x: number,
+    y: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await transport
+      .send(
+        "Runtime.evaluate",
+        {
+          expression: desktopCursorExpression(x, y),
+          awaitPromise: true,
+        },
+        { sessionId, signal },
+      )
+      .catch(() => {});
+  }
+
   async release(): Promise<void> {
+    this.cursorPositions.clear();
+    await this.cursorRestored;
     if (!this.transport) {
       return;
     }
@@ -382,5 +430,6 @@ export class DesktopBrowserClient {
     this.selected = undefined;
     this.held.clear();
     this.conversation = undefined;
+    this.cursorPositions.clear();
   }
 }

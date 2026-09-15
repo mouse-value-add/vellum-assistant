@@ -10,8 +10,12 @@ export function desktopCursorExpression(x: number, y: number): string {
       cursor = document.createElement('div');
       cursor.setAttribute('data-vellum-desktop-cursor', '');
       cursor.setAttribute('aria-hidden', 'true');
-      cursor.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:24px;height:30px;pointer-events:none;z-index:2147483647;';
+      cursor.setAttribute('popover', 'manual');
+      cursor.style.cssText = 'all:initial;position:fixed;inset:auto;left:0;top:0;margin:0;padding:0;border:0;width:24px;height:30px;pointer-events:none;z-index:2147483647;';
       const shadow = cursor.attachShadow({mode:'closed'});
+      const style = document.createElement('style');
+      style.textContent = ':host::backdrop{pointer-events:none;background:transparent}';
+      shadow.append(style);
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('width', '24');
       svg.setAttribute('height', '30');
@@ -25,6 +29,8 @@ export function desktopCursorExpression(x: number, y: number): string {
       shadow.append(svg);
       document.documentElement.append(cursor);
     }
+    if (cursor.matches(':popover-open')) { cursor.hidePopover(); }
+    cursor.showPopover();
     const destination = 'translate(${x}px, ${y}px)';
     if (cursor.style.transform === destination) { return; }
     const animation = cursor.animate([{transform:cursor.style.transform || destination},{transform:destination}], {duration:100,easing:'ease-out'});
