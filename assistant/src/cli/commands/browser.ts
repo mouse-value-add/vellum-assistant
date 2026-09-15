@@ -28,6 +28,8 @@ import { registerCommand } from "../lib/register-command.js";
 import { log } from "../logger.js";
 import { browserHelp, toKebab } from "./browser.help.js";
 
+const BROWSER_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
 // ── Naming helpers ───────────────────────────────────────────────────
 
 /**
@@ -166,9 +168,7 @@ function attachOperationAction(
       }
     }
 
-    // Browser operations can be long-running (page loads, auth
-    // challenges, downloads up to 120s, etc.), so use a generous
-    // IPC timeout that exceeds any server-side operation timeout.
+    // First use can include virtual desktop installation and Chrome startup.
     const ipcResult = await cliIpcCall<BrowserExecuteResult>(
       "browser_execute",
       {
@@ -180,7 +180,7 @@ function attachOperationAction(
           ...(conversationId ? { conversationId } : {}),
         },
       },
-      { timeoutMs: 180_000 },
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
     );
 
     if (!ipcResult.ok) {
@@ -394,7 +394,7 @@ export function registerBrowserCommand(program: Command): void {
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -462,7 +462,7 @@ export function registerBrowserCommand(program: Command): void {
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -518,7 +518,7 @@ export function registerBrowserCommand(program: Command): void {
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -581,7 +581,7 @@ export function registerBrowserCommand(program: Command): void {
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {

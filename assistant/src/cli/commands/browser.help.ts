@@ -136,11 +136,12 @@ Existing sessions and explicit backend/client choices take priority.
 --browser-mode local (alias playwright) means the assistant's Playwright browser,
 not the user's Chrome. --desktop remains an alias for --virtual-desktop.
 Use --virtual-desktop for Chrome in the Virtual desktop panel. It respects
-Take control in that panel. Start with assistant browser --virtual-desktop status.
+Take control in that panel. Run navigate --url <url> directly to open a page.
 The assistant-desktop feature flag and completed installation are required.
-The first browser command starts installation automatically if needed. If setup
-is running, wait and retry the command once ready. Opening the Virtual desktop
-panel also starts installation and shows progress.
+The first browser command installs missing components, starts Chrome, and completes
+the requested action in one call. Allow up to 600 seconds for this command when
+using bash (timeout_seconds: 600). Opening the Virtual desktop panel also starts
+the same installation and shows progress. No separate setup command is needed.
 Report other availability errors without switching to a personal computer.
 The assistant manages Chrome startup. Do not launch a separate desktop stack,
 install desktop packages, or drive webpages with shell-level xdotool.

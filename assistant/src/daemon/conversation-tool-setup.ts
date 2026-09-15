@@ -7,6 +7,7 @@
  */
 
 import type { AssistantEvent } from "../api/index.js";
+import { shouldUseVirtualDesktopBrowser } from "../browser/virtual-desktop-target.js";
 import {
   type HostProxyCapability,
   supportsHostProxy,
@@ -1129,6 +1130,30 @@ export function createResolveToolsCallback(
       ...scopedWorkspaceDefs,
       ...scopedMcpDefs,
     ].filter((d) => !excluded.has(d.name));
+    if (
+      ctx.transportInterface === "web" &&
+      shouldUseVirtualDesktopBrowser(
+        undefined,
+        {},
+        {
+          workingDir: ctx.workingDir,
+          conversationId: ctx.conversationId,
+          trustClass: ctx.trustContext?.trustClass ?? "unknown",
+          transportInterface: ctx.transportInterface,
+          clientOs: resolveTurnClientOs(ctx).clientOs,
+          sourceActorPrincipalId: ctx.getTurnActorPrincipalId?.(),
+        },
+      )
+    ) {
+      allBaseDefs = allBaseDefs.map((definition) =>
+        definition.name === "bash"
+          ? {
+              ...definition,
+              description: `${definition.description} For browser tasks, use assistant browser navigate --url <url> directly. It installs the virtual desktop if needed, starts Chrome, and completes the action in one call. Use timeout_seconds: ${getConfig().timeouts.shellMaxTimeoutSec} for first use; setup progress is visible in the Virtual desktop panel. Use assistant browser --help for other browser actions. Use this managed path even if saved notes describe manual setup. Do not install packages or launch Chrome, X servers, or screenshot scripts yourself.`,
+            }
+          : definition,
+      );
+    }
     // Activation-rail conversations carry the optional `activation_moment`
     // telemetry param on ui_show. The marker is written before the first
     // tool resolution (see `applyBootstrapTemplate` in system-prompt.ts), so
