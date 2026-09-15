@@ -22,6 +22,7 @@ import {
   allocateDesktopDebugPort,
   desktopChromeArguments,
   discoverDesktopBrowser,
+  findDesktopBrowserPid,
 } from "./desktop-browser-endpoint.js";
 import { writeDesktopChromePolicy } from "./desktop-chrome-policy.js";
 import {
@@ -229,10 +230,32 @@ export class DesktopSessionManager {
     if (!this.automation) {
       throw new Error("Desktop browser requires the desktop control lease");
     }
-    await this.ensureBrowser(this.childEnv(), this.generation);
-    const child = this.children.get("browser");
+    const generation = this.generation;
+    const owner = this.automation;
+    let child = this.children.get("browser");
+    let pid = child?.pid;
+    if (!pid && this.debugPort) {
+      pid = await findDesktopBrowserPid(
+        await this.resolveChromePath(),
+        this.profileDir,
+        this.debugPort,
+      );
+    }
+    if (this.generation !== generation || this.automation !== owner) {
+      throw new Error("Desktop Chrome session changed. Observe again.");
+    }
+    signal.throwIfAborted();
+    if (!pid) {
+      await this.ensureBrowser(this.childEnv(), generation);
+      child = this.children.get("browser");
+      pid = child?.pid;
+    }
     const port = this.debugPort;
-    if (!child || !port) {
+    const isCurrent = () =>
+      this.generation === generation &&
+      this.automation === owner &&
+      (!child || this.children.get("browser") === child);
+    if (!pid || !port) {
       throw new Error(
         "Desktop Chrome is unavailable. Open the Desktop modal to inspect it, then retry the browser command.",
       );
@@ -241,20 +264,16 @@ export class DesktopSessionManager {
     const deadline = Date.now() + 5_000;
     while (true) {
       signal.throwIfAborted();
-      if (this.children.get("browser") !== child || !this.automation) {
+      if (!isCurrent()) {
         throw new Error("Desktop Chrome session changed. Observe again.");
       }
       try {
-        const url = await discoverDesktopBrowser(child.pid, port, signal);
+        const url = await discoverDesktopBrowser(pid, port, signal);
         const transport = await connectCdpWsTransport(url, {
           signal,
           connectTimeoutMs: 3000,
         });
-        if (
-          this.children.get("browser") !== child ||
-          !this.automation ||
-          signal.aborted
-        ) {
+        if (!isCurrent() || signal.aborted) {
           transport.dispose();
           throw new Error("Desktop Chrome session changed. Observe again.");
         }

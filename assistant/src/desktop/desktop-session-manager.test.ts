@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 
 import { waitFor } from "../__tests__/helpers/wait-for.js";
 import { sleep } from "../util/retry.js";
@@ -19,6 +19,7 @@ import {
   newViewer,
   settle,
 } from "./__tests__/fake-desktop.js";
+import * as browserEndpoint from "./desktop-browser-endpoint.js";
 import {
   DESKTOP_VNC_PORT,
   type DesktopChildRole,
@@ -762,3 +763,43 @@ describe("desktop automation lifecycle", () => {
     );
   });
 });
+
+test.each([undefined, 4321])(
+  "browser control uses the reopened dock PID %s or launches Chrome when absent",
+  async (dockPid) => {
+    const h = newManager({ exitOnTerm: true });
+    const owner = newViewer().viewer;
+    h.manager.acquireViewerSlot(owner);
+    await h.manager.ensureDesktopRunning();
+    await settle();
+    h.child("browser").exit(0);
+    await settle();
+    h.manager.acquireAutomationSlot(owner);
+    const abort = new AbortController();
+    const find = spyOn(
+      browserEndpoint,
+      "findDesktopBrowserPid",
+    ).mockResolvedValue(dockPid);
+    const discover = spyOn(
+      browserEndpoint,
+      "discoverDesktopBrowser",
+    ).mockImplementation(async () => {
+      abort.abort();
+      throw new Error("Reached verified discovery");
+    });
+    try {
+      await expect(
+        h.manager.browser.client("conv-123", abort.signal),
+      ).rejects.toThrow("Reached verified discovery");
+      expect(h.count("browser")).toBe(dockPid ? 1 : 2);
+      expect(discover.mock.calls[0]?.[0]).toBe(
+        dockPid ?? h.child("browser").pid,
+      );
+      expect(find).toHaveBeenCalledTimes(1);
+    } finally {
+      find.mockRestore();
+      discover.mockRestore();
+      await h.manager.destroy();
+    }
+  },
+);
