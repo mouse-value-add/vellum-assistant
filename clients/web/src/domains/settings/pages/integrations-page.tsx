@@ -2,10 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@vellumai/design-library/components/button";
 import { Input } from "@vellumai/design-library/components/input";
 import { Notice } from "@vellumai/design-library/components/notice";
-import { Select } from "@vellumai/design-library/components/select";
 import { toast } from "@vellumai/design-library/components/toast";
-import { Loader2, Plus, RefreshCw, Search } from "lucide-react";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Loader2, Plus, Search } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { useActiveAssistantId } from "@/assistant/use-active-assistant-id";
@@ -21,13 +20,14 @@ import { routes } from "@/utils/routes";
 
 import { IntegrationDetailModal } from "../components/integration-detail-modal";
 import { IntegrationMethodsModal } from "../components/integration-methods-modal";
+import type { IntegrationListLayout } from "../components/integration-list-row";
 import { IntegrationRow } from "../components/integration-row";
 import {
   catalogDefinitionKey,
   catalogMethodServers,
   buildIntegrationItems,
   filterIntegrationItems,
-  type IntegrationFilter,
+  type IntegrationItem,
 } from "../integration-items";
 import type { McpCatalogEntry } from "../mcp/mcp-catalog-api";
 import { CatalogIntegrationRow } from "../mcp/catalog-integration-row";
@@ -37,6 +37,35 @@ import { McpServerCard } from "../mcp/mcp-server-card";
 import { useMcpConnections } from "../mcp/use-mcp-connections";
 
 type SettingsTranslate = ReturnType<typeof useTranslation<"settings">>["t"];
+
+const CONNECTED_GRID =
+  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(22rem,1fr))]";
+const AVAILABLE_GRID =
+  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]";
+
+function IntegrationSection({
+  title,
+  count,
+  gridClassName,
+  children,
+}: {
+  title: string;
+  count: number;
+  gridClassName: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <h2 className="flex items-center gap-2 text-title-small text-[var(--content-default)]">
+        {title}
+        <span className="text-body-medium-lighter text-[var(--content-tertiary)]">
+          {count}
+        </span>
+      </h2>
+      <div className={gridClassName}>{children}</div>
+    </section>
+  );
+}
 
 function oauthErrorMessage(
   t: SettingsTranslate,
@@ -61,8 +90,6 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
   const allowAdd = useAssistantFeatureFlagStore.use.mcpAddServer();
   const flagsHydrated = useAssistantFeatureFlagStore.use.hasHydrated();
   const [searchText, setSearchText] = useState("");
-  const [selectedFilter, setSelectedFilter] =
-    useState<IntegrationFilter>("all");
   const [selectedProviderKey, setSelectedProviderKey] = useState<string | null>(
     searchParams.get("provider"),
   );
@@ -128,9 +155,11 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
     [providers.data, connections.data, mcp.list.data, mcp.catalog.data],
   );
   const items = useMemo(
-    () => filterIntegrationItems(allItems, searchText, selectedFilter),
-    [allItems, searchText, selectedFilter],
+    () => filterIntegrationItems(allItems, searchText),
+    [allItems, searchText],
   );
+  const connectedItems = items.filter((item) => item.configured);
+  const availableItems = items.filter((item) => !item.configured);
   const selectedItem = allItems.find((item) => item.id === selectedItemId);
   const selectedProvider = providers.data?.find(
     (provider) => provider.provider_key === selectedProviderKey,
@@ -161,9 +190,70 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
     }
   };
 
+  const renderItem = (item: IntegrationItem, layout: IntegrationListLayout) => {
+    if (item.kind === "oauth") {
+      return (
+        <IntegrationRow
+          key={item.id}
+          layout={layout}
+          providerKey={item.provider.provider_key}
+          displayName={item.name}
+          description={item.provider.description}
+          logoUrl={item.provider.logo_url}
+          connections={item.connections}
+          mcpServers={catalogMethodServers(item.methods)}
+          disabled={
+            !orgReady ||
+            (item.methods.length === 0 &&
+              platformGate === "full" &&
+              !platformAssistantId)
+          }
+          onConfigure={() =>
+            item.methods.length > 0
+              ? setSelectedItemId(item.id)
+              : setSelectedProviderKey(item.provider.provider_key)
+          }
+        />
+      );
+    }
+    if (item.kind === "catalog") {
+      return (
+        <CatalogIntegrationRow
+          key={item.id}
+          layout={layout}
+          method={item.method}
+          connections={mcp}
+          onOpen={() => setSelectedItemId(item.id)}
+          onConnect={() => connectCatalog(item.method.definition)}
+        />
+      );
+    }
+    return (
+      <McpServerCard
+        key={item.id}
+        server={item.server}
+        displayName={mcp.serverInstanceDisplayName(item.server.id)}
+        onRemove={mcp.setRemoveServerId}
+        onConfigure={mcp.setConfigureServerId}
+        onAuthenticate={mcp.connectServer}
+        onManagePlugin={(pluginName) =>
+          navigate(
+            pluginName
+              ? `${routes.plugins}/${encodeURIComponent(pluginName)}`
+              : routes.plugins,
+          )
+        }
+        isAuthenticating={
+          mcp.auth.attempt?.serverId === item.server.id && authBusy
+        }
+        connectDisabled={!orgReady || authBusy}
+      />
+    );
+  };
+
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="flex flex-wrap items-center gap-2">
         <Input
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
@@ -171,28 +261,9 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
           aria-label={t("integrationsPage.searchAriaLabel")}
           leftIcon={<Search aria-hidden className="size-4" />}
           className="min-h-11"
+          wrapperClassName="min-w-64 max-w-xl flex-1"
           fullWidth
         />
-        <Select<IntegrationFilter>
-          options={[
-            { value: "all", label: t("integrationsPage.filterAll") },
-            {
-              value: "connected",
-              label: t("integrationsPage.filterConnected"),
-            },
-            {
-              value: "available",
-              label: t("integrationsPage.filterAvailable"),
-            },
-          ]}
-          value={selectedFilter}
-          onChange={setSelectedFilter}
-          aria-label={t("integrationsPage.filterAriaLabel")}
-          menuAlign="end"
-          className="[&>button]:min-h-11"
-        />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
           variant="outlined"
           className="min-h-11"
@@ -202,19 +273,6 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
         >
           {t("integrationsPage.addCustom")}
         </Button>
-        <Button
-          variant="ghost"
-          className="min-h-11 min-w-11"
-          iconOnly={
-            <RefreshCw
-              className={mcp.reload.isPending ? "animate-spin" : undefined}
-            />
-          }
-          aria-label={t("mcpPage.reloadButton")}
-          tooltip={t("mcpPage.reloadButton")}
-          disabled={!orgReady || mcp.reload.isPending}
-          onClick={() => mcp.reload.mutate()}
-        />
       </div>
       {oauthError ? (
         <Notice tone="warning">{t("integrationsPage.oauthUnavailable")}</Notice>
@@ -253,67 +311,31 @@ function IntegrationsPanelInner({ assistantId }: { assistantId: string }) {
           {t("integrationsPage.loading")}
         </div>
       ) : null}
-      <div className="space-y-2">
-        {items.map((item) =>
-          item.kind === "oauth" ? (
-            <IntegrationRow
-              key={item.id}
-              providerKey={item.provider.provider_key}
-              displayName={item.name}
-              description={item.provider.description}
-              logoUrl={item.provider.logo_url}
-              connections={item.connections}
-              mcpServers={catalogMethodServers(item.methods)}
-              disabled={
-                !orgReady ||
-                (item.methods.length === 0 &&
-                  platformGate === "full" &&
-                  !platformAssistantId)
-              }
-              onConfigure={() =>
-                item.methods.length > 0
-                  ? setSelectedItemId(item.id)
-                  : setSelectedProviderKey(item.provider.provider_key)
-              }
-            />
-          ) : item.kind === "catalog" ? (
-            <CatalogIntegrationRow
-              key={item.id}
-              method={item.method}
-              connections={mcp}
-              onOpen={() => setSelectedItemId(item.id)}
-              onConnect={() => connectCatalog(item.method.definition)}
-            />
-          ) : (
-            <McpServerCard
-              key={item.id}
-              server={item.server}
-              displayName={mcp.serverInstanceDisplayName(item.server.id)}
-              onRemove={mcp.setRemoveServerId}
-              onConfigure={mcp.setConfigureServerId}
-              onAuthenticate={mcp.connectServer}
-              onManagePlugin={(pluginName) =>
-                navigate(
-                  pluginName
-                    ? `${routes.plugins}/${encodeURIComponent(pluginName)}`
-                    : routes.plugins,
-                )
-              }
-              isAuthenticating={
-                mcp.auth.attempt?.serverId === item.server.id && authBusy
-              }
-              connectDisabled={!orgReady || authBusy}
-            />
-          ),
-        )}
-      </div>
+      {connectedItems.length > 0 ? (
+        <IntegrationSection
+          title={t("integrationsPage.sectionConnected")}
+          count={connectedItems.length}
+          gridClassName={CONNECTED_GRID}
+        >
+          {connectedItems.map((item) => renderItem(item, "row"))}
+        </IntegrationSection>
+      ) : null}
+      {availableItems.length > 0 ? (
+        <IntegrationSection
+          title={t("integrationsPage.sectionAvailable")}
+          count={availableItems.length}
+          gridClassName={AVAILABLE_GRID}
+        >
+          {availableItems.map((item) => renderItem(item, "tile"))}
+        </IntegrationSection>
+      ) : null}
       {!loading && items.length === 0 ? (
         <p className="py-8 text-center text-body-medium-default text-[var(--content-tertiary)]">
           {searchText.trim()
             ? t("integrationsPage.emptySearchSubtitle", {
                 query: searchText.trim(),
               })
-            : t("integrationsPage.emptyFilter")}
+            : t("integrationsPage.empty")}
         </p>
       ) : null}
       {selectedItem && selectedItem.kind !== "mcp" ? (

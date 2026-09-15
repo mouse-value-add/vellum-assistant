@@ -7,7 +7,10 @@ import { useTranslation } from "@/i18n";
 
 import type { McpServerEntry } from "../mcp/mcp-api";
 import { summarizeIntegrationConnections } from "../integration-items";
-import { IntegrationListRow } from "./integration-list-row";
+import {
+  IntegrationListRow,
+  type IntegrationListLayout,
+} from "./integration-list-row";
 
 interface IntegrationRowProps {
   providerKey: string;
@@ -17,6 +20,7 @@ interface IntegrationRowProps {
   connections: OAuthConnection[];
   mcpServers?: McpServerEntry[];
   disabled?: boolean;
+  layout?: IntegrationListLayout;
   onConfigure: () => void;
 }
 
@@ -28,6 +32,7 @@ export function IntegrationRow({
   connections,
   mcpServers = [],
   disabled,
+  layout,
   onConfigure,
 }: IntegrationRowProps) {
   const { t } = useTranslation("settings");
@@ -35,6 +40,7 @@ export function IntegrationRow({
     summarizeIntegrationConnections(connections, mcpServers);
   return (
     <IntegrationListRow
+      layout={layout}
       icon={
         <IntegrationIcon
           providerKey={providerKey}

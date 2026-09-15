@@ -900,12 +900,8 @@
     "addCustom": "Add custom integration",
     "connectFailedToast": "Failed to connect {providerLabel}.",
     "connectFailedToastGeneric": "Failed to connect. Please try again.",
-    "emptyFilter": "No integrations match this filter.",
+    "empty": "No integrations are available.",
     "emptySearchSubtitle": "No integrations matched \"{query}\"",
-    "filterAll": "All",
-    "filterAriaLabel": "Filter integrations",
-    "filterAvailable": "Available",
-    "filterConnected": "Connected",
     "loading": "Loading...",
     "mcpUnavailable": "MCP connections could not be loaded. Other integrations are still available.",
     "oauthErrorDenied": "Authorization was denied. Please try again.",
@@ -915,7 +911,9 @@
     "oauthErrorStateInvalid": "Authorization state was invalid. Please try again.",
     "oauthUnavailable": "Some OAuth integrations could not be loaded. MCP connections are still available.",
     "searchAriaLabel": "Search integrations",
-    "searchPlaceholder": "Search Integrations"
+    "searchPlaceholder": "Search Integrations",
+    "sectionAvailable": "Available",
+    "sectionConnected": "Connected"
   },
   "invoicesTable": {
     "columnAction": "Action",
@@ -1025,12 +1023,10 @@
     "urlPlaceholder": "https://example.com/mcp"
   },
   "mcpPage": {
-    "reloadButton": "Refresh",
     "removeDialogConfirm": "Remove",
     "removeDialogMessage": "Are you sure you want to remove \"{serverId}\"? This will disconnect all tools provided by this server.",
     "removeDialogTitle": "Remove MCP Server",
     "setupPrompt": "Help me set up an MCP server to extend you with external tools.",
-    "toastReloadFailed": "Failed to reload MCP servers",
     "toastRemoveFailed": "Failed to remove {serverId}",
     "toastRemoved": "Removed {serverId}"
   },

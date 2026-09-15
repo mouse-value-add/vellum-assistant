@@ -886,12 +886,7 @@
     "addCustom": "Добавить свою интеграцию",
     "connectFailedToast": "Не удалось подключить {providerLabel}.",
     "connectFailedToastGeneric": "Не удалось подключить. Повторите попытку.",
-    "emptyFilter": "Нет интеграций, соответствующих фильтру.",
     "emptySearchSubtitle": "Нет интеграций по запросу \"{query}\"",
-    "filterAll": "Все",
-    "filterAriaLabel": "Фильтр интеграций",
-    "filterAvailable": "Доступные",
-    "filterConnected": "Подключённые",
     "loading": "Загрузка...",
     "mcpUnavailable": "Не удалось загрузить подключения MCP. Другие интеграции по-прежнему доступны.",
     "oauthErrorDenied": "Авторизацию отклонили. Повторите попытку.",
@@ -1011,12 +1006,10 @@
     "urlPlaceholder": "https://example.com/mcp"
   },
   "mcpPage": {
-    "reloadButton": "Обновить",
     "removeDialogConfirm": "Удалить",
     "removeDialogMessage": "Точно удалить \"{serverId}\"? Это отключит все инструменты этого сервера.",
     "removeDialogTitle": "Удалить MCP-сервер",
     "setupPrompt": "Помоги настроить MCP-сервер, чтобы расширить тебя внешними инструментами.",
-    "toastReloadFailed": "Не удалось перезагрузить MCP-серверы",
     "toastRemoveFailed": "Не удалось удалить {serverId}",
     "toastRemoved": "Удалён {serverId}"
   },

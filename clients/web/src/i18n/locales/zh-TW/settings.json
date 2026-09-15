@@ -900,12 +900,7 @@
     "addCustom": "新增自訂整合",
     "connectFailedToast": "連線 {providerLabel} 失敗。",
     "connectFailedToastGeneric": "連線失敗。請再試一次。",
-    "emptyFilter": "沒有符合此篩選條件的整合。",
     "emptySearchSubtitle": "沒有與「{query}」相符的整合",
-    "filterAll": "全部",
-    "filterAriaLabel": "篩選整合",
-    "filterAvailable": "可用",
-    "filterConnected": "已連線",
     "loading": "載入中...",
     "mcpUnavailable": "MCP 連線無法載入。其他整合仍然可用。",
     "oauthErrorDenied": "授權被拒。請再試一次。",
@@ -1025,12 +1020,10 @@
     "urlPlaceholder": "https://example.com/mcp"
   },
   "mcpPage": {
-    "reloadButton": "重新整理",
     "removeDialogConfirm": "移除",
     "removeDialogMessage": "您確定要移除「{serverId}」嗎？這將會中斷此伺服器提供的所有工具。",
     "removeDialogTitle": "移除 MCP 伺服器",
     "setupPrompt": "協助我設定 MCP 伺服器，以外部工具擴充您。",
-    "toastReloadFailed": "重新載入 MCP 伺服器失敗",
     "toastRemoveFailed": "移除 {serverId} 失敗",
     "toastRemoved": "已移除 {serverId}"
   },

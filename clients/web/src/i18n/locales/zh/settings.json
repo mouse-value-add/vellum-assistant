@@ -900,12 +900,7 @@
     "addCustom": "添加自定义集成",
     "connectFailedToast": "连接 {providerLabel} 失败。",
     "connectFailedToastGeneric": "连接失败。请重试。",
-    "emptyFilter": "没有符合此筛选条件的集成。",
     "emptySearchSubtitle": "没有与“{query}”匹配的集成",
-    "filterAll": "全部",
-    "filterAriaLabel": "筛选集成",
-    "filterAvailable": "可用",
-    "filterConnected": "已连接",
     "loading": "加载中...",
     "mcpUnavailable": "MCP 连接无法加载。其他集成仍然可用。",
     "oauthErrorDenied": "授权被拒绝。请重试。",
@@ -1025,12 +1020,10 @@
     "urlPlaceholder": "https://example.com/mcp"
   },
   "mcpPage": {
-    "reloadButton": "刷新",
     "removeDialogConfirm": "移除",
     "removeDialogMessage": "您确定要移除“{serverId}”吗？这将断开此服务器提供的所有工具。",
     "removeDialogTitle": "移除 MCP 服务器",
     "setupPrompt": "帮助我设置一个 MCP 服务器，用外部工具扩展您。",
-    "toastReloadFailed": "重新加载 MCP 服务器失败",
     "toastRemoveFailed": "移除 {serverId} 失败",
     "toastRemoved": "已移除 {serverId}"
   },

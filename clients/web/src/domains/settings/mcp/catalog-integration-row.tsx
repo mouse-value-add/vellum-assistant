@@ -3,7 +3,10 @@ import { Tag } from "@vellumai/design-library/components/tag";
 
 import { useTranslation } from "@/i18n";
 
-import { IntegrationListRow } from "../components/integration-list-row";
+import {
+  IntegrationListRow,
+  type IntegrationListLayout,
+} from "../components/integration-list-row";
 import {
   summarizeIntegrationConnections,
   type CatalogMethod,
@@ -15,11 +18,13 @@ import type { useMcpConnections } from "./use-mcp-connections";
 export function CatalogIntegrationRow({
   method,
   connections,
+  layout,
   onOpen,
   onConnect,
 }: {
   method: CatalogMethod;
   connections: ReturnType<typeof useMcpConnections>;
+  layout?: IntegrationListLayout;
   onOpen: () => void;
   onConnect: () => void;
 }) {
@@ -48,6 +53,7 @@ export function CatalogIntegrationRow({
     summarizeIntegrationConnections([], servers).connectedCount > 0;
   return (
     <IntegrationListRow
+      layout={layout}
       icon={
         <McpIntegrationIcon
           providerKey={providerKey}

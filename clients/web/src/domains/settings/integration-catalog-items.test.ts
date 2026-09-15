@@ -91,9 +91,9 @@ describe("catalog integration identity", () => {
       [],
       [definition],
     );
-    expect(filterIntegrationItems(before, "", "connected")).toHaveLength(1);
-    expect(filterIntegrationItems(after, "", "connected")).toHaveLength(1);
-    expect(filterIntegrationItems(after, "", "available")).toHaveLength(0);
+    expect(before.filter((item) => item.connected)).toHaveLength(1);
+    expect(after.filter((item) => item.connected)).toHaveLength(1);
+    expect(after.filter((item) => !item.connected)).toHaveLength(0);
   });
 
   test("a working MCP connection keeps a brand connected despite a failed OAuth account", () => {
@@ -103,7 +103,7 @@ describe("catalog integration identity", () => {
       [mcpServer({ catalog: provenance })],
       [definition],
     );
-    expect(filterIntegrationItems(items, "", "connected")).toHaveLength(1);
+    expect(items.filter((item) => item.connected)).toHaveLength(1);
   });
 
   test("a removed definition leaves the saved server independently manageable", () => {
@@ -153,8 +153,6 @@ describe("catalog integration identity", () => {
       ],
     );
     expect(items).toHaveLength(2);
-    expect(filterIntegrationItems(items, "meeting", "available")).toHaveLength(
-      1,
-    );
+    expect(filterIntegrationItems(items, "meeting")).toHaveLength(1);
   });
 });
