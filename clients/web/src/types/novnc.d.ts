@@ -16,9 +16,11 @@ declare module "@novnc/novnc" {
 
   export default class RFB {
     constructor(target: HTMLElement, urlOrChannel: string | WebSocket);
+    background: string;
     scaleViewport: boolean;
-    resizeSession: boolean;
     viewOnly: boolean;
+    focusOnClick: boolean;
+    resizeSession: boolean;
     clipViewport: boolean;
     clipboardPasteFrom(text: string): void;
     disconnect(): void;

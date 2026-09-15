@@ -2,7 +2,6 @@ import { readdir, readFile, readlink } from "node:fs/promises";
 import { createServer } from "node:net";
 
 import { shouldRestoreDesktopChromeSession } from "./desktop-chrome-session.js";
-import { DESKTOP_HEIGHT, DESKTOP_WIDTH } from "./desktop-display.js";
 
 export async function allocateDesktopDebugPort(): Promise<number> {
   const server = createServer();
@@ -100,8 +99,6 @@ export function desktopChromeArguments(
       ? ["--restore-last-session", "--hide-crash-restore-bubble"]
       : []),
     "--start-maximized",
-    "--window-position=0,0",
-    `--window-size=${DESKTOP_WIDTH},${DESKTOP_HEIGHT}`,
     `--user-data-dir=${profileDir}`,
     ...(debugPort
       ? [

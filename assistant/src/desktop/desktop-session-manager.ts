@@ -36,6 +36,8 @@ import {
 } from "./desktop-display.js";
 import { writeDesktopPanelConfig } from "./desktop-panel-config.js";
 import { renderCurrentDesktopWallpaper } from "./desktop-wallpaper.js";
+import { DESKTOP_WINDOW_DRAG_SCRIPT } from "./desktop-window-drag.js";
+import { writeDesktopWindowManagerConfig } from "./desktop-window-manager-config.js";
 import { writeDesktopWindowTheme } from "./desktop-window-theme.js";
 
 const log = getLogger("desktop-session");
@@ -46,8 +48,8 @@ const DESKTOP_LINGER_MS = 5 * 60_000;
 const VNC_READY_DEADLINE_MS = 10_000;
 const VNC_PROBE_INTERVAL_MS = 100;
 const KILL_GRACE_MS = 2_000;
-const BROWSER_CRASH_WINDOW_MS = 60_000;
-const BROWSER_CRASH_LIMIT = 3;
+const PANEL_RESTART_LIMIT = 3;
+const PANEL_RESTART_DELAY_MS = 1_000;
 
 /**
  * What the desktop children see. Deliberately not `buildSanitizedEnv()`: its
@@ -103,7 +105,6 @@ export type DesktopChildRole =
 /** Optional desktop decoration processes. */
 const COSMETIC_ROLES: ReadonlySet<DesktopChildRole> = new Set([
   "compositor",
-  "panel",
   "wallpaper",
 ]);
 
@@ -188,6 +189,8 @@ interface DesktopSessionManagerOptions {
   ) => Promise<Buffer | null>;
   /** Where the children's allowlisted env is read from. */
   readonly sourceEnv?: NodeJS.ProcessEnv;
+  readonly panelRestartDelayMs?: number;
+  readonly writeWindowManagerConfig?: (configDir: string) => string;
 }
 
 type DesktopBinaries = ReturnType<typeof resolveDesktopBinaries>;
@@ -204,11 +207,16 @@ export class DesktopSessionManager {
   private automation: DesktopViewer | null = null;
   private lingerTimer: ReturnType<typeof setTimeout> | null = null;
   private ingressClosed = false;
-  private browserExitsAt: number[] = [];
   /** Resolved for the current tree, and read again when the dock comes up. */
   private binaries: DesktopBinaries | null = null;
-  /** Whether this tree has already had its one dock start attempted. */
   private panelStarted = false;
+  private panelRestartTimer: ReturnType<typeof setTimeout> | null = null;
+  private panelRestartAttempts = 0;
+  private panelLaunch: {
+    chromiumPath: string;
+    env: Record<string, string>;
+  } | null = null;
+  private readonly retiredPanels = new Set<DesktopChild>();
   private wallpaperStarting: {
     generation: number;
     refreshQueued: boolean;
@@ -280,6 +288,8 @@ export class DesktopSessionManager {
     DesktopSessionManagerOptions["renderWallpaper"]
   >;
   private readonly sourceEnv: NodeJS.ProcessEnv;
+  private readonly panelRestartDelayMs: number;
+  private readonly writeWindowManagerConfig: (configDir: string) => string;
 
   constructor(options: DesktopSessionManagerOptions = {}) {
     this.allocateDebugPort =
@@ -309,6 +319,27 @@ export class DesktopSessionManager {
     this.panelConfigDir =
       options.panelConfigDir ?? join(getDataDir(), "desktop-panel");
     this.sourceEnv = options.sourceEnv ?? process.env;
+    this.panelRestartDelayMs =
+      options.panelRestartDelayMs ?? PANEL_RESTART_DELAY_MS;
+    this.writeWindowManagerConfig =
+      options.writeWindowManagerConfig ??
+      ((configDir) => {
+        let sourcePath: string | undefined;
+        try {
+          sourcePath = writeDesktopWindowTheme(
+            configDir,
+            this.sourceEnv.HOME,
+            resolveNotificationAccentHex(readAvatarState()),
+          );
+        } catch (err) {
+          log.warn({ err }, "Desktop window theme could not be applied");
+        }
+        return writeDesktopWindowManagerConfig(
+          configDir,
+          this.sourceEnv.HOME,
+          sourcePath,
+        );
+      });
     this.renderWallpaper =
       options.renderWallpaper ?? renderCurrentDesktopWallpaper;
   }
@@ -375,7 +406,6 @@ export class DesktopSessionManager {
     }
     if (this.running) {
       void this.refreshWallpaper(this.childEnv(), this.generation);
-      void this.ensureBrowser(this.childEnv(), this.generation);
       return Promise.resolve();
     }
     this.starting ??= this.startDesktop().finally(() => {
@@ -415,20 +445,22 @@ export class DesktopSessionManager {
           `Desktop VNC server not ready on port ${DESKTOP_VNC_PORT} after ${this.readyDeadlineMs}ms`,
         );
       }
-      const windowManagerCommand = [this.binaries.windowManager];
-      try {
-        windowManagerCommand.push(
+      const windowManagerConfig = this.writeWindowManagerConfig(
+        this.panelConfigDir,
+      );
+      this.launch(
+        "window-manager",
+        [
+          this.binaries.python,
+          "-c",
+          DESKTOP_WINDOW_DRAG_SCRIPT,
+          this.binaries.windowManager,
+          "--sm-disable",
           "--config-file",
-          writeDesktopWindowTheme(
-            this.panelConfigDir,
-            env.HOME,
-            resolveNotificationAccentHex(readAvatarState()),
-          ),
-        );
-      } catch (err) {
-        log.warn({ err }, "Desktop window theme could not be applied");
-      }
-      this.launch("window-manager", windowManagerCommand, env);
+          windowManagerConfig,
+        ],
+        env,
+      );
       // Before the dock, which only gets the ARGB visual its rounded corners
       // and translucency need if a compositor is already running.
       this.launchCosmetic("compositor", [this.binaries.compositor], env);
@@ -521,9 +553,6 @@ export class DesktopSessionManager {
     env: Record<string, string>,
     generation: number,
   ): Promise<void> {
-    if (this.children.has("browser")) {
-      return;
-    }
     try {
       const executable = await this.resolveChromePath();
       const debugPort = this.debugPort ?? (await this.allocateDebugPort());
@@ -549,17 +578,14 @@ export class DesktopSessionManager {
     }
   }
 
-  /**
-   * Bring the dock up once per tree. It waits on Chrome because its launcher
-   * points at that executable, and its window manager and compositor are long
-   * up by then.
-   */
+  /** Start the dock after its Chrome launcher has an executable. */
   private startPanel(chromiumPath: string, env: Record<string, string>): void {
     const binaries = this.binaries;
     if (this.panelStarted || !binaries) {
       return;
     }
     this.panelStarted = true;
+    this.panelLaunch = { chromiumPath, env };
     try {
       writeDesktopPanelConfig({
         configDir: this.panelConfigDir,
@@ -568,20 +594,37 @@ export class DesktopSessionManager {
         debugPort: this.debugPort,
         terminalPath: binaries.terminal,
       });
-    } catch (err) {
-      log.warn({ err }, "Desktop dock config could not be written");
-      return;
-    }
-    this.launchCosmetic(
-      "panel",
-      [binaries.panelSession, "--", binaries.panel],
-      {
+      this.launch("panel", [binaries.panelSession, "--", binaries.panel], {
         ...env,
         XDG_CONFIG_HOME: this.panelConfigDir,
         XDG_DATA_HOME: this.panelConfigDir,
         GSETTINGS_BACKEND: "keyfile",
-      },
-    );
+      });
+    } catch (err) {
+      log.warn({ err }, "Desktop dock failed to start");
+      this.schedulePanelRestart();
+    }
+  }
+
+  private schedulePanelRestart(): void {
+    if (!this.running || this.panelRestartTimer || !this.panelLaunch) {
+      return;
+    }
+    if (this.panelRestartAttempts >= PANEL_RESTART_LIMIT) {
+      log.warn("Desktop dock restart limit reached");
+      return;
+    }
+    this.panelRestartAttempts += 1;
+    const generation = this.generation;
+    const { chromiumPath, env } = this.panelLaunch;
+    this.panelRestartTimer = setTimeout(() => {
+      this.panelRestartTimer = null;
+      if (generation === this.generation && this.running) {
+        this.panelStarted = false;
+        this.startPanel(chromiumPath, env);
+      }
+    }, this.panelRestartDelayMs);
+    this.panelRestartTimer.unref?.();
   }
 
   /** Spawn a child the desktop looks worse without but works fine without. */
@@ -623,9 +666,13 @@ export class DesktopSessionManager {
     if (this.children.get(role) !== child) {
       return;
     }
-    // Dock-launched applications can outlive the panel's session wrapper.
-    if (role !== "panel") {
-      this.children.delete(role);
+    this.children.delete(role);
+    if (role === "panel") {
+      // Keep dock-launched applications alive until desktop teardown.
+      this.retiredPanels.add(child);
+      log.warn({ outcome }, "Desktop dock exited, scheduling restart");
+      this.schedulePanelRestart();
+      return;
     }
     if (role === "wallpaper" && outcome === 0) {
       return;
@@ -633,11 +680,10 @@ export class DesktopSessionManager {
     if (role === "browser") {
       this.browser.dispose();
       log.info({ outcome }, "Desktop browser exited");
-      this.onBrowserExit();
       return;
     }
     if (COSMETIC_ROLES.has(role)) {
-      // A dead dock or compositor costs the desktop its looks, not its use.
+      // Cosmetic failures leave the interactive desktop available.
       log.warn({ role, outcome }, "Desktop child exited");
       return;
     }
@@ -646,27 +692,6 @@ export class DesktopSessionManager {
       code: DESKTOP_CLOSE.failed,
       reason: `Desktop stopped: ${role} exited`,
     });
-  }
-
-  /** Relaunch Chrome while a viewer or automation is using the desktop. */
-  private onBrowserExit(): void {
-    if ((!this.viewer && !this.automation) || !this.running) {
-      return;
-    }
-    const now = Date.now();
-    this.browserExitsAt = this.browserExitsAt.filter(
-      (at) => now - at < BROWSER_CRASH_WINDOW_MS,
-    );
-    this.browserExitsAt.push(now);
-    if (this.browserExitsAt.length > BROWSER_CRASH_LIMIT) {
-      log.warn("Desktop browser is crash looping, tearing down");
-      void this.teardown({
-        code: DESKTOP_CLOSE.failed,
-        reason: "Desktop browser keeps crashing",
-      });
-      return;
-    }
-    void this.ensureBrowser(this.childEnv(), this.generation);
   }
 
   /**
@@ -679,9 +704,16 @@ export class DesktopSessionManager {
     this.browser.dispose();
     this.debugPort = undefined;
     this.running = false;
-    this.browserExitsAt = [];
     this.binaries = null;
     this.panelStarted = false;
+    if (this.panelRestartTimer) {
+      clearTimeout(this.panelRestartTimer);
+      this.panelRestartTimer = null;
+    }
+    this.panelRestartAttempts = 0;
+    this.panelLaunch = null;
+    const retiredPanels = [...this.retiredPanels];
+    this.retiredPanels.clear();
     const children = new Map(this.children);
     this.children.clear();
     const viewer = this.viewer;
@@ -698,6 +730,9 @@ export class DesktopSessionManager {
     const done: Promise<void> = Promise.all([
       this.tearingDown,
       this.killAll(children),
+      ...retiredPanels.map((child) =>
+        this.killAll(new Map([["panel", child]])),
+      ),
     ])
       .then(() => undefined)
       .finally(() => {
@@ -811,6 +846,8 @@ function xServerCommand(executable: string): string[] {
     DESKTOP_OVERRIDABLE_PARAMETERS.join(","),
     "-geometry",
     DESKTOP_GEOMETRY,
+    // Keep the dock and wallpaper anchored to a stable display.
+    "-AcceptSetDesktopSize=0",
     "-depth",
     "24",
     "-desktop",
