@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import {
   ConceptCategoryRail,
   ConceptDirectoryGrid,
+  ConceptGridWithCategories,
   ConceptNarrowColumn,
   ConceptOverviewColumns,
 } from "./integrations-redesign-concepts";
@@ -44,3 +45,8 @@ export const OverviewColumns: Story = {
 
 /** D. Minimal change: cap the width, add a heading, divided list instead of cards. */
 export const NarrowColumn: Story = { render: () => <ConceptNarrowColumn /> };
+
+/** E. Directory grid with categories as a chip row; "All" groups the catalog by category. */
+export const GridWithCategories: Story = {
+  render: () => <ConceptGridWithCategories />,
+};

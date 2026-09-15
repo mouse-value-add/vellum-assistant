@@ -506,6 +506,65 @@ function EmptyState({ query }: { query: string }) {
 /* Concept A: directory grid                                            */
 /* ------------------------------------------------------------------ */
 
+function ConnectedCard({ item }: { item: ConceptIntegration }) {
+  return (
+    <Card.Root
+      bordered
+      className="flex items-center gap-3 transition-colors hover:border-[var(--border-hover)]"
+    >
+      <Logo item={item} size={36} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-title-small text-[var(--content-default)]">
+          {item.name}
+        </p>
+        <p className="truncate text-body-small-lighter text-[var(--content-tertiary)]">
+          {item.account}
+        </p>
+      </div>
+      <StatusTag status={item.status} />
+      <Button
+        variant="ghost"
+        size="compact"
+        iconOnly={<MoreHorizontal />}
+        aria-label={`${item.name} actions`}
+      />
+    </Card.Root>
+  );
+}
+
+function CatalogCard({ item }: { item: ConceptIntegration }) {
+  return (
+    <Card.Root
+      bordered
+      className="group flex flex-col gap-3 transition-colors hover:border-[var(--border-hover)]"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <Logo item={item} size={40} />
+        <Button
+          variant="outlined"
+          size="compact"
+          className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        >
+          Connect
+        </Button>
+      </div>
+      <div className="min-w-0 space-y-1">
+        <p className="truncate text-title-small text-[var(--content-default)]">
+          {item.name}
+        </p>
+        <p className="line-clamp-2 text-body-small-lighter text-[var(--content-tertiary)]">
+          {item.description}
+        </p>
+      </div>
+    </Card.Root>
+  );
+}
+
+const CONNECTED_GRID =
+  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]";
+const CATALOG_GRID =
+  "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]";
+
 /**
  * App-directory layout. Configured integrations stay as wide rows at the top
  * so status and account are readable at a glance; the catalog becomes a
@@ -527,30 +586,9 @@ export function ConceptDirectoryGrid() {
       {configured.length > 0 ? (
         <section className="space-y-3">
           <SectionHeading title="Connected" count={configured.length} />
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+          <div className={CONNECTED_GRID}>
             {configured.map((item) => (
-              <Card.Root
-                key={item.key}
-                bordered
-                className="flex items-center gap-3 transition-colors hover:border-[var(--border-hover)]"
-              >
-                <Logo item={item} size={36} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-title-small text-[var(--content-default)]">
-                    {item.name}
-                  </p>
-                  <p className="truncate text-body-small-lighter text-[var(--content-tertiary)]">
-                    {item.account}
-                  </p>
-                </div>
-                <StatusTag status={item.status} />
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  iconOnly={<MoreHorizontal />}
-                  aria-label={`${item.name} actions`}
-                />
-              </Card.Root>
+              <ConnectedCard key={item.key} item={item} />
             ))}
           </div>
         </section>
@@ -558,37 +596,116 @@ export function ConceptDirectoryGrid() {
       {available.length > 0 ? (
         <section className="space-y-3">
           <SectionHeading title="Available" count={available.length} />
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
+          <div className={CATALOG_GRID}>
             {available.map((item) => (
-              <Card.Root
-                key={item.key}
-                bordered
-                className="group flex flex-col gap-3 transition-colors hover:border-[var(--border-hover)]"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <Logo item={item} size={40} />
-                  <Button
-                    variant="outlined"
-                    size="compact"
-                    className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-                  >
-                    Connect
-                  </Button>
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-title-small text-[var(--content-default)]">
-                    {item.name}
-                  </p>
-                  <p className="line-clamp-2 text-body-small-lighter text-[var(--content-tertiary)]">
-                    {item.description}
-                  </p>
-                </div>
-              </Card.Root>
+              <CatalogCard key={item.key} item={item} />
             ))}
           </div>
         </section>
       ) : null}
       {filtered.length === 0 ? <EmptyState query={query} /> : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Concept E: directory grid + category chips                           */
+/* ------------------------------------------------------------------ */
+
+function CategoryChip({
+  label,
+  count,
+  active,
+  onSelect,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-body-medium-default transition-colors ${
+        active
+          ? "border-transparent bg-[var(--primary-base)] text-[var(--content-inset)]"
+          : "border-[var(--border-subtle)] bg-[var(--surface-lift)] text-[var(--content-secondary)] hover:border-[var(--border-hover)] hover:text-[var(--content-default)]"
+      }`}
+    >
+      <span>{label}</span>
+      <span
+        className={`text-body-small-lighter tabular-nums ${
+          active
+            ? "text-[var(--content-inset)] opacity-70"
+            : "text-[var(--content-tertiary)]"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The directory grid with categories as a chip row under the search. No chip
+ * selected shows everything; a chip narrows both sections to that category
+ * and clicking it again clears the filter. Connected and available are
+ * already distinct by section, so there is no status filter.
+ */
+export function ConceptGridWithCategories() {
+  const { query, setQuery, filtered } = useConceptFilter(CONCEPT_INTEGRATIONS);
+  const [category, setCategory] = useState<ConceptCategory | null>(null);
+  const visible = category
+    ? filtered.filter((item) => item.category === category)
+    : filtered;
+  const configured = visible.filter((item) => item.status !== "available");
+  const available = visible.filter((item) => item.status === "available");
+
+  return (
+    <div className="space-y-8">
+      <div className="space-y-3">
+        <Toolbar query={query} onQuery={setQuery} />
+        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+          {CONCEPT_CATEGORIES.map((entry) => (
+            <CategoryChip
+              key={entry}
+              label={entry}
+              count={
+                CONCEPT_INTEGRATIONS.filter((item) => item.category === entry)
+                  .length
+              }
+              active={category === entry}
+              onSelect={() => setCategory(category === entry ? null : entry)}
+            />
+          ))}
+        </div>
+      </div>
+      {configured.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeading title="Connected" count={configured.length} />
+          <div className={CONNECTED_GRID}>
+            {configured.map((item) => (
+              <ConnectedCard key={item.key} item={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {available.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeading
+            title={category ?? "Available"}
+            count={available.length}
+          />
+          <div className={CATALOG_GRID}>
+            {available.map((item) => (
+              <CatalogCard key={item.key} item={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {visible.length === 0 ? <EmptyState query={query} /> : null}
     </div>
   );
 }
