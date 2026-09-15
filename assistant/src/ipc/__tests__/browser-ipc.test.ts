@@ -553,15 +553,12 @@ test("browser selection uses the active turn rather than a queued message's OS",
   expect(desktopContext).toBeUndefined();
 });
 
-test.each(["flag", "installation", "guardian", "actor"])(
+test.each(["flag", "guardian", "actor"])(
   "web preserves the existing browser when %s is unavailable",
   async (missing) => {
     webConversation();
     if (missing === "flag") {
       desktopEnabled = false;
-    }
-    if (missing === "installation") {
-      desktopReady = false;
     }
     if (missing === "guardian") {
       mockConversation!.trustContext = { trustClass: "unknown" };
@@ -639,5 +636,17 @@ test("a streamed browser failure does not switch to Playwright or personal Chrom
     conversationId: "conv-default-browser",
   });
   expect(result).toMatchObject({ isError: true, content: "Desktop is busy" });
+  expect(mockOperationCalls).toHaveLength(0);
+});
+
+test("first web browser use routes to virtual desktop setup before installation", async () => {
+  webConversation();
+  desktopReady = false;
+  await callHandler({
+    operation: "navigate",
+    input: { url: "https://example.com" },
+    conversationId: "conv-default-browser",
+  });
+  expect(desktopContext?.clientOs).toBe("web");
   expect(mockOperationCalls).toHaveLength(0);
 });

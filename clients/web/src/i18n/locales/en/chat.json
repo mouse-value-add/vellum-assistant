@@ -111,7 +111,6 @@
     "title": "Virtual desktop",
     "unavailable": "The virtual desktop isn't available on this assistant.",
     "installButton": "Install virtual desktop",
-    "installDescription": "Install Google Chrome and the components needed for your assistant’s virtual desktop. This may take a few minutes.",
     "checkingSetup": "Checking virtual desktop setup…",
     "installingPackages": "Installing virtual desktop components…",
     "installingChrome": "Installing Google Chrome…",

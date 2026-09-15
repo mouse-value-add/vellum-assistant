@@ -129,7 +129,7 @@ export const browserHelp: CliCommandHelp = {
 Browser operations are executed through the running assistant.
 Virtual desktop is available only for platform-hosted assistants.
 In the web client, automatic selection prefers virtual desktop Chrome when
-its feature is enabled, installation is ready and the conversation has an
+its feature is enabled and the conversation has an
 identified guardian. The macOS and Windows apps keep their existing browser
 selection and fallback behavior; use --virtual-desktop to select it there.
 Existing sessions and explicit backend/client choices take priority.
@@ -138,8 +138,9 @@ not the user's Chrome. --desktop remains an alias for --virtual-desktop.
 Use --virtual-desktop for Chrome in the Virtual desktop panel. It respects
 Take control in that panel. Start with assistant browser --virtual-desktop status.
 The assistant-desktop feature flag and completed installation are required.
-If setup is required or running, ask the user to open the Virtual desktop
-panel and wait for installation to finish.
+The first browser command starts installation automatically if needed. If setup
+is running, wait and retry the command once ready. Opening the Virtual desktop
+panel also starts installation and shows progress.
 Report other availability errors without switching to a personal computer.
 The assistant manages Chrome startup. Do not launch a separate desktop stack,
 install desktop packages, or drive webpages with shell-level xdotool.

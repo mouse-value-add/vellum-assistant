@@ -16,6 +16,9 @@ afterEach(async () => {
 function fixture() {
   let enabled = true;
   let ready = true;
+  const startSetup = mock(() => ({
+    state: "unsupported" as "unsupported" | "installing",
+  }));
   const started = mock(async () => {});
   const released = mock(() => {});
   const releaseBrowser = mock(async () => {});
@@ -23,6 +26,7 @@ function fixture() {
   const lease = new DesktopControlLease({
     enabled: () => enabled,
     ready: () => ready,
+    startSetup,
     manager: () =>
       ({
         browser: { release: releaseBrowser },
@@ -36,6 +40,10 @@ function fixture() {
   cleanups.push(lease);
   return {
     lease,
+    startSetup,
+    completeSetup: () => {
+      ready = true;
+    },
     started,
     released,
     releaseBrowser,
@@ -123,4 +131,46 @@ test("failed browser cleanup retains ownership until release succeeds", async ()
   await f.lease.takeControl();
   expect(f.released).toHaveBeenCalledTimes(1);
   expect(f.lease.getStatus().state).toBe("human");
+});
+
+test("first browser use starts setup without running an action and retries use the installed browser", async () => {
+  const f = fixture();
+  f.uninstall();
+  f.startSetup.mockReturnValue({ state: "installing" });
+  const callback = mock(operation);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect(await f.lease.runBrowser(context, callback)).toMatchObject({
+      isError: true,
+      content: expect.stringContaining("installing automatically"),
+    });
+  }
+  expect(f.startSetup).toHaveBeenCalledTimes(2);
+  expect(f.started).not.toHaveBeenCalled();
+  expect(callback).not.toHaveBeenCalled();
+  f.completeSetup();
+  expect(await f.lease.runBrowser(context, callback)).toMatchObject({
+    isError: false,
+  });
+  expect(f.started).toHaveBeenCalledTimes(1);
+  expect(callback).toHaveBeenCalledTimes(1);
+});
+
+test("disabled, unidentified, cancelled and released browser calls cannot install", async () => {
+  const f = fixture();
+  f.uninstall();
+  const cancelled = new AbortController();
+  cancelled.abort();
+  for (const caller of [
+    { ...context, trustClass: "unknown" as const },
+    { ...context, sourceActorPrincipalId: undefined },
+    { ...context, signal: cancelled.signal },
+  ]) {
+    await expect(f.lease.runBrowser(caller, operation)).rejects.toThrow();
+  }
+  await f.lease.runBrowser(context, operation, true);
+  await f.lease.takeControl();
+  await expect(f.lease.runBrowser(context, operation)).rejects.toThrow();
+  f.disable();
+  await expect(f.lease.runBrowser(context, operation)).rejects.toThrow();
+  expect(f.startSetup).not.toHaveBeenCalled();
 });

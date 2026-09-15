@@ -1,5 +1,4 @@
 import { getConfig } from "../config/loader.js";
-import { desktopDependencyInstaller } from "../desktop/desktop-dependencies.js";
 import { isVirtualDesktopEnabled } from "../desktop/virtual-desktop-feature.js";
 import { browserManager } from "../tools/browser/browser-manager.js";
 import { normalizeBrowserMode } from "../tools/browser/browser-mode.js";
@@ -31,8 +30,5 @@ export function shouldUseVirtualDesktopBrowser(
   ) {
     return false;
   }
-  return (
-    isVirtualDesktopEnabled(getConfig()) &&
-    desktopDependencyInstaller.getStatus().state === "ready"
-  );
+  return isVirtualDesktopEnabled(getConfig());
 }

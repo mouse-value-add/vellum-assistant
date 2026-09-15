@@ -51,9 +51,11 @@ test("self-hosted Docker cannot automatically select or explicitly control virtu
   expect(status).not.toHaveBeenCalled();
 });
 
-test("platform web conversations select virtual Chrome only after installation", () => {
+test("platform web conversations select virtual Chrome before and during installation", () => {
   process.env.IS_PLATFORM = "true";
   expect(shouldUseVirtualDesktopBrowser(undefined, {}, context)).toBe(true);
   status.mockReturnValue({ state: "installing" });
-  expect(shouldUseVirtualDesktopBrowser(undefined, {}, context)).toBe(false);
+  expect(shouldUseVirtualDesktopBrowser(undefined, {}, context)).toBe(true);
+  status.mockReturnValue({ state: "required" });
+  expect(shouldUseVirtualDesktopBrowser(undefined, {}, context)).toBe(true);
 });

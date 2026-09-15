@@ -111,7 +111,6 @@
     "title": "Escritorio virtual",
     "unavailable": "El escritorio virtual no está disponible en este asistente.",
     "installButton": "Instalar escritorio virtual",
-    "installDescription": "Instala Google Chrome y los componentes necesarios para el escritorio virtual de tu asistente. Esto puede tardar unos minutos.",
     "checkingSetup": "Comprobando el escritorio virtual…",
     "installingPackages": "Instalando componentes del escritorio virtual…",
     "installingChrome": "Instalando Google Chrome…",

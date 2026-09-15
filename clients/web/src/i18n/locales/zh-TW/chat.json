@@ -111,7 +111,6 @@
     "title": "虛擬桌面",
     "unavailable": "此助理不支援虛擬桌面。",
     "installButton": "安裝虛擬桌面",
-    "installDescription": "安裝 Google Chrome 和助理虛擬桌面所需的元件。這可能需要幾分鐘。",
     "checkingSetup": "正在檢查虛擬桌面設定…",
     "installingPackages": "正在安裝虛擬桌面元件…",
     "installingChrome": "正在安裝 Google Chrome…",

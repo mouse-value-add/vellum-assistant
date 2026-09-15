@@ -37,6 +37,7 @@ const manager = new DesktopSessionManager({
 const control = new DesktopControlLease({
   enabled: () => true,
   ready: () => true,
+  startSetup: () => ({ state: "ready" }),
   manager: () => manager,
   input,
   notify: async () => {},

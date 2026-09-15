@@ -3,7 +3,10 @@ import { SYNC_TAGS } from "../daemon/message-types/sync.js";
 import { publishSyncInvalidation } from "../runtime/sync/sync-publisher.js";
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
 import { getLogger } from "../util/logger.js";
-import { desktopDependencyInstaller } from "./desktop-dependencies.js";
+import {
+  desktopDependencyInstaller,
+  type DesktopSetupStatus,
+} from "./desktop-dependencies.js";
 import {
   type DesktopSessionManager,
   type DesktopViewer,
@@ -44,12 +47,14 @@ export class DesktopControlLease {
     private readonly deps: {
       enabled: () => boolean;
       ready: () => boolean;
+      startSetup: () => DesktopSetupStatus;
       manager: () => DesktopSessionManager;
       input: Pick<DesktopViewerInput, "setViewerInput">;
       notify: () => Promise<unknown>;
     } = {
       enabled: () => isVirtualDesktopEnabled(getConfig()),
       ready: () => desktopDependencyInstaller.getStatus().state === "ready",
+      startSetup: () => desktopDependencyInstaller.start(),
       manager: getDesktopSessionManager,
       input: new DesktopViewerInput(),
       notify: () => publishSyncInvalidation([SYNC_TAGS.assistantDesktop]),
@@ -239,7 +244,10 @@ export class DesktopControlLease {
     operation: (signal: AbortSignal) => Promise<ToolExecutionResult>,
     done = false,
   ): Promise<ToolExecutionResult> {
-    return this.run(context, ({ signal }) => operation(signal), { done });
+    return this.run(context, ({ signal }) => operation(signal), {
+      done,
+      autoInstall: true,
+    });
   }
 
   run(
@@ -252,6 +260,7 @@ export class DesktopControlLease {
     }) => Promise<ToolExecutionResult>,
     options: {
       done?: boolean;
+      autoInstall?: boolean;
       requiresLease?: boolean;
       countAction?: boolean;
       cleanup?: () => Promise<void>;
@@ -281,6 +290,23 @@ export class DesktopControlLease {
       }
       context.signal?.throwIfAborted();
       try {
+        if (
+          options.autoInstall &&
+          !this.owner &&
+          !this.humanControl &&
+          generation === this.generation &&
+          this.deps.enabled() &&
+          !this.deps.ready()
+        ) {
+          const setup = this.deps.startSetup();
+          if (setup.state === "installing") {
+            return {
+              isError: true,
+              content:
+                "Virtual desktop is installing automatically. No browser action was performed. Wait for setup to finish, then retry this browser command.",
+            };
+          }
+        }
         this.assertAvailable();
       } catch (error) {
         await this.release();
