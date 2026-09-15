@@ -5,7 +5,6 @@ import { browserManager } from "../tools/browser/browser-manager.js";
 import { normalizeBrowserMode } from "../tools/browser/browser-mode.js";
 import { getPinnedTab } from "../tools/browser/pinned-tabs.js";
 import type { ToolContext } from "../tools/types.js";
-import { isNativeBrowserClient } from "./client-surface.js";
 
 export function shouldUseDesktopBrowser(
   desktop: boolean | undefined,
@@ -22,7 +21,9 @@ export function shouldUseDesktopBrowser(
     input.target_client_id ||
     input.use_active_tab ||
     context.transportInterface !== "web" ||
-    isNativeBrowserClient(context) ||
+    context.clientOs === "macos" ||
+    context.clientOs === "windows" ||
+    context.clientOs === "linux" ||
     context.trustClass !== "guardian" ||
     !context.sourceActorPrincipalId ||
     browserManager.getPreferredBackendKind(context.conversationId) !== null ||

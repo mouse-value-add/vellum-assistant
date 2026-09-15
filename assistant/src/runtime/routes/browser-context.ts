@@ -29,7 +29,10 @@ export async function resolveBrowserContext(
       ? conversationId!
       : browserCliConversationKey(sessionId),
     trustClass: conversation?.trustContext?.trustClass ?? "unknown",
-    ...(conversation ? resolveTurnClientOs(conversation) : {}),
+    transportInterface: conversation?.transportInterface,
+    clientOs: conversation
+      ? resolveTurnClientOs(conversation).clientOs
+      : undefined,
     sourceActorPrincipalId: actor,
     signal: signals.length ? AbortSignal.any(signals) : undefined,
   };

@@ -1,5 +1,4 @@
 import { optimizeImageForTransport } from "../../agent/image-optimize.js";
-import { isNativeBrowserClient } from "../../browser/client-surface.js";
 import type { BrowserOperationContext as ToolContext } from "../../browser/types.js";
 import { getConfig } from "../../config/loader.js";
 import { HostBrowserProxy } from "../../daemon/host-browser-proxy.js";
@@ -2788,7 +2787,8 @@ async function checkCdpInspectModeStatus(
 ): Promise<BrowserStatusModeResult> {
   const cdpInspectConfig = getConfig().hostBrowser.cdpInspect;
   const desktopAutoEnabled =
-    isNativeBrowserClient(context) && cdpInspectConfig.desktopAuto.enabled;
+    context.transportInterface === "macos" &&
+    cdpInspectConfig.desktopAuto.enabled;
   const cooldownActive =
     desktopAutoEnabled &&
     isDesktopAutoCooldownActive(cdpInspectConfig.desktopAuto.cooldownMs);

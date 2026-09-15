@@ -2805,7 +2805,7 @@ describe("macOS host-browser proxy without extension registry", () => {
   });
 });
 
-describe("native renderer browser defaults", () => {
+describe("native renderer browser compatibility", () => {
   beforeEach(() => {
     setCdpInspectEnabled(false);
     setDesktopAutoConfig({ enabled: true, cooldownMs: 30_000 });
@@ -2835,7 +2835,7 @@ describe("native renderer browser defaults", () => {
   );
 
   test.each(["macos", "windows"] as const)(
-    "%s web renderer tries local Chrome before Playwright without a bridge",
+    "%s web renderer keeps the existing Playwright fallback without a bridge",
     async (clientOs) => {
       const client = getCdpClient(
         makeContext({
@@ -2846,7 +2846,7 @@ describe("native renderer browser defaults", () => {
       );
       try {
         expect(await client.send("Page.getFrameTree", {})).toMatchObject({
-          via: "cdp-inspect",
+          via: "local",
         });
       } finally {
         client.dispose();

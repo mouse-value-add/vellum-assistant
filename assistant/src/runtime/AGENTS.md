@@ -133,12 +133,12 @@ See `docs/browser-use-architecture-phase2.md` for the backend scenarios and the 
 
 ### Canonical browser backend precedence (macOS)
 
-On native desktop turns, the CDP factory (`tools/browser/cdp-client/factory.ts`) evaluates three browser backends in strict priority order. Each candidate is tried lazily; if the first command fails with a transport-level error, the factory falls over to the next candidate. CDP protocol errors (the browser understood the command but rejected it) do NOT trigger failover.
+On macOS-originated turns, the CDP factory (`tools/browser/cdp-client/factory.ts`) evaluates three browser backends in strict priority order. Each candidate is tried lazily; if the first command fails with a transport-level error, the factory falls over to the next candidate. CDP protocol errors (the browser understood the command but rejected it) do NOT trigger failover.
 
 | Priority | Backend                    | Condition                                                                                                                                                                                                                                                                                                                      | Transport                                                                                 |
 | -------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | 1        | **Extension / host proxy** | Two candidates from the always-present `HostBrowserProxy` singleton: `extension` when `hasExtensionClient(actor)` finds a chrome-extension client on the hub; otherwise `host-bridge` when `isAvailable(actor)` finds any `host_browser` client (the macOS desktop bridge) and that actor's host-bridge cooldown is not active | SSE via `assistantEventHub` with `targetCapability: "host_browser"`, to the chosen client |
-| 2        | **cdp-inspect**            | (a) `hostBrowser.cdpInspect.enabled` is `true` in config, OR (b) the client surface is macOS, Windows or Linux (frozen `clientOs`, falling back to `transportInterface`) AND `desktopAuto.enabled` is `true` (default) AND the cooldown from a prior failure is not active                                                     | Direct CDP WebSocket to `localhost:9222`                                                  |
+| 2        | **cdp-inspect**            | (a) `hostBrowser.cdpInspect.enabled` is `true` in config, OR (b) `transportInterface === "macos"` AND `desktopAuto.enabled` is `true` (default) AND the cooldown from a prior failure is not active                                                                                                                            | Direct CDP WebSocket to `localhost:9222`                                                  |
 | 3        | **Local**                  | Always present as the final fallback                                                                                                                                                                                                                                                                                           | In-process Playwright CDP via `browserManager`                                            |
 
 **Transport selection for the extension/host-proxy backend:**
@@ -154,16 +154,16 @@ In the CDP factory the bridge is the internal `"host-bridge"` candidate kind (`I
 
 **Fallback criteria for cdp-inspect (desktop-auto):**
 
-- On native desktop clients, `desktopAuto.enabled` defaults to `true`, so cdp-inspect is attempted even when the top-level `cdpInspect.enabled` is `false`.
+- On macOS, `desktopAuto.enabled` defaults to `true`, so cdp-inspect is attempted even when the top-level `cdpInspect.enabled` is `false`.
 - If the cdp-inspect probe fails (Chrome was not launched with `--remote-debugging-port`, or the endpoint is unreachable), the factory records a cooldown timestamp (`desktopAuto.cooldownMs`, default 30 seconds).
-- While the cooldown is active, subsequent native desktop turns skip the cdp-inspect candidate entirely and go straight to local, bounding the per-call latency penalty to one `probeTimeoutMs` (default 500ms) per cooldown window.
+- While the cooldown is active, subsequent macOS turns skip the cdp-inspect candidate entirely and go straight to local, bounding the per-call latency penalty to one `probeTimeoutMs` (default 500ms) per cooldown window.
 - The cooldown only applies to desktop-auto candidates (reason starts with `"desktopAuto:"`). Explicitly configured cdp-inspect (`enabled: true`) is never cooldown-suppressed.
 
 **After the first successful CDP command**, the selected backend becomes **sticky** for the remainder of the tool invocation. Subsequent commands always route through the same backend so multi-command tool flows do not hop transports mid-step.
 
 ### Browser CLI surface defaults
 
-The browser execute and tab routes share `browser/desktop-target.ts`. Web guardian conversations use installed, enabled streamed Chrome by default. Native renderer turns also use the `web` transport, so browser preference reads the frozen turn `clientOs` without changing transport identity or host capability authorization. Explicit desktop/backend/client targets and existing personal-browser sessions override the surface default. Disabled or uninstalled desktop support retains the existing browser path; selection never triggers installation.
+The browser execute and tab routes share `browser/desktop-target.ts`. Web guardian conversations use installed, enabled streamed Chrome by default. Native renderer turns also use the `web` transport, so the frozen turn `clientOs` excludes native apps from automatic streamed-browser selection. Native apps retain their existing backend selection and fallback behavior. Explicit desktop/backend/client targets and existing personal-browser sessions override the surface default. Disabled or uninstalled desktop support retains the existing browser path; selection never triggers installation.
 
 ### Per-tool `browser_mode` override
 
