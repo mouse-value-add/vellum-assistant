@@ -316,6 +316,22 @@ test("navigation restores the cursor in its tab without replaying mouse input", 
   expect(f.calls[0]?.params.expression).toContain("translate(50px, 60px)");
 });
 
+test("keyboard input restores an existing cursor without synthesizing mouse input", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: 50,
+    y: 60,
+  });
+  f.calls.length = 0;
+  await f.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter" });
+  expect(f.calls.map((call) => call.method)).toEqual([
+    "Input.dispatchKeyEvent",
+    "Runtime.evaluate",
+  ]);
+  expect(f.calls[1]?.params.expression).toContain("translate(50px, 60px)");
+});
+
 test("release suppresses pending cursor restoration and clears it before takeover", async () => {
   const f = await session();
   await f.cdp.send("Input.dispatchMouseEvent", {

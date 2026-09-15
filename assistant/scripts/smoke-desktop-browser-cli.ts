@@ -225,6 +225,11 @@ try {
   await assertCursorPainted(true);
   await cli("click", "--selector", "#inside");
   assert.match(await cli("extract"), /Modal clicked/);
+  for (const key of ["Enter", "Space"]) {
+    await cli("press-key", "--key", "Escape");
+    await cli("press-key", "--key", key, "--selector", "#open-dialog");
+    await assertCursorPainted(true);
+  }
   await cli(
     "navigate",
     "--url",

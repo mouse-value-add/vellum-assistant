@@ -314,18 +314,13 @@ export class DesktopBrowserClient {
       if (params.type === "keyUp" || params.type === "mouseReleased") {
         this.held.delete(key);
       }
+      const cursor = this.cursorPositions.get(sessionId);
       if (
-        pointer &&
-        params.type === "mouseReleased" &&
+        cursor &&
+        (params.type === "mouseReleased" || params.type === "keyUp") &&
         generation === this.generation
       ) {
-        await this.drawCursor(
-          transport,
-          sessionId,
-          pointer.x,
-          pointer.y,
-          signal,
-        );
+        await this.drawCursor(transport, sessionId, cursor.x, cursor.y, signal);
       }
       return result;
     } catch (error) {
