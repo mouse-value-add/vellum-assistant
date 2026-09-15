@@ -47,6 +47,10 @@ export class DesktopBrowserClient {
   ): Promise<ScopedCdpClient> {
     signal = AbortSignal.any([signal, AbortSignal.timeout(120_000)]);
     signal.throwIfAborted();
+    if (this.transport?.closed) {
+      await this.release();
+      signal.throwIfAborted();
+    }
     if (!this.transport) {
       const transport = await this.connect(signal);
       if (signal.aborted) {
