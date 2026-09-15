@@ -87,10 +87,18 @@ mock.module("@/domains/settings/components/integration-detail-modal", () => ({
   IntegrationDetailModal: (props: {
     providerKey: string;
     tenantHost: unknown;
+    onClose: () => void;
   }) => {
     selectedModalProvider = props.providerKey;
     selectedModalTenantHost = props.tenantHost;
-    return <div>OAuth detail modal</div>;
+    return (
+      <div>
+        OAuth detail modal
+        <button type="button" onClick={props.onClose}>
+          Close OAuth detail modal
+        </button>
+      </div>
+    );
   },
 }));
 mock.module("@/domains/settings/mcp/mcp-api", () => ({
@@ -334,6 +342,35 @@ describe("IntegrationsPage", () => {
     );
     await screen.findByText("OAuth detail modal");
     expect(selectedModalProvider).toBe("notion");
+  });
+
+  test("closing a provider deep link allows the same link to reopen", async () => {
+    seededProviders = [provider()];
+    render(
+      <>
+        <IntegrationsPage />
+        <ProviderNavigationButton />
+      </>,
+      {
+        wrapper: ({ children }) => (
+          <Wrapper initialEntry="/assistant/settings/integrations?provider=notion">
+            {children}
+          </Wrapper>
+        ),
+      },
+    );
+
+    await screen.findByText("OAuth detail modal");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close OAuth detail modal" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("OAuth detail modal")).toBeNull(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open provider deep link" }),
+    );
+    await screen.findByText("OAuth detail modal");
   });
 
   test("custom setup preserves the assistant-guided feature fallback", async () => {

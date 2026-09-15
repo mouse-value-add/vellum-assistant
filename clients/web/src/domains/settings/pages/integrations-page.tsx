@@ -6,6 +6,7 @@ import { toast } from "@vellumai/design-library/components/toast";
 import { Loader2, Plus, Search } from "lucide-react";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -84,7 +85,7 @@ function oauthErrorMessage(
 
 function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) {
   const { t } = useTranslation("settings");
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const platformGate = usePlatformGate();
   const allowAdd = useAssistantFeatureFlagStore.use.mcpAddServer();
@@ -127,6 +128,16 @@ function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) 
     previousProviderParam.current = providerParam;
     setSelectedProviderKey(providerParam);
   }, [providerParam]);
+
+  const closeProvider = useCallback(() => {
+    setSelectedProviderKey(null);
+    if (!searchParams.has("provider")) {
+      return;
+    }
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("provider");
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const {
     platformAssistantId,
@@ -353,7 +364,7 @@ function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) 
           logoUrl={selectedProvider.logo_url}
           platformGate={platformGate}
           tenantHost={selectedProvider.tenant_host}
-          onClose={() => setSelectedProviderKey(null)}
+          onClose={closeProvider}
         />
       ) : null}
     </div>
