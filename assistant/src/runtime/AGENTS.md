@@ -163,7 +163,7 @@ In the CDP factory the bridge is the internal `"host-bridge"` candidate kind (`I
 
 ### Browser CLI surface defaults
 
-The browser execute and tab routes share `browser/desktop-target.ts`. Web guardian conversations use installed, enabled streamed Chrome by default. Native renderer turns also use the `web` transport, so the frozen turn `clientOs` excludes native apps from automatic streamed-browser selection. Native apps retain their existing backend selection and fallback behavior. Explicit desktop/backend/client targets and existing personal-browser sessions override the surface default. Disabled or uninstalled desktop support retains the existing browser path; selection never triggers installation.
+The browser execute and tab routes share `browser/virtual-desktop-target.ts`. Platform-hosted web guardian conversations use installed, enabled virtual desktop Chrome by default. The shared `isVirtualDesktopEnabled` gate requires both `IS_PLATFORM` and `IS_CONTAINERIZED` alongside the `assistant-desktop` flag. Native renderer turns also use the `web` transport, so the frozen turn `clientOs` excludes native apps from automatic streamed-browser selection. Native apps retain their existing backend selection and fallback behavior. Explicit desktop/backend/client targets and existing personal-browser sessions override the surface default. Disabled or uninstalled desktop support retains the existing browser path; selection never triggers installation.
 
 ### Per-tool `browser_mode` override
 

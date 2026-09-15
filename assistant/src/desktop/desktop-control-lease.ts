@@ -4,13 +4,13 @@ import { publishSyncInvalidation } from "../runtime/sync/sync-publisher.js";
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
 import { getLogger } from "../util/logger.js";
 import { desktopDependencyInstaller } from "./desktop-dependencies.js";
-import { isAssistantDesktopEnabled } from "./desktop-feature.js";
 import {
   type DesktopSessionManager,
   type DesktopViewer,
   getDesktopSessionManager,
 } from "./desktop-session-manager.js";
 import { DesktopViewerInput } from "./desktop-viewer-input.js";
+import { isVirtualDesktopEnabled } from "./virtual-desktop-feature.js";
 
 const log = getLogger("desktop-control");
 const IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -48,7 +48,7 @@ export class DesktopControlLease {
       input: Pick<DesktopViewerInput, "setViewerInput">;
       notify: () => Promise<unknown>;
     } = {
-      enabled: () => isAssistantDesktopEnabled(getConfig()),
+      enabled: () => isVirtualDesktopEnabled(getConfig()),
       ready: () => desktopDependencyInstaller.getStatus().state === "ready",
       manager: getDesktopSessionManager,
       input: new DesktopViewerInput(),
@@ -81,11 +81,13 @@ export class DesktopControlLease {
 
   private assertAvailable(): void {
     if (!this.deps.enabled()) {
-      throw new Error("Desktop control is not available on this assistant");
+      throw new Error(
+        "Virtual desktop control is available only on enabled platform-hosted assistants",
+      );
     }
     if (!this.deps.ready()) {
       throw new Error(
-        "Open the Desktop modal and wait for automatic installation to finish before using desktop control",
+        "Open the Virtual desktop panel and wait for automatic installation to finish before using desktop control",
       );
     }
   }

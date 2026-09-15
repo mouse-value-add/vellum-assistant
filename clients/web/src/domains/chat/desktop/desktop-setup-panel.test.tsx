@@ -77,12 +77,12 @@ function notify() {
 test("opening only checks setup; installing shows progress and opens the desktop when ready", async () => {
   mount();
   const install = await screen.findByRole("button", {
-    name: "Install desktop",
+    name: "Install virtual desktop",
   });
   expect(postCalls).toBe(0);
   expect(open).not.toHaveBeenCalled();
   fireEvent.click(install);
-  await screen.findByText("Installing desktop components…");
+  await screen.findByText("Installing virtual desktop components…");
   expect(postCalls).toBe(1);
   expect(open).not.toHaveBeenCalled();
   state = "ready";
@@ -93,14 +93,14 @@ test("opening only checks setup; installing shows progress and opens the desktop
 test("reopening observes an existing install and offers retry after failure", async () => {
   state = "installing";
   mount();
-  await screen.findByText("Installing desktop components…");
+  await screen.findByText("Installing virtual desktop components…");
   expect(postCalls).toBe(0);
   state = "failed";
   notify();
   fireEvent.click(
-    await screen.findByRole("button", { name: "Install desktop" }),
+    await screen.findByRole("button", { name: "Install virtual desktop" }),
   );
-  await screen.findByText("Installing desktop components…");
+  await screen.findByText("Installing virtual desktop components…");
   expect(postCalls).toBe(1);
 });
 

@@ -2,11 +2,11 @@ import { Button } from "@vellumai/design-library";
 import { Monitor } from "lucide-react";
 
 import { useTranslation } from "@/i18n";
-import { useAssistantFeatureFlagStore } from "@/stores/assistant-feature-flag-store";
 import { useResolvedAssistantsStore } from "@/stores/resolved-assistants-store";
 import { usePointerCoarse } from "@/utils/pointer";
 
 import { useDesktopPreviewStore } from "./desktop-preview-store";
+import { useVirtualDesktopEnabled } from "./use-virtual-desktop-enabled";
 
 export function AssistantDesktopAffordance({
   onToggle,
@@ -14,7 +14,7 @@ export function AssistantDesktopAffordance({
   onToggle?: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const enabled = useAssistantFeatureFlagStore.use.assistantDesktop();
+  const enabled = useVirtualDesktopEnabled();
   const assistantId = useResolvedAssistantsStore.use.activeAssistantId();
   const session = useDesktopPreviewStore.use.session();
   const fullscreenOnly = usePointerCoarse();

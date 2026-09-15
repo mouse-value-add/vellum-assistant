@@ -1,12 +1,12 @@
 import { getConfig } from "../config/loader.js";
 import { desktopDependencyInstaller } from "../desktop/desktop-dependencies.js";
-import { isAssistantDesktopEnabled } from "../desktop/desktop-feature.js";
+import { isVirtualDesktopEnabled } from "../desktop/virtual-desktop-feature.js";
 import { browserManager } from "../tools/browser/browser-manager.js";
 import { normalizeBrowserMode } from "../tools/browser/browser-mode.js";
 import { getPinnedTab } from "../tools/browser/pinned-tabs.js";
 import type { ToolContext } from "../tools/types.js";
 
-export function shouldUseDesktopBrowser(
+export function shouldUseVirtualDesktopBrowser(
   desktop: boolean | undefined,
   input: Record<string, unknown>,
   context: ToolContext,
@@ -32,7 +32,7 @@ export function shouldUseDesktopBrowser(
     return false;
   }
   return (
-    isAssistantDesktopEnabled(getConfig()) &&
+    isVirtualDesktopEnabled(getConfig()) &&
     desktopDependencyInstaller.getStatus().state === "ready"
   );
 }

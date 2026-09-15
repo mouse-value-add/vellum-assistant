@@ -17,7 +17,7 @@ import {
 } from "bun:test";
 
 import { desktopDependencyInstaller } from "../../desktop/desktop-dependencies.js";
-import * as desktopFeature from "../../desktop/desktop-feature.js";
+import * as desktopFeature from "../../desktop/virtual-desktop-feature.js";
 import { browserManager } from "../../tools/browser/browser-manager.js";
 import type { ToolExecutionResult } from "../../tools/types.js";
 
@@ -85,7 +85,7 @@ let desktopReady = false;
 let desktopFailure = false;
 const enabledSpy = spyOn(
   desktopFeature,
-  "isAssistantDesktopEnabled",
+  "isVirtualDesktopEnabled",
 ).mockImplementation(() => desktopEnabled);
 const readySpy = spyOn(
   desktopDependencyInstaller,

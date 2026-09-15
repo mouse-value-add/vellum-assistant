@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { getConfig } from "../../config/loader.js";
 import { desktopControlLease } from "../../desktop/desktop-control-lease.js";
-import { isAssistantDesktopEnabled } from "../../desktop/desktop-feature.js";
+import { isVirtualDesktopEnabled } from "../../desktop/virtual-desktop-feature.js";
 import { GATEWAY_PRINCIPALS } from "../auth/route-policy.js";
 import { NotFoundError } from "./errors.js";
 import type { RouteDefinition } from "./types.js";
@@ -18,9 +18,9 @@ export const ROUTES: RouteDefinition[] = ["GET", "POST"].map((method) => ({
   policy: { requiredScopes: [], allowedPrincipalTypes: GATEWAY_PRINCIPALS },
   ...(method === "POST" ? { requestBody: request } : {}),
   handler: ({ body }) => {
-    if (!isAssistantDesktopEnabled(getConfig())) {
+    if (!isVirtualDesktopEnabled(getConfig())) {
       throw new NotFoundError(
-        "Desktop control is not available on this assistant",
+        "Virtual desktop control is available only on enabled platform-hosted assistants",
       );
     }
     if (method === "GET") {
@@ -32,8 +32,8 @@ export const ROUTES: RouteDefinition[] = ["GET", "POST"].map((method) => ({
   },
   summary:
     method === "GET"
-      ? "Get desktop control status"
-      : "Hand desktop control between the user and assistant",
+      ? "Get virtual desktop control status"
+      : "Hand virtual desktop control between the user and assistant",
   tags: ["desktop"],
   responseBody: status,
 }));

@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 
-import { shouldUseDesktopBrowser } from "../../browser/desktop-target.js";
+import { shouldUseVirtualDesktopBrowser } from "../../browser/virtual-desktop-target.js";
 import { HostBrowserProxy } from "../../daemon/host-browser-proxy.js";
 import { executeDesktopBrowserTabs } from "../../desktop/desktop-browser-operations.js";
 import { normalizeBrowserMode } from "../../tools/browser/browser-mode.js";
@@ -64,7 +64,7 @@ async function handleBrowserTabs({
     throw new BadRequestError(mode.error);
   }
   if (
-    shouldUseDesktopBrowser(
+    shouldUseVirtualDesktopBrowser(
       desktop,
       { browser_mode: browserMode, target_client_id: targetClientId },
       context,
@@ -75,7 +75,7 @@ async function handleBrowserTabs({
       (mode.mode !== "auto" && mode.mode !== "cdp-inspect")
     ) {
       throw new BadRequestError(
-        "--desktop cannot target a personal browser client",
+        "--virtual-desktop cannot target a personal browser client",
       );
     }
     const result = await executeDesktopBrowserTabs(

@@ -16,12 +16,12 @@ export function executeDesktopBrowserOperation(
       input.browser_mode !== "cdp-inspect")
   ) {
     throw new Error(
-      "--desktop targets the streamed Chrome directly. Omit other browser targets and modes.",
+      "--virtual-desktop targets the streamed Chrome directly. Omit other browser targets and modes.",
     );
   }
   if (input.use_active_tab) {
     throw new Error(
-      "Use assistant browser --desktop tabs list and tabs select to choose a streamed browser tab.",
+      "Use assistant browser --virtual-desktop tabs list and tabs select to choose a streamed browser tab.",
     );
   }
   if (operation === "wait_for_download") {
@@ -48,7 +48,7 @@ export function executeDesktopBrowserOperation(
                 mode: "desktop",
                 available: true,
                 summary:
-                  "Streamed desktop Chrome is ready. Use assistant browser --desktop commands.",
+                  "Virtual desktop Chrome is ready. Use assistant browser --virtual-desktop commands.",
                 userActions: [],
               },
             ],

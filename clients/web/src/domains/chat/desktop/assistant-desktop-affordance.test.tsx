@@ -11,6 +11,11 @@ import { useEffect, useState } from "react";
 let desktopEnabled: boolean | undefined = true;
 let assistantId = "asst-1";
 let touch = false;
+let platformHosted = true;
+
+mock.module("@/hooks/use-platform-gate", () => ({
+  useActiveAssistantIsPlatformHosted: () => platformHosted,
+}));
 
 mock.module("@/utils/pointer", () => ({
   usePointerCoarse: () => touch,
@@ -57,7 +62,7 @@ function DesktopHarness() {
 
 const openDesktop = async () => {
   render(<DesktopHarness />);
-  fireEvent.click(screen.getByRole("button", { name: "Open desktop" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open virtual desktop" }));
   await waitFor(() =>
     expect(screen.getByTestId("desktop-panel")).not.toBeNull(),
   );
@@ -65,6 +70,7 @@ const openDesktop = async () => {
 
 beforeEach(() => {
   touch = false;
+  platformHosted = true;
   useDesktopPreviewStore.setState({ position: null });
   panelUnmounts = 0;
   desktopEnabled = true;
@@ -91,8 +97,12 @@ describe("AssistantDesktopAffordance", () => {
       );
     }
     render(<MenuHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Open desktop" }));
-    await waitFor(() => expect(screen.getByTestId("desktop-panel")).toBeTruthy());
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("desktop-panel")).toBeTruthy(),
+    );
     expect(screen.queryByRole("navigation") === null).toBe(true);
     expect(screen.getByRole("dialog")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
@@ -106,25 +116,33 @@ describe("AssistantDesktopAffordance", () => {
     await openDesktop();
     expect(screen.getByRole("dialog")).not.toBeNull();
     expect(screen.getByTestId("desktop-panel").dataset.viewOnly).toBe("false");
-    expect(screen.queryByRole("button", { name: "Expand desktop" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Expand virtual desktop" }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
     await waitFor(() =>
       expect(screen.queryByTestId("desktop-panel") === null).toBe(true),
     );
-    expect(screen.getByRole("button", { name: "Open desktop" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    ).not.toBeNull();
   });
   for (const flag of [false, undefined]) {
     test(`hides the desktop control and panel when the flag is ${flag}`, () => {
       desktopEnabled = flag;
       render(<DesktopHarness />);
-      expect(screen.queryByRole("button", { name: "Open desktop" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Open virtual desktop" }),
+      ).toBeNull();
       expect(screen.queryByTestId("desktop-panel") === null).toBe(true);
     });
   }
 
   test("unmounts an open desktop when the flag is disabled", async () => {
     const { rerender } = render(<DesktopHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Open desktop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("desktop-panel")).not.toBeNull(),
     );
@@ -137,7 +155,9 @@ describe("AssistantDesktopAffordance", () => {
 
   test("Escape leaves the modal open and the panel mounted", async () => {
     await openDesktop();
-    fireEvent.click(screen.getByRole("button", { name: "Expand desktop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand virtual desktop" }),
+    );
 
     fireEvent.keyDown(document.activeElement ?? document.body, {
       key: "Escape",
@@ -150,7 +170,9 @@ describe("AssistantDesktopAffordance", () => {
 
   test("clicks inside the expanded desktop keep it open", async () => {
     await openDesktop();
-    fireEvent.click(screen.getByRole("button", { name: "Expand desktop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand virtual desktop" }),
+    );
     fireEvent.pointerDown(screen.getByTestId("desktop-panel"));
     fireEvent.click(screen.getByTestId("desktop-panel"));
     expect(screen.getByRole("dialog")).not.toBeNull();
@@ -160,7 +182,9 @@ describe("AssistantDesktopAffordance", () => {
   test("closing fullscreen restores the same preview session", async () => {
     await openDesktop();
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand desktop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand virtual desktop" }),
+    );
     expect(screen.getByTestId("desktop-panel").dataset.viewOnly).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
 
@@ -173,7 +197,7 @@ describe("AssistantDesktopAffordance", () => {
     await openDesktop();
     expect(screen.queryByRole("dialog")).toBeNull();
     const collapse = screen.getByRole("button", {
-      name: "Hide desktop",
+      name: "Hide virtual desktop",
     });
     expect(collapse.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(collapse);
@@ -182,19 +206,23 @@ describe("AssistantDesktopAffordance", () => {
       expect(screen.queryByTestId("desktop-panel") === null).toBe(true),
     );
     expect(panelUnmounts).toBe(1);
-    expect(screen.getByRole("button", { name: "Open desktop" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    ).not.toBeNull();
   });
 
   test("the preview X closes it without opening fullscreen", async () => {
     await openDesktop();
     fireEvent.click(
-      screen.getByRole("button", { name: "Close desktop preview" }),
+      screen.getByRole("button", { name: "Close virtual desktop preview" }),
     );
     await waitFor(() =>
       expect(screen.queryByTestId("desktop-panel") === null).toBe(true),
     );
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "Open desktop" })).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    ).not.toBeNull();
   });
 
   function mockPreviewGeometry() {
@@ -222,7 +250,9 @@ describe("AssistantDesktopAffordance", () => {
   test("dragging moves the preview without expanding and the X still closes it", async () => {
     await openDesktop();
     const frame = mockPreviewGeometry();
-    const expand = screen.getByRole("button", { name: "Expand desktop" });
+    const expand = screen.getByRole("button", {
+      name: "Expand virtual desktop",
+    });
     const pointer = { pointerId: 1, button: 0, buttons: 1, isPrimary: true };
     fireEvent.pointerDown(expand, { ...pointer, clientX: 500, clientY: 400 });
     fireEvent.pointerMove(frame, { ...pointer, clientX: 300, clientY: 200 });
@@ -235,7 +265,9 @@ describe("AssistantDesktopAffordance", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(panelUnmounts).toBe(0);
 
-    const close = screen.getByRole("button", { name: "Close desktop preview" });
+    const close = screen.getByRole("button", {
+      name: "Close virtual desktop preview",
+    });
     fireEvent.pointerDown(close, pointer);
     fireEvent.click(close, { detail: 1 });
     expect(useDesktopPreviewStore.getState().session).toBeNull();
@@ -245,7 +277,7 @@ describe("AssistantDesktopAffordance", () => {
     await openDesktop();
     const frame = mockPreviewGeometry();
     const move = screen.getByRole("button", {
-      name: "Move desktop preview (arrow keys)",
+      name: "Move virtual desktop preview (arrow keys)",
     });
     fireEvent.keyDown(move, { key: "ArrowLeft" });
     expect(frame.style.left).toBe("464px");
@@ -260,7 +292,9 @@ describe("AssistantDesktopAffordance", () => {
 
   test("switching assistants closes the previous session", async () => {
     const { rerender } = render(<DesktopHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Open desktop" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open virtual desktop" }),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("desktop-panel")).not.toBeNull(),
     );
@@ -272,4 +306,23 @@ describe("AssistantDesktopAffordance", () => {
     rerender(<DesktopHarness />);
     expect(screen.queryByTestId("desktop-panel") === null).toBe(true);
   });
+});
+
+test("self-hosted assistants cannot open the virtual desktop even with its flag enabled", () => {
+  platformHosted = false;
+  render(<DesktopHarness />);
+  expect(
+    screen.queryByRole("button", { name: "Open virtual desktop" }),
+  ).toBeNull();
+  expect(screen.queryByTestId("desktop-panel")).toBeNull();
+});
+
+test("switching to a self-hosted assistant closes the virtual desktop preview", async () => {
+  const { rerender } = render(<DesktopHarness />);
+  fireEvent.click(screen.getByRole("button", { name: "Open virtual desktop" }));
+  await waitFor(() => expect(screen.getByTestId("desktop-panel")).toBeTruthy());
+  platformHosted = false;
+  rerender(<DesktopHarness />);
+  await waitFor(() => expect(screen.queryByTestId("desktop-panel")).toBeNull());
+  expect(useDesktopPreviewStore.getState().session).toBeNull();
 });

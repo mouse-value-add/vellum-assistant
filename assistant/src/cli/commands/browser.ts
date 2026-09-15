@@ -132,6 +132,7 @@ function attachOperationAction(
     const input: Record<string, unknown> = {};
     const excludeKeys = new Set([
       "desktop",
+      "virtualDesktop",
       "session",
       "json",
       "output",
@@ -332,6 +333,9 @@ export function registerBrowserCommand(program: Command): void {
     build: (browser) => {
       applyCommandHelp(browser, browserHelp);
       browser.hook("preAction", () => {
+        if (browser.opts().virtualDesktop) {
+          browser.setOptionValue("desktop", true);
+        }
         const options = browser.opts();
         if (
           options.desktop &&
@@ -340,7 +344,7 @@ export function registerBrowserCommand(program: Command): void {
               !["auto", "cdp-inspect"].includes(options.browserMode)))
         ) {
           throw new Error(
-            "--desktop cannot be combined with a personal browser target or another browser mode",
+            "--virtual-desktop cannot be combined with a personal browser target or another browser mode",
           );
         }
       });

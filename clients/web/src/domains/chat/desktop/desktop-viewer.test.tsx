@@ -224,7 +224,7 @@ describe("DesktopViewer", () => {
 
     expect(status()).toBe("busy");
     expect(
-      screen.getByText("The desktop is in use by another viewer."),
+      screen.getByText("The virtual desktop is in use by another viewer."),
     ).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
@@ -244,7 +244,9 @@ describe("DesktopViewer", () => {
     act(() => socket().serverClose(4011));
 
     expect(status()).toBe("failed");
-    expect(screen.getByText("The desktop couldn't start.")).not.toBeNull();
+    expect(
+      screen.getByText("The virtual desktop couldn't start."),
+    ).not.toBeNull();
     expect(screen.getByRole("button", { name: "Reconnect" })).not.toBeNull();
   });
 
@@ -475,6 +477,8 @@ test("preview suppresses clipboard traffic and expands without reconnecting", as
   expect(rfb().pasted).toEqual([selected]);
   expect(FakeRFB.instances).toHaveLength(1);
   expect(rfb().disconnectCalls).toBe(0);
-  expect(screen.queryByRole("button", { name: "Expand desktop" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Expand virtual desktop" }),
+  ).toBeNull();
   node.remove();
 });

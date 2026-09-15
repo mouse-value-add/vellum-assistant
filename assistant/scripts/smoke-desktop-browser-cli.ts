@@ -134,7 +134,7 @@ async function cli(...args: string[]) {
       "bun",
       "assistant",
       "browser",
-      "--desktop",
+      "--virtual-desktop",
       "--json",
       ...args,
     ]);

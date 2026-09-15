@@ -11922,7 +11922,7 @@ paths:
   /v1/desktop/control:
     get:
       operationId: desktop_control_get
-      summary: Get desktop control status
+      summary: Get virtual desktop control status
       tags:
         - desktop
       responses:
@@ -11944,7 +11944,7 @@ paths:
                 additionalProperties: false
     post:
       operationId: desktop_control_post
-      summary: Hand desktop control between the user and assistant
+      summary: Hand virtual desktop control between the user and assistant
       tags:
         - desktop
       requestBody:
@@ -11981,7 +11981,7 @@ paths:
   /v1/desktop/setup:
     get:
       operationId: desktop_setup_get
-      summary: Get desktop setup status
+      summary: Get virtual desktop setup status
       tags:
         - desktop
       responses:
@@ -12011,7 +12011,7 @@ paths:
                 additionalProperties: false
     post:
       operationId: desktop_setup_post
-      summary: Install desktop components
+      summary: Install virtual desktop components
       tags:
         - desktop
       responses:
