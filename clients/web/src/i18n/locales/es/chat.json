@@ -23,6 +23,7 @@
   },
   "acpConnectAffordance": {
     "connectButton": "Conectar",
+    "dismissButton": "Descartar",
     "errorFallback": "No se pudo conectar Claude. Inténtalo de nuevo.",
     "pastePlaceholder": "Pega tu clave",
     "saveButton": "Guardar",
@@ -106,7 +107,8 @@
     "connecting": "Conectando con el escritorio virtual…",
     "failed": "No se pudo iniciar el escritorio virtual.",
     "lost": "Se perdió la conexión con el escritorio virtual.",
-    "openAria": "Abrir escritorio virtual",
+    "openAria": "Abrir el escritorio virtual de {name}",
+    "openUnnamedAria": "Abrir escritorio virtual",
     "reconnectButton": "Reconectar",
     "title": "Escritorio virtual",
     "unavailable": "El escritorio virtual no está disponible en este asistente.",
@@ -1329,6 +1331,7 @@
   },
   "preferencesMenu": {
     "admin": "Admin",
+    "earnCredits": "Gana créditos gratis",
     "preferences": "Preferencias",
     "settings": "Ajustes",
     "shareFeedback": "Compartir comentarios"

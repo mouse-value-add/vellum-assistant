@@ -168,7 +168,13 @@ export interface LiveVoiceClientStartFrame {
   readonly sessionControls?: readonly LiveVoiceSessionControl[];
 }
 
-const LIVE_VOICE_SESSION_CONTROLS = ["end", "mute"] as const;
+const LIVE_VOICE_SESSION_CONTROLS = [
+  "end",
+  "mute",
+  "look_screen",
+  "look_camera",
+  "look_stop",
+] as const;
 
 /** A session control a client can carry out on the assistant's behalf. */
 export type LiveVoiceSessionControl =
@@ -633,6 +639,9 @@ export interface LiveVoiceMinimizeRoomServerFrame extends LiveVoiceServerFrameBa
  *   elapses; without, stay muted until the user unmutes. The timer is the
  *   client's: a muted microphone sends silence, so the daemon cannot hear an
  *   "unmute".
+ * - `look_screen`: start showing the call the user's screen.
+ * - `look_camera`: start showing the call what the camera sees.
+ * - `look_stop`: stop showing the call the screen and the camera.
  */
 export interface LiveVoiceSessionControlServerFrame extends LiveVoiceServerFrameBase {
   readonly type: "session_control";

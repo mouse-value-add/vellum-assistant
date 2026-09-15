@@ -23,6 +23,7 @@
   },
   "acpConnectAffordance": {
     "connectButton": "连接",
+    "dismissButton": "忽略",
     "errorFallback": "连接 Claude 失败。请重试。",
     "pastePlaceholder": "粘贴您的密钥",
     "saveButton": "保存",
@@ -106,7 +107,8 @@
     "connecting": "正在连接虚拟桌面…",
     "failed": "虚拟桌面无法启动。",
     "lost": "与虚拟桌面的连接已断开。",
-    "openAria": "打开虚拟桌面",
+    "openAria": "打开 {name} 的虚拟桌面",
+    "openUnnamedAria": "打开虚拟桌面",
     "reconnectButton": "重新连接",
     "title": "虚拟桌面",
     "unavailable": "此助理不支持虚拟桌面。",
@@ -1367,6 +1369,7 @@
   },
   "preferencesMenu": {
     "admin": "管理",
+    "earnCredits": "赚取免费积分",
     "preferences": "偏好设置",
     "settings": "设置",
     "shareFeedback": "分享反馈"
