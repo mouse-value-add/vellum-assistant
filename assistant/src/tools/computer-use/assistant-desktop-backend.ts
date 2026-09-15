@@ -24,23 +24,25 @@ const X11_KEYS: Readonly<Record<string, string>> = {
   super: "super",
 };
 
-export function executeAssistantDesktopTool(
+export async function executeAssistantDesktopTool(
   toolName: string,
   input: Record<string, unknown>,
   context: ToolContext,
 ): Promise<ToolExecutionResult> {
+  let unsupported: string | undefined;
   if (!ASSISTANT_DESKTOP_TOOLS.has(toolName)) {
-    throw new Error(`${toolName} is not supported on the assistant desktop`);
-  }
-  if (
+    unsupported = `${toolName} is not supported on the assistant desktop`;
+  } else if (
     input.element_id !== undefined ||
     input.to_element_id !== undefined ||
     input.capture_window_id !== undefined ||
     input.full_tree === true
   ) {
-    throw new Error(
-      "The assistant desktop supports full-screen screenshots and pixel coordinates, not accessibility elements or window capture",
-    );
+    unsupported =
+      "The assistant desktop supports full-screen screenshots and pixel coordinates, not accessibility elements or window capture";
+  }
+  if (unsupported) {
+    return rejectAssistantDesktopInput(unsupported, context);
   }
   const observed = { observation_id: input.observation_id };
   const point = { x: input.x, y: input.y };
@@ -117,4 +119,16 @@ export function executeAssistantDesktopTool(
     }
     return result;
   });
+}
+
+export async function rejectAssistantDesktopInput(
+  content: string,
+  context: ToolContext,
+): Promise<ToolExecutionResult> {
+  try {
+    await desktopControl.execute({ action: "done" }, context);
+  } catch (error) {
+    content += ` Desktop control release failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return { content, isError: true };
 }

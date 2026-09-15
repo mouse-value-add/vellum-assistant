@@ -33,5 +33,11 @@ export function computerUseTarget(
 export function computerUseExecutionTarget(
   input: Record<string, unknown>,
 ): ExecutionTarget {
-  return computerUseTarget(input) === "assistant-desktop" ? "sandbox" : "host";
+  try {
+    return computerUseTarget(input) === "assistant-desktop"
+      ? "sandbox"
+      : "host";
+  } catch {
+    return "host";
+  }
 }

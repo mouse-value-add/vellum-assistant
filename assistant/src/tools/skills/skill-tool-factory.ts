@@ -37,14 +37,16 @@ export function createSkillTool(
   versionHash: string,
   bundled?: boolean,
 ): Tool {
+  const isComputerUse =
+    bundled &&
+    resolve(skillDir) === resolve(join(getBundledSkillsDir(), "computer-use"));
   return {
     name: entry.name,
     description: entry.description,
     category: entry.category,
     defaultRiskLevel: riskMap[entry.risk],
     executionTarget: entry.execution_target as ExecutionTarget,
-    ...(bundled &&
-    resolve(skillDir) === resolve(join(getBundledSkillsDir(), "computer-use"))
+    ...(isComputerUse
       ? { getExecutionTarget: computerUseExecutionTarget }
       : {}),
     supportedClientOs: entry.supported_client_os,
@@ -87,12 +89,18 @@ export function createSkillTool(
         const misuse = bundled
           ? bundledToolInputMisuseMessage(entry.name, coercedInput)
           : undefined;
-        return {
-          content:
-            misuse ??
-            `Invalid input for tool "${entry.name}": ${validation.errors.join("; ")}. Fix the arguments and retry.`,
-          isError: true,
-        };
+        const content =
+          misuse ??
+          `Invalid input for tool "${entry.name}": ${validation.errors.join("; ")}. Fix the arguments and retry.`;
+        if (
+          isComputerUse &&
+          computerUseExecutionTarget(coercedInput) === "sandbox"
+        ) {
+          const { rejectAssistantDesktopInput } =
+            await import("../computer-use/assistant-desktop-backend.js");
+          return rejectAssistantDesktopInput(content, context);
+        }
+        return { content, isError: true };
       }
 
       return runSkillToolScript(

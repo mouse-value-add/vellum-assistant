@@ -305,12 +305,13 @@ test("permission routing follows the trusted skill target and cannot downgrade u
     }
     expect(resolveExecutionTarget(tool)).toBe("host");
     expect(resolveExecutionTarget(tool, {})).toBe("host");
-    expect(() =>
-      resolveExecutionTarget(tool, {
-        target: "assistant-desktop",
-        target_client_id: "client-123",
-      }),
-    ).toThrow();
+    for (const args of [
+      { target: "assistant-desktop", target_client_id: "client-123" },
+      { target: "invalid" },
+      { target: "connected-computer", observation_id: crypto.randomUUID() },
+    ]) {
+      expect(resolveExecutionTarget(tool, args)).toBe("host");
+    }
     const dir = join(getBundledSkillsDir(), "computer-use");
     const entry = parseToolManifestFile(join(dir, "TOOLS.json")).tools[0]!;
     const untrusted = createSkillTool(
@@ -373,4 +374,44 @@ test("a web conversation can use native drag only when a supported computer is a
     containerized.mockRestore();
     setup.mockRestore();
   }
+});
+
+test.each([
+  ["type_text", { reasoning: "Type" }],
+  ["done", {}],
+  ["click", { reasoning: "Click", x: 10, y: 10, unexpected: true }],
+] as const)(
+  "schema rejection in %s releases only the current owner's lease",
+  async (name, args) => {
+    const f = fixture();
+    const noSession = await f.local(name, args);
+    expect(noSession.isError).toBe(true);
+    expect(f.started).not.toHaveBeenCalled();
+    await f.local("observe");
+    const other = await f.local(name, args, {
+      ...context,
+      sourceActorPrincipalId: "user-456",
+    });
+    expect(other.isError).toBe(true);
+    expect(f.lease.getStatus().state).toBe("assistant");
+    const own = await f.local(name, args);
+    expect(own.isError).toBe(true);
+    expect(own.content).toContain("Invalid input");
+    expect(f.input.perform).not.toHaveBeenCalled();
+    expect(f.lease.getStatus().state).toBe("idle");
+  },
+);
+
+test("unsupported native observation features release the owner without touching a host", async () => {
+  const f = fixture();
+  await f.local("observe");
+  const proxy = mock(async () => ({ content: "host", isError: false }));
+  const result = await f.local(
+    "observe",
+    { full_tree: true },
+    { ...context, proxyToolResolver: proxy },
+  );
+  expect(result.isError).toBe(true);
+  expect(f.lease.getStatus().state).toBe("idle");
+  expect(proxy).not.toHaveBeenCalled();
 });
