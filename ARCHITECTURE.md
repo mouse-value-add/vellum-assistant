@@ -825,7 +825,7 @@ Before launching Chrome or exposing its dock launcher, the Linux container sessi
 
 ### Assistant desktop browser use
 
-The bundled `assistant-desktop` skill uses `assistant browser --desktop` against the managed Chrome window. The default-off `assistant-desktop` flag, completed automatic installation and identified guardian conversation gate automation. No connected host desktop client is needed. Existing host computer-use tools keep their connected-client routing.
+`assistant browser --desktop` controls the managed Chrome window. Usage guidance lives in `assistant browser --help`. The default-off `assistant-desktop` flag, completed automatic installation and identified guardian conversation gate automation. No connected host desktop client is needed. Existing host computer-use tools keep their connected-client routing.
 
 `DesktopControlLease` serializes browser automation and binds ownership to one conversation and actor. The browser CLI borrows a scoped direct CDP client and dispatches through the existing browser operation handlers. Snapshot references use a separate desktop namespace and are invalidated on navigation, tab changes and release. A page overlay animates the CDP pointer in the stream. Page screenshots come directly from Chrome as color JPEGs. Native application control and whole-desktop screenshots are outside this browser interface. See [desktop browser CLI](assistant/docs/desktop-browser-cli.md).
 
