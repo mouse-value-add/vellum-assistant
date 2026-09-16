@@ -52,6 +52,9 @@ function fixture() {
   const lease = new DesktopControlLease({
     enabled: () => enabled,
     ready: () => ready,
+    ensureReady: async () => {
+      throw new Error("Desktop setup required");
+    },
     manager: () => manager,
     input,
     notify: async () => {},
@@ -227,7 +230,7 @@ describe("assistant desktop control", () => {
     f.disable();
     await expect(
       f.control.execute({ action: "observe" }, context()),
-    ).rejects.toThrow("not available");
+    ).rejects.toThrow("only on enabled platform-hosted assistants");
     expect(f.released).toHaveBeenCalledTimes(2);
   });
 });

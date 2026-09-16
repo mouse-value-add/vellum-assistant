@@ -4209,6 +4209,8 @@ paths:
                   minLength: 1
                 desktop:
                   type: boolean
+                browserMode:
+                  type: string
                 tabId:
                   type: number
                 url:
@@ -11920,7 +11922,7 @@ paths:
   /v1/desktop/control:
     get:
       operationId: desktop_control_get
-      summary: Get desktop control status
+      summary: Get virtual desktop control status
       tags:
         - desktop
       responses:
@@ -11942,7 +11944,7 @@ paths:
                 additionalProperties: false
     post:
       operationId: desktop_control_post
-      summary: Hand desktop control between the user and assistant
+      summary: Hand virtual desktop control between the user and assistant
       tags:
         - desktop
       requestBody:
@@ -11979,7 +11981,7 @@ paths:
   /v1/desktop/setup:
     get:
       operationId: desktop_setup_get
-      summary: Get desktop setup status
+      summary: Get virtual desktop setup status
       tags:
         - desktop
       responses:
@@ -12009,7 +12011,7 @@ paths:
                 additionalProperties: false
     post:
       operationId: desktop_setup_post
-      summary: Install desktop components
+      summary: Install virtual desktop components
       tags:
         - desktop
       responses:
@@ -18489,7 +18491,7 @@ paths:
     get:
       operationId: internal_mcp_list_get
       summary: List MCP servers with health status
-      description: Returns configured MCP servers with live health-check results (connected, needs auth, error).
+      description: Returns configured MCP servers with recorded runtime status without opening new connections.
       tags:
         - internal
       responses:
@@ -24544,6 +24546,22 @@ paths:
                             anyOf:
                               - type: string
                               - type: "null"
+                          tenant_host:
+                            anyOf:
+                              - type: object
+                                properties:
+                                  pattern:
+                                    type: string
+                                  label:
+                                    type: string
+                                  placeholder:
+                                    type: string
+                                required:
+                                  - pattern
+                                  - label
+                                  - placeholder
+                                additionalProperties: false
+                              - type: "null"
                           acts_as:
                             type: string
                             enum:
@@ -24560,6 +24578,7 @@ paths:
                           - supports_managed_mode
                           - managed_service_is_paid
                           - feature_flag
+                          - tenant_host
                           - acts_as
                         additionalProperties: false
                       - type: "null"
@@ -25078,6 +25097,22 @@ paths:
                           anyOf:
                             - type: string
                             - type: "null"
+                        tenant_host:
+                          anyOf:
+                            - type: object
+                              properties:
+                                pattern:
+                                  type: string
+                                label:
+                                  type: string
+                                placeholder:
+                                  type: string
+                              required:
+                                - pattern
+                                - label
+                                - placeholder
+                              additionalProperties: false
+                            - type: "null"
                         acts_as:
                           type: string
                           enum:
@@ -25094,6 +25129,7 @@ paths:
                         - supports_managed_mode
                         - managed_service_is_paid
                         - feature_flag
+                        - tenant_host
                         - acts_as
                       additionalProperties: false
                 required:

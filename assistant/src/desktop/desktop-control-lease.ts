@@ -4,13 +4,13 @@ import { publishSyncInvalidation } from "../runtime/sync/sync-publisher.js";
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
 import { getLogger } from "../util/logger.js";
 import { desktopDependencyInstaller } from "./desktop-dependencies.js";
-import { isAssistantDesktopEnabled } from "./desktop-feature.js";
 import {
   type DesktopSessionManager,
   type DesktopViewer,
   getDesktopSessionManager,
 } from "./desktop-session-manager.js";
 import { DesktopViewerInput } from "./desktop-viewer-input.js";
+import { isVirtualDesktopEnabled } from "./virtual-desktop-feature.js";
 
 const log = getLogger("desktop-control");
 const IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -38,18 +38,21 @@ export class DesktopControlLease {
   private inputCleanupPending = false;
   private generation = 0;
   private tail: Promise<unknown> = Promise.resolve();
+  private setupAbort: AbortController | undefined;
   private watchdog: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly deps: {
       enabled: () => boolean;
       ready: () => boolean;
+      ensureReady: (signal: AbortSignal) => Promise<void>;
       manager: () => DesktopSessionManager;
       input: Pick<DesktopViewerInput, "setViewerInput">;
       notify: () => Promise<unknown>;
     } = {
-      enabled: () => isAssistantDesktopEnabled(getConfig()),
+      enabled: () => isVirtualDesktopEnabled(getConfig()),
       ready: () => desktopDependencyInstaller.getStatus().state === "ready",
+      ensureReady: (signal) => desktopDependencyInstaller.ensureReady(signal),
       manager: getDesktopSessionManager,
       input: new DesktopViewerInput(),
       notify: () => publishSyncInvalidation([SYNC_TAGS.assistantDesktop]),
@@ -81,11 +84,13 @@ export class DesktopControlLease {
 
   private assertAvailable(): void {
     if (!this.deps.enabled()) {
-      throw new Error("Desktop control is not available on this assistant");
+      throw new Error(
+        "Virtual desktop control is available only on enabled platform-hosted assistants",
+      );
     }
     if (!this.deps.ready()) {
       throw new Error(
-        "Open the Desktop modal and wait for automatic installation to finish before using desktop control",
+        "Open the Virtual desktop panel and wait for automatic installation to finish before using desktop control",
       );
     }
   }
@@ -94,6 +99,9 @@ export class DesktopControlLease {
     this.humanControl = true;
     this.generation += 1;
     this.owner?.abort.abort();
+    this.setupAbort?.abort(
+      new Error("Virtual desktop setup wait interrupted by user control"),
+    );
     return this.exclusive(async () => {
       await this.release();
       this.notify();
@@ -237,7 +245,10 @@ export class DesktopControlLease {
     operation: (signal: AbortSignal) => Promise<ToolExecutionResult>,
     done = false,
   ): Promise<ToolExecutionResult> {
-    return this.run(context, ({ signal }) => operation(signal), { done });
+    return this.run(context, ({ signal }) => operation(signal), {
+      done,
+      autoInstall: true,
+    });
   }
 
   run(
@@ -250,6 +261,7 @@ export class DesktopControlLease {
     }) => Promise<ToolExecutionResult>,
     options: {
       done?: boolean;
+      autoInstall?: boolean;
       requiresLease?: boolean;
       countAction?: boolean;
       cleanup?: () => Promise<void>;
@@ -279,6 +291,45 @@ export class DesktopControlLease {
       }
       context.signal?.throwIfAborted();
       try {
+        if (
+          options.autoInstall &&
+          !this.owner &&
+          !this.humanControl &&
+          generation === this.generation &&
+          this.deps.enabled() &&
+          !this.deps.ready()
+        ) {
+          const abort = new AbortController();
+          this.setupAbort = abort;
+          const signal = AbortSignal.any([
+            abort.signal,
+            ...(context.signal ? [context.signal] : []),
+          ]);
+          const timeout = setTimeout(
+            () =>
+              abort.abort(
+                new Error(
+                  "Virtual desktop setup is taking too long. Check installation progress in the Virtual desktop panel. No browser action was performed.",
+                ),
+              ),
+            8 * 60_000,
+          );
+          const watchdog = setInterval(() => {
+            if (!this.deps.enabled()) {
+              abort.abort(
+                new Error("Virtual desktop was disabled during setup"),
+              );
+            }
+          }, 1_000);
+          try {
+            await this.deps.ensureReady(signal);
+            signal.throwIfAborted();
+          } finally {
+            clearTimeout(timeout);
+            clearInterval(watchdog);
+            this.setupAbort = undefined;
+          }
+        }
         this.assertAvailable();
       } catch (error) {
         await this.release();

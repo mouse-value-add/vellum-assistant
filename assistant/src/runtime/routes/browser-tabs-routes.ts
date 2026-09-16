@@ -7,8 +7,10 @@
 
 import { z } from "zod";
 
+import { shouldUseVirtualDesktopBrowser } from "../../browser/virtual-desktop-target.js";
 import { HostBrowserProxy } from "../../daemon/host-browser-proxy.js";
 import { executeDesktopBrowserTabs } from "../../desktop/desktop-browser-operations.js";
+import { normalizeBrowserMode } from "../../tools/browser/browser-mode.js";
 import { getCdpClient } from "../../tools/browser/cdp-client/factory.js";
 import {
   clearPinnedTab,
@@ -26,6 +28,7 @@ const BrowserTabsParams = z.object({
   sessionId: z.string().min(1).default("default"),
   conversationId: z.string().min(1).optional(),
   desktop: z.boolean().optional(),
+  browserMode: z.string().optional(),
   tabId: z.number().optional(),
   url: z.string().optional(),
   // Route tab operations to a specific extension client in multi-client
@@ -46,6 +49,7 @@ async function handleBrowserTabs({
     url,
     targetClientId,
     desktop,
+    browserMode,
   } = parseBody(BrowserTabsParams, body);
 
   const context = await resolveBrowserContext(
@@ -55,10 +59,23 @@ async function handleBrowserTabs({
     abortSignal,
   );
   const resolvedConversationId = context.conversationId;
-  if (desktop) {
-    if (targetClientId) {
+  const mode = normalizeBrowserMode(browserMode);
+  if ("error" in mode) {
+    throw new BadRequestError(mode.error);
+  }
+  if (
+    shouldUseVirtualDesktopBrowser(
+      desktop,
+      { browser_mode: browserMode, target_client_id: targetClientId },
+      context,
+    )
+  ) {
+    if (
+      targetClientId ||
+      (mode.mode !== "auto" && mode.mode !== "cdp-inspect")
+    ) {
       throw new BadRequestError(
-        "--desktop cannot target a personal browser client",
+        "--virtual-desktop cannot target a personal browser client",
       );
     }
     const result = await executeDesktopBrowserTabs(
@@ -71,15 +88,21 @@ async function handleBrowserTabs({
     return JSON.parse(result.content);
   }
 
-  const cdpOptions = { mode: "extension" as const, targetClientId };
-
-  // Every tabs command pins extension mode. Absorb a brief extension SSE
-  // reconnect blip so a flapping connection doesn't surface as a hard
-  // "no Chrome Extension connected" error.
-  await HostBrowserProxy.instance.waitForExtensionClient(
-    context.sourceActorPrincipalId,
+  const cdpOptions = {
+    mode:
+      targetClientId || mode.mode === "auto"
+        ? ("extension" as const)
+        : mode.mode,
     targetClientId,
-  );
+  };
+
+  // Absorb brief reconnects before dispatching to the extension.
+  if (cdpOptions.mode === "extension") {
+    await HostBrowserProxy.instance.waitForExtensionClient(
+      context.sourceActorPrincipalId,
+      targetClientId,
+    );
+  }
 
   if (command === "list") {
     const cdp = getCdpClient(context, cdpOptions);

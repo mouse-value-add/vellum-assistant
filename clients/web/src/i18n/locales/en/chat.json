@@ -23,6 +23,7 @@
   },
   "acpConnectAffordance": {
     "connectButton": "Connect",
+    "dismissButton": "Dismiss",
     "errorFallback": "Connecting Claude failed. Please try again.",
     "pastePlaceholder": "Paste your key",
     "saveButton": "Save",
@@ -94,30 +95,37 @@
     "earlierActivity": "Earlier activity"
   },
   "assistantDesktop": {
-    "busy": "The desktop is in use by another viewer.",
-    "connecting": "Connecting to the desktop…",
-    "failed": "The desktop couldn't start.",
-    "lost": "The connection to the desktop was lost.",
-    "openAria": "Open desktop",
+    "fitView": "Fit",
+    "panView": "Pan",
+    "controlView": "Control",
+    "panHint": "Drag to pan. Tap to click.",
+    "hideAria": "Hide virtual desktop",
+    "closeAria": "Close virtual desktop preview",
+    "moveAria": "Move virtual desktop preview (arrow keys)",
+    "expandAria": "Expand virtual desktop",
+    "busy": "The virtual desktop is in use by another viewer.",
+    "connecting": "Connecting to the virtual desktop…",
+    "failed": "The virtual desktop couldn't start.",
+    "lost": "The connection to the virtual desktop was lost.",
+    "openAria": "Open {name}'s virtual desktop",
+    "openUnnamedAria": "Open virtual desktop",
     "reconnectButton": "Reconnect",
-    "title": "Desktop",
-    "unavailable": "The desktop isn't available on this assistant.",
-    "installButton": "Install desktop",
-    "installDescription": "Install Google Chrome and the components needed for your assistant’s desktop. This may take a few minutes.",
-    "checkingSetup": "Checking desktop setup…",
-    "installingPackages": "Installing desktop components…",
+    "title": "Virtual desktop",
+    "unavailable": "The virtual desktop isn't available on this assistant.",
+    "installButton": "Install virtual desktop",
+    "checkingSetup": "Checking virtual desktop setup…",
+    "installingPackages": "Installing virtual desktop components…",
     "installingChrome": "Installing Google Chrome…",
     "checkingInstall": "Checking the installation…",
-    "installBackground": "Setup continues if you close this window.",
     "installFailed": "Installation failed. Try again to finish setup.",
-    "setupRequestFailed": "Could not check desktop setup. Reconnect to try again.",
-    "setupUnsupported": "Desktop installation requires a Linux x64 or ARM64 container with administrator access.",
-    "assistantControlling": "Assistant is controlling this desktop",
+    "setupRequestFailed": "Could not check virtual desktop setup. Reconnect to try again.",
+    "setupUnsupported": "Virtual desktop installation requires a Linux x64 or ARM64 container with administrator access.",
+    "assistantControlling": "Assistant is controlling this virtual desktop",
     "userControlling": "You have control. Allow the assistant when you are ready to continue.",
     "controlReady": "You can watch the assistant work here.",
     "takeControl": "Take control",
     "allowAssistant": "Allow assistant",
-    "controlFailed": "Could not update desktop control. Reconnect to try again."
+    "controlFailed": "Could not update virtual desktop control. Reconnect to try again."
   },
   "assistantNavItem": {
     "newChat": "New Chat"
@@ -1289,6 +1297,7 @@
     "defaultDescription": "Connect {name} so I can use it for this task.",
     "dismiss": "Dismiss",
     "missingDetails": "Missing assistant or provider details.",
+    "tenantHostInvalid": "Enter a valid {label}, for example {placeholder}",
     "thisAccount": "this account",
     "waiting": "Waiting...",
     "yourAssistant": "Your assistant"
@@ -1371,6 +1380,7 @@
   },
   "preferencesMenu": {
     "admin": "Admin",
+    "earnCredits": "Earn Free Credits",
     "preferences": "Preferences",
     "settings": "Settings",
     "shareFeedback": "Share Feedback"
@@ -1610,10 +1620,6 @@
   },
   "singleActivity": {
     "webSearch": "Web Search"
-  },
-  "skillCreatedCard": {
-    "view": "View",
-    "viewAria": "View {name}"
   },
   "skillDetailPanel": {
     "actionsAria": "Skill actions",

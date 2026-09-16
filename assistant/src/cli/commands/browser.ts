@@ -28,6 +28,8 @@ import { registerCommand } from "../lib/register-command.js";
 import { log } from "../logger.js";
 import { browserHelp, toKebab } from "./browser.help.js";
 
+const BROWSER_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
 // ── Naming helpers ───────────────────────────────────────────────────
 
 /**
@@ -132,6 +134,7 @@ function attachOperationAction(
     const input: Record<string, unknown> = {};
     const excludeKeys = new Set([
       "desktop",
+      "virtualDesktop",
       "session",
       "json",
       "output",
@@ -165,9 +168,7 @@ function attachOperationAction(
       }
     }
 
-    // Browser operations can be long-running (page loads, auth
-    // challenges, downloads up to 120s, etc.), so use a generous
-    // IPC timeout that exceeds any server-side operation timeout.
+    // First use can include virtual desktop installation and Chrome startup.
     const ipcResult = await cliIpcCall<BrowserExecuteResult>(
       "browser_execute",
       {
@@ -179,7 +180,7 @@ function attachOperationAction(
           ...(conversationId ? { conversationId } : {}),
         },
       },
-      { timeoutMs: 180_000 },
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
     );
 
     if (!ipcResult.ok) {
@@ -332,6 +333,9 @@ export function registerBrowserCommand(program: Command): void {
     build: (browser) => {
       applyCommandHelp(browser, browserHelp);
       browser.hook("preAction", () => {
+        if (browser.opts().virtualDesktop) {
+          browser.setOptionValue("desktop", true);
+        }
         const options = browser.opts();
         if (
           options.desktop &&
@@ -340,7 +344,7 @@ export function registerBrowserCommand(program: Command): void {
               !["auto", "cdp-inspect"].includes(options.browserMode)))
         ) {
           throw new Error(
-            "--desktop cannot be combined with a personal browser target or another browser mode",
+            "--virtual-desktop cannot be combined with a personal browser target or another browser mode",
           );
         }
       });
@@ -356,6 +360,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "list").action(async (opts: { pretty?: boolean }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -382,11 +387,14 @@ export function registerBrowserCommand(program: Command): void {
               command: "list",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -428,6 +436,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "select").action(async (opts: { tabId: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -445,12 +454,15 @@ export function registerBrowserCommand(program: Command): void {
               command: "select",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               tabId,
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -477,6 +489,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "new").action(async (opts: { url?: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -497,12 +510,15 @@ export function registerBrowserCommand(program: Command): void {
               command: "new",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               ...(opts.url ? { url: opts.url } : {}),
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {
@@ -535,6 +551,7 @@ export function registerBrowserCommand(program: Command): void {
       subcommand(tabs, "close").action(async (opts: { tabId: string }) => {
         const parentOpts = browser.opts() as {
           desktop?: boolean;
+          browserMode?: string;
           session?: string;
           json?: boolean;
           targetClientId?: string;
@@ -556,12 +573,15 @@ export function registerBrowserCommand(program: Command): void {
               command: "close",
               sessionId,
               ...(parentOpts.desktop ? { desktop: true } : {}),
+              ...(parentOpts.browserMode
+                ? { browserMode: parentOpts.browserMode }
+                : {}),
               tabId,
               ...(conversationId ? { conversationId } : {}),
               ...(targetClientId ? { targetClientId } : {}),
             },
           },
-          { timeoutMs: 30_000 },
+          { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS, cancelOnDisconnect: true },
         );
 
         if (!ipcResult.ok) {

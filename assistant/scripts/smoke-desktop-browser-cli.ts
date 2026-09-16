@@ -12,6 +12,10 @@ import { executeBrowserOperation } from "../src/browser/operations.js";
 import type { BrowserOperation } from "../src/browser/types.js";
 import { registerBrowserCommand } from "../src/cli/commands/browser.js";
 import { DesktopControlLease } from "../src/desktop/desktop-control-lease.js";
+import {
+  desktopChromePath,
+  desktopDependencyInstaller,
+} from "../src/desktop/desktop-dependencies.js";
 import { DesktopSessionManager } from "../src/desktop/desktop-session-manager.js";
 import { DesktopViewerInput } from "../src/desktop/desktop-viewer-input.js";
 import { getAssistantSocketPath } from "../src/ipc/socket-path.js";
@@ -22,10 +26,15 @@ if (
   !process.env.ASSISTANT_IPC_SOCKET_DIR
 ) {
   throw new Error(
-    "Run in disposable Linux with desktop packages, a temporary ASSISTANT_IPC_SOCKET_DIR and a Chrome executable argument.",
+    "Run in disposable Linux with desktop packages, a temporary ASSISTANT_IPC_SOCKET_DIR and a Chrome executable argument or --install for a cold install.",
   );
 }
-const executable = process.argv[2];
+const coldInstall = process.argv[2] === "--install";
+const executable = coldInstall ? desktopChromePath() : process.argv[2];
+if (coldInstall) {
+  assert.equal(desktopDependencyInstaller.getStatus().state, "required");
+  assert.equal(Bun.which("Xtigervnc"), null);
+}
 const directory = await mkdtemp(join(tmpdir(), "desktop-browser-cli-"));
 const input = new DesktopViewerInput();
 const manager = new DesktopSessionManager({
@@ -36,7 +45,9 @@ const manager = new DesktopSessionManager({
 });
 const control = new DesktopControlLease({
   enabled: () => true,
-  ready: () => true,
+  ready: () =>
+    !coldInstall || desktopDependencyInstaller.getStatus().state === "ready",
+  ensureReady: (signal) => desktopDependencyInstaller.ensureReady(signal),
   manager: () => manager,
   input,
   notify: async () => {},
@@ -48,6 +59,7 @@ const context = {
   trustClass: "guardian" as const,
 };
 let submissions = 0;
+let navigations = 0;
 const page = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -56,8 +68,11 @@ const page = Bun.serve({
       submissions++;
       return Response.json({ ok: true });
     }
+    if (new URL(request.url).pathname === "/") {
+      navigations++;
+    }
     return new Response(
-      `<!doctype html><html><head><title>Desktop browser CLI</title><style>body{font:24px sans-serif;padding:70px;background:#f3f4f8}input,button{font:inherit;padding:12px;margin:16px}#result{color:#5140bd}#colors{position:fixed;left:0;top:0;display:flex}#colors span{width:100px;height:50px}</style></head><body><div id="colors"><span style="background:#ff0000"></span><span style="background:#00ff00"></span><span style="background:#0000ff"></span></div><h1>Streamed desktop browser</h1><label>Example text<input id="text"></label><button id="save" onclick="fetch('/save');document.getElementById('result').textContent='Saved '+document.getElementById('text').value">Save</button><p id="result"></p></body></html>`,
+      `<!doctype html><html><head><title>Desktop browser CLI</title><style>body{font:24px sans-serif;padding:70px;background:#f3f4f8}input,button{font:inherit;padding:12px;margin:16px}#result{color:#5140bd}#colors{position:fixed;left:0;top:0;display:flex}#colors span{width:100px;height:50px}</style></head><body><div id="colors"><span style="background:#ff0000"></span><span style="background:#00ff00"></span><span style="background:#0000ff"></span></div><h1>Streamed desktop browser</h1><label>Example text<input id="text"></label><button id="save" onclick="fetch('/save');document.getElementById('result').textContent='Saved '+document.getElementById('text').value">Save</button><p id="result"></p><button id="open-dialog" onclick="document.querySelector('dialog').showModal()">Open dialog</button><dialog style="background:white"><button id="inside" onclick="this.textContent='Modal clicked'">Inside dialog</button></dialog></body></html>`,
       {
         headers: {
           "content-type": "text/html",
@@ -69,10 +84,16 @@ const page = Bun.serve({
   },
 });
 await mkdir(process.env.ASSISTANT_IPC_SOCKET_DIR, { recursive: true });
+let setupNotifications = 0;
 const ipc = createServer((socket) => {
   const reader = new IpcFrameReader((request) => {
     void (async () => {
       try {
+        if (request.method === "/events/publish") {
+          setupNotifications++;
+          writeMessage(socket, { id: request.id, result: { ok: true } });
+          return;
+        }
         const body = (
           request.params as {
             body: {
@@ -134,7 +155,7 @@ async function cli(...args: string[]) {
       "bun",
       "assistant",
       "browser",
-      "--desktop",
+      "--virtual-desktop",
       "--json",
       ...args,
     ]);
@@ -163,6 +184,17 @@ try {
     `http://127.0.0.1:${page.port}`,
     "--allow-private-network",
   );
+  assert.equal(navigations, 1);
+  if (coldInstall) {
+    assert.equal(desktopDependencyInstaller.getStatus().state, "ready");
+    assert(
+      setupNotifications >= 3,
+      "Installation progress must reach the viewer",
+    );
+    console.error(
+      "PASS: one CLI navigate installed desktop and Chrome from scratch, then loaded the requested page once",
+    );
+  }
   const snapshot = await cli("snapshot");
   await cli(
     "type",
@@ -192,33 +224,56 @@ try {
       );
     }
   }
-  await control.runBrowser(context, async (signal) => {
-    const cdp = await manager.browser.client(context.conversationId, signal);
-    const pointer = await cdp.send<{ result: { value: boolean } }>(
-      "Runtime.evaluate",
-      {
-        expression: "!!document.querySelector('[data-vellum-desktop-cursor]')",
-      },
-    );
-    assert.equal(pointer.result.value, true);
-    return { content: "verified", isError: false };
-  });
+  async function assertCursorPainted(expected: boolean) {
+    await control.runBrowser(context, async (signal) => {
+      const cdp = await manager.browser.client(context.conversationId, signal);
+      const screenshot = await cdp.send<{ data: string }>(
+        "Page.captureScreenshot",
+        { format: "png" },
+      );
+      const { data, info } = await sharp(Buffer.from(screenshot.data, "base64"))
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      let purple = 0;
+      for (let i = 0; i < data.length; i += info.channels) {
+        if (
+          Math.abs(data[i]! - 112) < 5 &&
+          Math.abs(data[i + 1]! - 87) < 5 &&
+          Math.abs(data[i + 2]! - 255) < 5
+        ) {
+          purple++;
+        }
+      }
+      assert.equal(purple > 40, expected, `Cursor pixels: ${purple}`);
+      return { content: "verified", isError: false };
+    });
+  }
+  await assertCursorPainted(true);
+  await cli("click", "--selector", "#open-dialog");
+  await assertCursorPainted(true);
+  await cli("hover", "--selector", "#inside");
+  await assertCursorPainted(true);
+  await cli("click", "--selector", "#inside");
+  assert.match(await cli("extract"), /Modal clicked/);
+  for (const key of ["Enter", "Space"]) {
+    await cli("press-key", "--key", "Escape");
+    await cli("press-key", "--key", key, "--selector", "#open-dialog");
+    await assertCursorPainted(true);
+  }
+  await cli(
+    "navigate",
+    "--url",
+    `http://127.0.0.1:${page.port}/next`,
+    "--allow-private-network",
+  );
+  await assertCursorPainted(true);
   await cli("detach");
   assert.equal(control.getStatus().state, "idle");
-  await control.runBrowser(context, async (signal) => {
-    const cdp = await manager.browser.client(context.conversationId, signal);
-    const pointer = await cdp.send<{ result: { value: boolean } }>(
-      "Runtime.evaluate",
-      {
-        expression: "!!document.querySelector('[data-vellum-desktop-cursor]')",
-      },
-    );
-    assert.equal(pointer.result.value, false);
-    return { content: "verified", isError: false };
-  });
+  await assertCursorPainted(false);
   await control.takeControl();
   console.log(
-    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, visible cursor, detach cleanup and takeover",
+    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, cursor pixels above dialogs and after navigation, detach cleanup and takeover",
   );
 } finally {
   await control.takeControl();

@@ -49,6 +49,9 @@ function fixture() {
   const lease = new DesktopControlLease({
     enabled: () => enabled,
     ready: () => ready,
+    ensureReady: async () => {
+      throw new Error("Desktop setup required");
+    },
     manager: () =>
       ({
         browser: { release: releaseBrowser },
@@ -346,6 +349,7 @@ test("a web conversation can use native drag only when a supported computer is a
     await import("./desktop-dependencies.js");
   const f = fixture();
   const containerized = spyOn(env, "getIsContainerized").mockReturnValue(true);
+  const platform = spyOn(env, "getIsPlatform").mockReturnValue(true);
   const original = desktopDependencyInstaller.getStatus();
   const setup = spyOn(desktopDependencyInstaller, "getStatus").mockReturnValue({
     ...original,
@@ -374,6 +378,7 @@ test("a web conversation can use native drag only when a supported computer is a
     unregisterSkillTools("computer-use");
     setOverridesForTesting({});
     containerized.mockRestore();
+    platform.mockRestore();
     setup.mockRestore();
   }
 });

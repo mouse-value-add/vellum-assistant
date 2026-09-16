@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 
+import { waitFor } from "../__tests__/helpers/wait-for.js";
 import { executeBrowserOperation } from "../browser/operations.js";
 import { browserManager } from "../tools/browser/browser-manager.js";
 import {
@@ -26,13 +27,23 @@ function fixture() {
   ];
   const listeners: ((event: CdpTransportEvent) => void)[] = [];
   let connections = 0;
+  let disconnect = () => {};
   let reject:
-    | ((method: string, params: Record<string, unknown>) => boolean)
+    | ((
+        method: string,
+        params: Record<string, unknown>,
+      ) => boolean | Promise<boolean>)
     | undefined;
   const browser = new DesktopBrowserClient(async () => {
     const connection = ++connections;
     let closed = false;
+    disconnect = () => {
+      closed = true;
+    };
     return {
+      get closed() {
+        return closed;
+      },
       async send<T>(
         method: string,
         params: Record<string, unknown> = {},
@@ -43,7 +54,7 @@ function fixture() {
           throw new CdpWsTransportError("closed");
         }
         calls.push({ connection, method, params, session: options?.sessionId });
-        if (reject?.(method, params)) {
+        if (await reject?.(method, params)) {
           throw new CdpWsTransportError("closed");
         }
         let result: unknown = {};
@@ -97,8 +108,9 @@ function fixture() {
     browser,
     calls,
     targets,
-    emit: (method: string, params = {}) =>
-      listeners.forEach((listener) => listener({ method, params })),
+    disconnect: () => disconnect(),
+    emit: (method: string, params = {}, sessionId?: string) =>
+      listeners.forEach((listener) => listener({ method, params, sessionId })),
     fail: (predicate?: typeof reject) => {
       reject = predicate;
     },
@@ -283,4 +295,119 @@ test("navigation during cursor animation prevents input on the replacement page"
   expect(f.calls.some((call) => call.params.type === "mousePressed")).toBe(
     false,
   );
+});
+
+test("navigation restores the cursor in its tab without replaying mouse input", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: 50,
+    y: 60,
+  });
+  f.calls.length = 0;
+  f.emit("Page.domContentEventFired", {}, "session-1-page-2");
+  f.emit("Page.domContentEventFired", {}, "session-1-page-1");
+  await Bun.sleep(0);
+  expect(f.calls).toHaveLength(1);
+  expect(f.calls[0]).toMatchObject({
+    method: "Runtime.evaluate",
+    session: "session-1-page-1",
+  });
+  expect(f.calls[0]?.params.expression).toContain("translate(50px, 60px)");
+});
+
+test("keyboard input restores an existing cursor without synthesizing mouse input", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: 50,
+    y: 60,
+  });
+  f.calls.length = 0;
+  await f.cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter" });
+  expect(f.calls.map((call) => call.method)).toEqual([
+    "Input.dispatchKeyEvent",
+    "Runtime.evaluate",
+  ]);
+  expect(f.calls[1]?.params.expression).toContain("translate(50px, 60px)");
+});
+
+test("release suppresses pending cursor restoration and clears it before takeover", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: 50,
+    y: 60,
+  });
+  f.calls.length = 0;
+  f.emit("Page.domContentEventFired", {}, "session-1-page-1");
+  await f.browser.release();
+  f.emit("Page.domContentEventFired", {}, "session-1-page-1");
+  await Bun.sleep(0);
+  const expressions = f.calls.filter(
+    (call) => call.method === "Runtime.evaluate",
+  );
+  expect(expressions).toHaveLength(1);
+  expect(expressions[0]?.params.expression).toContain("?.remove()");
+});
+
+test("takeover waits for an in-flight cursor restoration before removing it", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    x: 50,
+    y: 60,
+  });
+  let finish!: (reject: boolean) => void;
+  const restoring = new Promise<boolean>((resolve) => {
+    finish = resolve;
+  });
+  let started = false;
+  f.fail((method, params) => {
+    if (
+      method === "Runtime.evaluate" &&
+      String(params.expression).includes("translate(")
+    ) {
+      started = true;
+      return restoring;
+    }
+    return false;
+  });
+  f.emit("Page.domContentEventFired", {}, "session-1-page-1");
+  await waitFor(() => started);
+  const released = f.browser.release();
+  try {
+    await Bun.sleep(0);
+    expect(f.calls.some((call) => call.connection === 2)).toBe(false);
+  } finally {
+    finish(false);
+    await released;
+  }
+  expect(f.calls.at(-1)?.params.expression).toContain("?.remove()");
+});
+
+test("closed connections reconnect after cleanup without retrying input or reusing old clients", async () => {
+  const f = await session();
+  await f.cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Shift",
+    code: "ShiftLeft",
+  });
+  let previous = f.cdp;
+  for (let round = 0; round < 2; round++) {
+    f.disconnect();
+    const current = await f.browser.client("conv-123", f.abort.signal);
+    await expect(previous.listTabs()).rejects.toThrow("session expired");
+    await current.send("Runtime.evaluate", { expression: "document.title" });
+    expect(f.calls.at(-1)?.connection).toBe(3 + round * 2);
+    previous = current;
+  }
+  expect(f.calls.filter((call) => call.params.type === "keyDown")).toHaveLength(
+    1,
+  );
+  expect(
+    f.calls
+      .filter((call) => call.params.type === "keyUp")
+      .map((call) => call.connection),
+  ).toEqual([2]);
 });

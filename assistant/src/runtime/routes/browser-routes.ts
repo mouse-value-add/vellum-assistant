@@ -16,6 +16,7 @@ import {
   BROWSER_OPERATIONS,
   type BrowserOperation,
 } from "../../browser/types.js";
+import { shouldUseVirtualDesktopBrowser } from "../../browser/virtual-desktop-target.js";
 import { executeDesktopBrowserOperation } from "../../desktop/desktop-browser-operations.js";
 import type { ContentBlock } from "../../providers/types.js";
 import { LOCAL_PRINCIPALS } from "../auth/route-policy.js";
@@ -73,7 +74,7 @@ async function handleBrowserExecute({
     headers,
     abortSignal,
   );
-  const execute = desktop
+  const execute = shouldUseVirtualDesktopBrowser(desktop, input, context)
     ? executeDesktopBrowserOperation
     : executeBrowserOperation;
   const result = await execute(operation as BrowserOperation, input, context);

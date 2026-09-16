@@ -1,8 +1,8 @@
-import { readdir, readFile, readlink } from "node:fs/promises";
+import { readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { createServer } from "node:net";
+import { join } from "node:path";
 
 import { shouldRestoreDesktopChromeSession } from "./desktop-chrome-session.js";
-import { DESKTOP_HEIGHT, DESKTOP_WIDTH } from "./desktop-display.js";
 
 export async function allocateDesktopDebugPort(): Promise<number> {
   const server = createServer();
@@ -65,6 +65,40 @@ export async function assertDesktopListener(
   );
 }
 
+export async function findDesktopBrowserPid(
+  executable: string,
+  profileDir: string,
+  port: number,
+  procDir = "/proc",
+): Promise<number | undefined> {
+  try {
+    const lock = await readlink(join(profileDir, "SingletonLock"));
+    const pid = Number(/-(\d+)$/.exec(lock)?.[1]);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      return undefined;
+    }
+    const [expectedExecutable, actualExecutable, commandLine] =
+      await Promise.all([
+        realpath(executable),
+        readlink(join(procDir, String(pid), "exe")),
+        readFile(join(procDir, String(pid), "cmdline"), "utf8"),
+      ]);
+    const args = commandLine.split("\0");
+    if (
+      actualExecutable !== expectedExecutable ||
+      !args.includes(`--user-data-dir=${profileDir}`) ||
+      !args.includes(`--remote-debugging-port=${port}`) ||
+      !args.includes("--remote-debugging-address=127.0.0.1") ||
+      args.some((arg) => arg.startsWith("--type="))
+    ) {
+      return undefined;
+    }
+    return pid;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function discoverDesktopBrowser(
   pid: number,
   port: number,
@@ -100,8 +134,6 @@ export function desktopChromeArguments(
       ? ["--restore-last-session", "--hide-crash-restore-bubble"]
       : []),
     "--start-maximized",
-    "--window-position=0,0",
-    `--window-size=${DESKTOP_WIDTH},${DESKTOP_HEIGHT}`,
     `--user-data-dir=${profileDir}`,
     ...(debugPort
       ? [

@@ -35,7 +35,7 @@ modal manage installation; never install or start the desktop stack yourself.
 
 ## Assistant desktop workflow
 
-Use `assistant browser --desktop` for webpages in the streamed Chrome window.
+Use `assistant browser --virtual-desktop` for webpages in the streamed Chrome window.
 Use this skill for browser chrome, native dialogs, other applications, and
 whole-desktop screenshots. Run `assistant browser --help` for browser CLI guidance.
 
@@ -60,20 +60,29 @@ last native observation. Re-observe after switching back.
 
 If the user selects **Take control**, stop and yield. Resume with a fresh
 observation only after they select **Allow assistant** and ask you to continue.
-`computer_use_done` and `assistant browser --desktop detach` release the shared
+`computer_use_done` and `assistant browser --virtual-desktop detach` release the shared
 session and held input. Closing the viewer does not end control.
 
 ## Connected-computer observations
 
-Every computer-use step returns the accessibility tree. A screenshot comes with
-a desktop's first look, with window-scoped observations, or when you call
-`computer_use_observe` with `include_screenshot: true`. Ask for one whenever the
-tree is not enough to act on: a canvas, a game, a custom-drawn view, few or
+Every computer-use step returns the accessibility tree. Every action also
+returns a screenshot taken after it ran (one at the end of a
+`computer_use_sequence`), so check it to see what your action did. An
+observation comes with a screenshot on a desktop's first look, when it is
+window-scoped, or when you pass `include_screenshot: true`. Ask for one whenever
+the tree is not enough to act on: a canvas, a game, a custom-drawn view, few or
 unlabeled controls, or a layout question.
 
 The tree is walked to a limited depth to keep steps fast, and says when it was
 cut off. If the element you need is not in it, call `computer_use_observe` with
 `full_tree: true`.
+
+## Typing is not sending
+
+Pressing enter in a chat, email or form usually sends or submits it, and that
+cannot be taken back. Send only when the user asked you to send, post or
+submit. When they asked you to type, write or draft something, type it and stop
+before pressing enter; tell them it is ready to send.
 
 ## Batching known steps (macOS)
 

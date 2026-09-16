@@ -141,7 +141,7 @@ export function SkillsReferenceComputerUseContent() {
           <ul className="mb-0 list-disc space-y-2 pl-6 text-zinc-600">
             <li>
               <strong>Accessibility tree + screenshots.</strong> On connected computers, the assistant reads the
-              accessibility tree (same API screen readers use) and requests screenshots as needed.
+              accessibility tree (same API screen readers use) and takes a screenshot after each action.
               On its own desktop, each native action returns a fresh color screenshot.
             </li>
             <li>
@@ -155,6 +155,16 @@ export function SkillsReferenceComputerUseContent() {
               <strong>Platform differences.</strong> Dragging, opening apps by name, and AppleScript
               are available on macOS. Windows exposes only actions its desktop helper supports, so
               unsupported tools are not offered to the assistant.
+            </li>
+            <li>
+              <strong>Typing is not sending.</strong> Asked to type or draft a message, the
+              assistant types it and stops before pressing Enter. It sends only when asked to.
+            </li>
+            <li>
+              <strong>Your pointer comes back on macOS.</strong> The pointer stays where the
+              assistant last clicked while it works, so controls that only show on hover keep
+              working. It returns to where you left it when the task ends, unless you have
+              already moved it.
             </li>
             <li>
               <strong>Batched actions on macOS.</strong> When the assistant already knows several
