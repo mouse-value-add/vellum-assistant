@@ -110,7 +110,7 @@
     "openAria": "Open {name}'s virtual desktop",
     "openUnnamedAria": "Open virtual desktop",
     "reconnectButton": "Reconnect",
-    "title": "Virtual desktop",
+    "title": "Desktop",
     "unavailable": "The virtual desktop isn't available on this assistant.",
     "installButton": "Install virtual desktop",
     "checkingSetup": "Checking virtual desktop setup…",

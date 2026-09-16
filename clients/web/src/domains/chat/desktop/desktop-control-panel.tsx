@@ -102,8 +102,9 @@ function EnabledDesktopControlPanel({
             {failed ? (
               <Button
                 variant="outlined"
+                size="compact"
                 expandOnMobile={false}
-                className="h-11 shrink-0 border-white/20 text-white/90"
+                className="shrink-0 border-white/20 text-white/90"
                 tintColor="currentColor"
                 onClick={() => {
                   update.reset();
@@ -115,8 +116,9 @@ function EnabledDesktopControlPanel({
             ) : state === "assistant" || state === "human" ? (
               <Button
                 variant="outlined"
+                size="compact"
                 expandOnMobile={false}
-                className="h-11 shrink-0 border-white/20 text-white/90"
+                className="shrink-0 border-white/20 text-white/90"
                 tintColor="currentColor"
                 disabled={update.isPending}
                 onClick={() =>

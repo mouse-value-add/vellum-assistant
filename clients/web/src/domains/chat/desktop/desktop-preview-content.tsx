@@ -124,7 +124,7 @@ export function DesktopPreviewContent({
           </Modal.Title>
           <PreviewModalHeader
             title={t("assistantDesktop.title")}
-            actions={<div ref={setControlsContainer} />}
+            actions={<div ref={setControlsContainer} className="min-w-0" />}
             onClose={() => setFullscreen(false)}
           />
           <div
