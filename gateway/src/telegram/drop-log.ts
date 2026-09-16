@@ -8,16 +8,17 @@ import {
   AdmissionDropLog,
   type AdmissionDropLogLevel,
 } from "../channels/admission-drop-log.js";
+import { ROOM_ADMISSION_DROP_LOG_SEVERITY } from "../channels/room-admission.js";
 import type { TelegramDropReason } from "./normalize.js";
 
 /**
- * The level a reason logs at on its first occurrence for a chat.
+ * The level a reason logs at on its first occurrence for a chat. The
+ * room-admission reasons carry the shared severities; the rest are shapes the
+ * normalizer cannot read.
  *
- * `chat_not_private` is the one a person can act on: they added the bot to a
- * group and their messages are not arriving, and this line is the only place
- * that says so, since Telegram sees a 200 either way. The malformed-shape
- * reasons promote because a well-formed Bot API update never produces them,
- * so any occurrence is worth a look.
+ * The malformed-shape reasons promote because a well-formed Bot API update
+ * never produces them, so any occurrence is worth a look. They name no chat,
+ * so the policy promotes every one of them.
  *
  * `no_supported_content` is ordinary traffic: a sticker, a location, a
  * contact card. The bot is not built to read them and nothing is
@@ -25,7 +26,7 @@ import type { TelegramDropReason } from "./normalize.js";
  * same kind.
  */
 const DROP_LOG_SEVERITY: Record<TelegramDropReason, AdmissionDropLogLevel> = {
-  chat_not_private: "info",
+  ...ROOM_ADMISSION_DROP_LOG_SEVERITY,
   malformed_update: "info",
   missing_update_id: "info",
   missing_chat: "info",

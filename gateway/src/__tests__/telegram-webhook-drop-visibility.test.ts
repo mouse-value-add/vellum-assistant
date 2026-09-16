@@ -22,7 +22,25 @@ import "./test-preload.js";
  */
 
 mock.module("../fetch.js", () => ({
-  fetchImpl: async () => new Response("Not found", { status: 404 }),
+  // The only call the drop path makes is getMe, so the gate knows who it is.
+  fetchImpl: async (input: string | URL | Request) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    if (url.endsWith("/getMe")) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          result: { id: 123456789, username: "vellum_bot" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response("Not found", { status: 404 });
+  },
 }));
 
 const { createTelegramWebhookHandler } =
@@ -86,7 +104,7 @@ function makeCaches() {
         return SECRET;
       }
       if (key === credentialKey("telegram", "bot_token")) {
-        return "bot-token";
+        return "123456789:test-secret";
       }
       return undefined;
     },
@@ -119,7 +137,7 @@ function webhookRequest(payload: unknown): Request {
 }
 
 describe("telegram webhook: dropped updates are visible", () => {
-  test("a group message is acknowledged and its drop is written at a level the streams keep", async () => {
+  test("an unaddressed group message is acknowledged and its drop is written at a level the streams keep", async () => {
     const { handler } = createTelegramWebhookHandler(
       makeConfig(),
       makeCaches(),
@@ -132,7 +150,7 @@ describe("telegram webhook: dropped updates are visible", () => {
 
     const dropped = readLogRecords().filter((r) => r["updateId"] === 9001);
     expect(dropped).toHaveLength(1);
-    expect(dropped[0]?.["reason"]).toBe("chat_not_private");
+    expect(dropped[0]?.["reason"]).toBe("bot_not_mentioned");
     expect(dropped[0]?.["chatType"]).toBe("supergroup");
     expect(dropped[0]?.["chatId"]).toBe(String(GROUP_CHAT_ID));
     // pino: info is 30, debug is 20. The file streams start at info, so a
@@ -154,6 +172,33 @@ describe("telegram webhook: dropped updates are visible", () => {
     const records = readLogRecords();
     expect(records.filter((r) => r["updateId"] === 9101)).toHaveLength(1);
     expect(records.filter((r) => r["updateId"] === 9102)).toHaveLength(0);
+  });
+
+  test("a drop that names no chat is written every time, not once per process", async () => {
+    // Nothing to dedup on: a message with no chat id cannot share a key with
+    // the next one, so a wave of them stays visible at any process age.
+    const { handler } = createTelegramWebhookHandler(
+      makeConfig(),
+      makeCaches(),
+    );
+
+    for (const updateId of [9401, 9402]) {
+      const res = await handler(
+        webhookRequest({
+          update_id: updateId,
+          message: { message_id: 1, text: "hi", from: { id: 42 } },
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    const records = readLogRecords();
+    for (const updateId of [9401, 9402]) {
+      const dropped = records.filter((r) => r["updateId"] === updateId);
+      expect(dropped).toHaveLength(1);
+      expect(dropped[0]?.["reason"]).toBe("missing_chat");
+      expect(dropped[0]?.["level"]).toBe(30);
+    }
   });
 
   test("ordinary unreadable traffic stays quiet", async () => {
