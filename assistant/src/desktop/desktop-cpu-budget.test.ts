@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
@@ -22,6 +29,8 @@ async function hierarchy() {
   directories.push(root);
   const parent = join(root, "container");
   await mkdir(parent);
+  await writeFile(join(root, "cgroup.type"), "domain");
+  await writeFile(join(parent, "cgroup.type"), "domain");
   await writeFile(join(root, "cgroup.procs"), "1\n");
   await writeFile(join(parent, "cgroup.procs"), `${process.pid}\n`);
   await writeFile(join(root, "cpu.max"), "200000 100000");
@@ -58,6 +67,7 @@ test("uses the tightest visible ancestor quota and shares one budget across laun
 test("resolves namespace-root membership and honors a smaller platform CPU allocation", async () => {
   const h = await hierarchy();
   await writeFile(join(h.root, "cgroup.procs"), `${process.pid}\n`);
+  await rm(h.parent, { recursive: true });
   const budget = await createDesktopCpuBudget({
     ...h.deps,
     membership: async () => "0::/hidden/container\n",
@@ -90,7 +100,7 @@ test("handles a global hierarchy root without cpu.max", async () => {
 
 test("propagates unavailable CPU delegation instead of returning an unenforced launcher", async () => {
   const h = await hierarchy();
-  await mkdir(join(h.parent, "cgroup.subtree_control"));
+  await symlink(h.root, join(h.parent, "cgroup.subtree_control"));
   await expect(createDesktopCpuBudget(h.deps)).rejects.toThrow();
   await expect(
     readFile(join(h.parent, "vellum-desktop", "cpu.max")),
@@ -149,4 +159,55 @@ test("launcher never executes the desktop command if joining fails", async () =>
   );
   expect(await child.exited).toBe(125);
   expect(await new Response(child.stdout).text()).toBe("");
+});
+
+for (const siblingType of ["domain", "domain invalid", "domain threaded"]) {
+  test(`refuses a ${siblingType} sibling before modifying the hierarchy`, async () => {
+    const h = await hierarchy();
+    const sibling = join(h.parent, "worker");
+    await mkdir(sibling);
+    await writeFile(join(sibling, "cgroup.type"), siblingType);
+    await writeFile(join(sibling, "cgroup.procs"), "");
+    await expect(createDesktopCpuBudget(h.deps)).rejects.toThrow(
+      "incompatible sibling",
+    );
+    expect(await readFile(join(sibling, "cgroup.type"), "utf8")).toBe(
+      siblingType,
+    );
+    expect(await readFile(join(h.parent, "cgroup.type"), "utf8")).toBe(
+      "domain",
+    );
+    await expect(
+      readFile(join(h.parent, "vellum-desktop", "cgroup.type")),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(h.parent, "cgroup.subtree_control")),
+    ).rejects.toThrow();
+  });
+}
+
+test("refuses an invalid parent before creating a desktop group", async () => {
+  const h = await hierarchy();
+  await writeFile(join(h.parent, "cgroup.type"), "domain invalid");
+  await expect(createDesktopCpuBudget(h.deps)).rejects.toThrow(
+    "parent cgroup has an incompatible type",
+  );
+  await expect(
+    readFile(join(h.parent, "vellum-desktop", "cgroup.type")),
+  ).rejects.toThrow();
+});
+
+test("joins an existing threaded hierarchy without altering its sibling", async () => {
+  const h = await hierarchy();
+  await writeFile(join(h.parent, "cgroup.type"), "domain threaded");
+  const sibling = join(h.parent, "worker");
+  await mkdir(sibling);
+  await writeFile(join(sibling, "cgroup.type"), "threaded");
+  await writeFile(join(sibling, "cgroup.procs"), "123");
+  const budget = await createDesktopCpuBudget(h.deps);
+  expect(budget.wrapCommand(["chrome"])[4]).toBe(
+    join(h.parent, "vellum-desktop"),
+  );
+  expect(await readFile(join(sibling, "cgroup.procs"), "utf8")).toBe("123");
+  expect(await readFile(join(sibling, "cgroup.type"), "utf8")).toBe("threaded");
 });

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { getIsContainerized } from "../config/env-registry.js";
@@ -101,6 +101,24 @@ export async function createDesktopCpuBudget(
   }
 
   const group = join(parent, "vellum-desktop");
+  const parentType = (
+    await readFile(join(parent, "cgroup.type"), "utf8")
+  ).trim();
+  if (!["domain", "domain threaded", "threaded"].includes(parentType)) {
+    throw new Error("Desktop CPU parent cgroup has an incompatible type");
+  }
+  // Threaded conversion can invalidate sibling domain groups, even empty ones.
+  for (const entry of await readdir(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "vellum-desktop") {
+      continue;
+    }
+    const type = (
+      await readFile(join(parent, entry.name, "cgroup.type"), "utf8")
+    ).trim();
+    if (type !== "threaded") {
+      throw new Error("Desktop CPU cgroup has an incompatible sibling");
+    }
+  }
   let created = false;
   try {
     try {
