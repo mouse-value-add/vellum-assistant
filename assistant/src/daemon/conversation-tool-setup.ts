@@ -7,7 +7,10 @@
  */
 
 import type { AssistantEvent } from "../api/index.js";
-import { shouldUseVirtualDesktopBrowser } from "../browser/virtual-desktop-target.js";
+import {
+  isVirtualDesktopBrowserContext,
+  shouldUseVirtualDesktopBrowser,
+} from "../browser/virtual-desktop-target.js";
 import {
   type HostProxyCapability,
   supportsHostProxy,
@@ -1130,26 +1133,27 @@ export function createResolveToolsCallback(
       ...scopedWorkspaceDefs,
       ...scopedMcpDefs,
     ].filter((d) => !excluded.has(d.name));
-    if (
-      ctx.transportInterface === "web" &&
-      shouldUseVirtualDesktopBrowser(
+    const browserContext: ToolContext = {
+      workingDir: ctx.workingDir,
+      conversationId: ctx.conversationId,
+      trustClass: ctx.getTurnOrRestingTrust?.()?.trustClass ?? "unknown",
+      transportInterface: ctx.transportInterface,
+      clientOs: resolveTurnClientOs(ctx).clientOs,
+      sourceActorPrincipalId: ctx.getTurnActorPrincipalId?.(),
+    };
+    if (isVirtualDesktopBrowserContext(browserContext)) {
+      const browserTarget = shouldUseVirtualDesktopBrowser(
         undefined,
         {},
-        {
-          workingDir: ctx.workingDir,
-          conversationId: ctx.conversationId,
-          trustClass: ctx.trustContext?.trustClass ?? "unknown",
-          transportInterface: ctx.transportInterface,
-          clientOs: resolveTurnClientOs(ctx).clientOs,
-          sourceActorPrincipalId: ctx.getTurnActorPrincipalId?.(),
-        },
+        browserContext,
       )
-    ) {
+        ? "The default is virtual desktop Chrome, even when the viewer is closed. The command installs missing components, starts Chrome, and completes the action in one call. This also repairs missing packages after a restart while keeping the browser profile. Do not switch to headless Chrome or Playwright unless the user explicitly requests another browser."
+        : "Continue the selected browser session through this CLI; do not switch backends unless the user asks.";
       allBaseDefs = allBaseDefs.map((definition) =>
         definition.name === "bash"
           ? {
               ...definition,
-              description: `${definition.description} For browser tasks, use assistant browser navigate --url <url> directly. It installs the virtual desktop if needed, starts Chrome, and completes the action in one call. Use timeout_seconds: ${getConfig().timeouts.shellMaxTimeoutSec} for first use; setup progress is visible in the Virtual desktop panel. Use assistant browser --help for other browser actions. Use this managed path even if saved notes describe manual setup. Do not install packages or launch Chrome, X servers, or screenshot scripts yourself.`,
+              description: `${definition.description} For browser tasks, use assistant browser navigate --url <url> directly. ${browserTarget} Use timeout_seconds: ${getConfig().timeouts.shellMaxTimeoutSec} for first use; setup progress is visible in the Virtual desktop panel. Use assistant browser --help for other browser actions. Current CLI guidance takes precedence over saved browser setup notes. Do not install packages, launch Chrome or X servers, change supervisor settings, or use raw CDP or screenshot scripts yourself. If managed setup fails, report the error instead of starting a different browser.`,
             }
           : definition,
       );

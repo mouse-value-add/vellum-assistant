@@ -5,6 +5,18 @@ import { normalizeBrowserMode } from "../tools/browser/browser-mode.js";
 import { getPinnedTab } from "../tools/browser/pinned-tabs.js";
 import type { ToolContext } from "../tools/types.js";
 
+export function isVirtualDesktopBrowserContext(context: ToolContext): boolean {
+  return (
+    context.transportInterface === "web" &&
+    context.clientOs !== "macos" &&
+    context.clientOs !== "windows" &&
+    context.clientOs !== "linux" &&
+    context.trustClass === "guardian" &&
+    !!context.sourceActorPrincipalId &&
+    isVirtualDesktopEnabled(getConfig())
+  );
+}
+
 export function shouldUseVirtualDesktopBrowser(
   desktop: boolean | undefined,
   input: Record<string, unknown>,
@@ -19,16 +31,10 @@ export function shouldUseVirtualDesktopBrowser(
     mode.mode !== "auto" ||
     input.target_client_id ||
     input.use_active_tab ||
-    context.transportInterface !== "web" ||
-    context.clientOs === "macos" ||
-    context.clientOs === "windows" ||
-    context.clientOs === "linux" ||
-    context.trustClass !== "guardian" ||
-    !context.sourceActorPrincipalId ||
     browserManager.getPreferredBackendKind(context.conversationId) !== null ||
     getPinnedTab(context.conversationId)
   ) {
     return false;
   }
-  return isVirtualDesktopEnabled(getConfig());
+  return isVirtualDesktopBrowserContext(context);
 }

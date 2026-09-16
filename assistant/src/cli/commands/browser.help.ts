@@ -143,8 +143,15 @@ the requested action in one call. Allow up to 600 seconds for this command when
 using bash (timeout_seconds: 600). Opening the Virtual desktop panel also starts
 the same installation and shows progress. No separate setup command is needed.
 Report other availability errors without switching to a personal computer.
-The assistant manages Chrome startup. Do not launch a separate desktop stack,
-install desktop packages, or drive webpages with shell-level xdotool.
+Virtual desktop Chrome remains the default even when nobody is watching or the
+viewer is closed. Do not choose headless Chrome or Playwright for speed unless
+the user explicitly requests another browser. After an assistant restart, missing
+packages are reinstalled automatically while the existing browser profile is kept.
+Current CLI guidance takes precedence over saved manual browser setup notes.
+The assistant manages Chrome startup and display settings. Do not launch a separate
+desktop stack, change supervisor settings, install desktop packages, or drive pages
+with raw CDP scripts or shell-level xdotool. If managed setup fails, report its error
+rather than starting a different browser.
 With --virtual-desktop, screenshot captures the page directly from Chrome over CDP
 as a color JPEG. Use --output to save it and file_read to view it. Do not use
 shell-level xwd or custom screenshot conversion scripts.

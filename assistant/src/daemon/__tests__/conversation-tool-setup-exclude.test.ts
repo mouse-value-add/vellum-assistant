@@ -11,6 +11,7 @@ import * as configLoader from "../../config/loader.js";
 import type { AssistantConfig } from "../../config/schema.js";
 import * as disabledState from "../../plugins/disabled-state.js";
 import type { ToolDefinition } from "../../providers/types.js";
+import { browserManager } from "../../tools/browser/browser-manager.js";
 import {
   __clearRegistryForTesting,
   registerMcpTools,
@@ -48,6 +49,9 @@ function makeCtx(overrides: Partial<Conversation> = {}): Conversation {
     skillProjectionState: new Map(),
     skillProjectionCache: { fingerprints: new Map() } as SkillProjectionCache,
     toolsDisabledDepth: 0,
+    getTurnOrRestingTrust(this: Conversation) {
+      return this.currentTurnTrustContext ?? this.trustContext;
+    },
     ...overrides,
   } as unknown as Conversation;
 }
@@ -267,6 +271,34 @@ test("managed browser guidance follows each turn without changing native or shar
       resolve([]).find((tool) => tool.name === "bash")?.description,
     ).toContain("assistant browser navigate");
     expect(bash.description).toBe("bash");
+    browserManager.setPreferredBackendKind(ctx.conversationId, "local");
+    expect(
+      resolve([]).find((tool) => tool.name === "bash")?.description,
+    ).toContain("assistant browser");
+    expect(browserManager.getPreferredBackendKind(ctx.conversationId)).toBe(
+      "local",
+    );
+    browserManager.clearPreferredBackendKind(ctx.conversationId);
+
+    ctx.trustContext = {
+      trustClass: "unknown",
+    } as Conversation["trustContext"];
+    ctx.currentTurnTrustContext = {
+      trustClass: "guardian",
+    } as Conversation["trustContext"];
+    expect(
+      resolve([]).find((tool) => tool.name === "bash")?.description,
+    ).toContain("assistant browser navigate");
+    ctx.trustContext = {
+      trustClass: "guardian",
+    } as Conversation["trustContext"];
+    ctx.currentTurnTrustContext = {
+      trustClass: "unknown",
+    } as Conversation["trustContext"];
+    expect(resolve([]).find((tool) => tool.name === "bash")?.description).toBe(
+      "bash",
+    );
+    ctx.currentTurnTrustContext = undefined;
     for (const clientOs of ["macos", "windows", "linux"] as const) {
       ctx.currentTurnClientOs = clientOs;
       expect(
@@ -279,6 +311,7 @@ test("managed browser guidance follows each turn without changing native or shar
       "bash",
     );
   } finally {
+    browserManager.clearPreferredBackendKind(ctx.conversationId);
     setOverridesForTesting({});
     if (platform === undefined) {
       delete process.env.IS_PLATFORM;
