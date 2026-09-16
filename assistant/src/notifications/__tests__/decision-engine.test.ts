@@ -824,7 +824,10 @@ describe("scheduler requested copy preservation in notification decision engine"
       expect(decision.renderedCopy.telegram?.conversationSeedMessage).toBe(
         SCHEDULER_OWNED_REPORT,
       );
-      expect(decision.renderedCopy.vellum).toBeUndefined();
+      expect(decision.renderedCopy.vellum?.body).toBe(SCHEDULER_OWNED_REPORT);
+      expect(decision.renderedCopy.platform?.deliveryText).toBe(
+        SCHEDULER_OWNED_REPORT,
+      );
       expect(decision.verbatimCopy).toBe(true);
     } finally {
       toolUseBlock = null;

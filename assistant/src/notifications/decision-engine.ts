@@ -828,7 +828,7 @@ function buildPassThroughDecision(params: {
     verbatimCopy: true,
     ...(deepLinkTarget ? { deepLinkTarget } : {}),
   };
-  decision = applyDecisionGuards(decision, signal);
+  decision = applyDecisionGuards(decision, signal, availableChannels);
   decision.persistedDecisionId = persistDecision(signal, decision);
   return decision;
 }
@@ -836,6 +836,7 @@ function buildPassThroughDecision(params: {
 function pinSchedulerRequestedCopy(
   decision: NotificationDecision,
   signal: NotificationSignal,
+  availableChannels: NotificationChannel[],
 ): NotificationDecision {
   if (
     signal.sourceChannel !== "scheduler" ||
@@ -858,7 +859,7 @@ function pinSchedulerRequestedCopy(
   const nextCopy: Partial<Record<NotificationChannel, RenderedChannelCopy>> = {
     ...decision.renderedCopy,
   };
-  for (const channel of decision.selectedChannels) {
+  for (const channel of availableChannels) {
     nextCopy[channel] = {
       ...nextCopy[channel],
       title,
@@ -878,8 +879,9 @@ function pinSchedulerRequestedCopy(
 function applyDecisionGuards(
   decision: NotificationDecision,
   signal: NotificationSignal,
+  availableChannels: NotificationChannel[],
 ): NotificationDecision {
-  decision = pinSchedulerRequestedCopy(decision, signal);
+  decision = pinSchedulerRequestedCopy(decision, signal, availableChannels);
   decision = pinQuestionDeliveryCopy(decision, signal);
   decision = stripReplyMechanics(decision, signal);
   decision = enforceToolApprovalSeedBlocks(decision, signal);
@@ -1021,6 +1023,7 @@ export async function evaluateSignal(
     const decision = applyDecisionGuards(
       buildFallbackDecision(signal, availableChannels),
       signal,
+      availableChannels,
     );
     decision.persistedDecisionId = persistDecision(signal, decision);
     return decision;
@@ -1044,7 +1047,7 @@ export async function evaluateSignal(
     decision = buildFallbackDecision(signal, availableChannels);
   }
 
-  decision = applyDecisionGuards(decision, signal);
+  decision = applyDecisionGuards(decision, signal, availableChannels);
   decision.persistedDecisionId = persistDecision(signal, decision);
 
   return decision;
