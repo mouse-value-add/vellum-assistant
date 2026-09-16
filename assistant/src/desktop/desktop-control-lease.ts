@@ -24,9 +24,6 @@ type Owner = {
   abort: AbortController;
   holder: DesktopViewer;
   removeAbortListener: () => void;
-  id: string;
-  sequence: number;
-  cleanups: Set<() => Promise<void>>;
   actions: number;
   lastActivity: number;
   desktopLost: boolean;
@@ -119,16 +116,6 @@ export class DesktopControlLease {
     });
   }
 
-  private async releaseInput(): Promise<void> {
-    try {
-      await this.deps.manager().browser?.release();
-    } finally {
-      await Promise.all(
-        [...(this.owner?.cleanups ?? [])].map((cleanup) => cleanup()),
-      );
-    }
-  }
-
   private async release(): Promise<void> {
     const owner = this.owner;
     if (!owner && !this.inputCleanupPending) {
@@ -142,7 +129,7 @@ export class DesktopControlLease {
     try {
       if (!owner?.desktopLost) {
         try {
-          await this.releaseInput();
+          await this.deps.manager().browser.release();
         } finally {
           await this.deps.input.setViewerInput(true);
         }
@@ -196,9 +183,6 @@ export class DesktopControlLease {
       actions: 0,
       lastActivity: Date.now(),
       desktopLost: false,
-      id: crypto.randomUUID(),
-      sequence: 0,
-      cleanups: new Set(),
       removeAbortListener: () => {},
     };
     const slot = this.deps.manager().acquireAutomationSlot(holder);
@@ -228,7 +212,7 @@ export class DesktopControlLease {
       owner.abort.signal.throwIfAborted();
       this.assertAvailable();
       await this.deps.input.setViewerInput(false);
-      await this.releaseInput();
+      await this.deps.manager().browser.release();
       this.inputCleanupPending = false;
       this.notify();
       return owner;
@@ -244,28 +228,6 @@ export class DesktopControlLease {
     context: ToolContext,
     operation: (signal: AbortSignal) => Promise<ToolExecutionResult>,
     done = false,
-  ): Promise<ToolExecutionResult> {
-    return this.run(context, ({ signal }) => operation(signal), {
-      done,
-      autoInstall: true,
-    });
-  }
-
-  run(
-    context: ToolContext,
-    operation: (session: {
-      signal: AbortSignal;
-      leaseId: string;
-      sequence: number;
-      assertAvailable: () => void;
-    }) => Promise<ToolExecutionResult>,
-    options: {
-      done?: boolean;
-      autoInstall?: boolean;
-      requiresLease?: boolean;
-      countAction?: boolean;
-      cleanup?: () => Promise<void>;
-    } = {},
   ): Promise<ToolExecutionResult> {
     const generation = this.generation;
     return this.exclusive(async () => {
@@ -285,14 +247,13 @@ export class DesktopControlLease {
       ) {
         throw new Error("Another conversation is controlling the desktop");
       }
-      if (options.done) {
+      if (done) {
         await this.release();
         return { content: "Desktop control released.", isError: false };
       }
       context.signal?.throwIfAborted();
       try {
         if (
-          options.autoInstall &&
           !this.owner &&
           !this.humanControl &&
           generation === this.generation &&
@@ -343,9 +304,6 @@ export class DesktopControlLease {
           yieldToUser: true,
         };
       }
-      if (!this.owner && options.requiresLease) {
-        throw new Error("Observe the desktop before acting");
-      }
       if (this.owner) {
         this.bindCancellation(this.owner, context.signal);
       }
@@ -357,23 +315,12 @@ export class DesktopControlLease {
       signal.throwIfAborted();
       try {
         this.assertAvailable();
-        if (options.cleanup && !owner.cleanups.has(options.cleanup)) {
-          owner.cleanups.add(options.cleanup);
-          await options.cleanup();
-          signal.throwIfAborted();
-          this.assertAvailable();
-        }
-        if (options.countAction !== false && ++owner.actions > MAX_ACTIONS) {
+        if (++owner.actions > MAX_ACTIONS) {
           throw new Error(
             "Desktop action limit reached. Finish this session before continuing.",
           );
         }
-        const result = await operation({
-          signal,
-          leaseId: owner.id,
-          sequence: ++owner.sequence,
-          assertAvailable: () => this.assertAvailable(),
-        });
+        const result = await operation(signal);
         signal.throwIfAborted();
         if (result.isError) {
           await this.release();
