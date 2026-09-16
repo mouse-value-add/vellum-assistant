@@ -235,14 +235,16 @@ describe("deriveStepLabel", () => {
     );
   });
 
-  test("skill_load falls back to input.reason when activity is absent", () => {
+  test("does not read input.reason as the activity sentence", () => {
+    // The daemon only ever injects `activity`. A `reason` is a tool's own
+    // argument (app-control's stop takes one for its logs), not a status.
     const result = deriveStepLabel(
       buildToolCall({
-        name: "skill_load",
-        input: { name: "deep-research", reason: "Loading research playbook" },
+        name: "app_control_stop",
+        input: { reason: "User finished the task" },
       }),
     );
-    expect(result.activity).toBe("Loading research playbook");
+    expect(result.activity).toBe("");
   });
 
   test("no activity or reason → activity is the empty string", () => {
