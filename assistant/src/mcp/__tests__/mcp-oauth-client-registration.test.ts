@@ -15,6 +15,7 @@ const CALLBACK_URL =
   "https://platform.example/v1/gateway/callbacks/abc/webhooks/oauth/callback/";
 
 let resolvedCallbackUrl = CALLBACK_URL;
+let assistantName: string | null = "Jarvis";
 
 mock.module("../../inbound/platform-callback-registration.js", () => ({
   resolveCallbackUrl: async () => resolvedCallbackUrl,
@@ -42,7 +43,7 @@ mock.module("../../security/secure-keys.js", () => ({
 }));
 
 mock.module("../../daemon/identity-helpers.js", () => ({
-  getAssistantName: () => "Jarvis",
+  getAssistantName: () => assistantName,
 }));
 
 mock.module("../../config/env.js", () => ({
@@ -84,6 +85,7 @@ async function register(issuer = "https://mcp.unabyss.com"): Promise<void> {
 beforeEach(() => {
   store.clear();
   resolvedCallbackUrl = CALLBACK_URL;
+  assistantName = "Jarvis";
 });
 
 describe("McpOAuthProvider client registration reuse", () => {
@@ -171,9 +173,21 @@ describe("McpOAuthProvider client registration reuse", () => {
 });
 
 describe("McpOAuthProvider client metadata", () => {
-  test("registers under the assistant's own name", async () => {
+  test("registers under a customized assistant name", async () => {
     const provider = newProvider();
     expect(provider.clientMetadata.client_name).toEqual("Jarvis");
+  });
+
+  test("uses the product name when the assistant has no name", async () => {
+    assistantName = null;
+    const provider = newProvider();
+    expect(provider.clientMetadata.client_name).toEqual("Vellum Assistant");
+  });
+
+  test("uses the product name for the scaffold name placeholder", async () => {
+    assistantName = "_(not yet chosen)_";
+    const provider = newProvider();
+    expect(provider.clientMetadata.client_name).toEqual("Vellum Assistant");
   });
 
   test("carries the assistant id as software_id", async () => {

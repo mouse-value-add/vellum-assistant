@@ -29,6 +29,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { getPlatformAssistantId } from "../config/env.js";
+import { isTemplatePlaceholder } from "../daemon/handlers/identity.js";
 import { getAssistantName } from "../daemon/identity-helpers.js";
 import {
   deleteSecureKeyAsync,
@@ -149,9 +150,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
    */
   get clientMetadata(): OAuthClientMetadata {
     const assistantName = getAssistantName();
+    const clientName =
+      assistantName && !isTemplatePlaceholder(assistantName)
+        ? assistantName
+        : "Vellum Assistant";
     const assistantId = getPlatformAssistantId().trim();
     return {
-      client_name: assistantName ?? "Vellum Assistant",
+      client_name: clientName,
       logo_uri: CLIENT_LOGO_URI,
       redirect_uris: this._redirectUrl ? [this._redirectUrl] : [],
       token_endpoint_auth_method: "none",
