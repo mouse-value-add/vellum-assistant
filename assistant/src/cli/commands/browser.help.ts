@@ -135,12 +135,12 @@ selection and fallback behavior; use --virtual-desktop to select it there.
 Existing sessions and explicit backend/client choices take priority.
 --browser-mode local (alias playwright) means the assistant's Playwright browser,
 not the user's Chrome. --desktop remains an alias for --virtual-desktop.
-Use --virtual-desktop for Chrome in the Virtual desktop panel. It respects
-Take control in that panel. Run navigate --url <url> directly to open a page.
+Use --virtual-desktop for Chrome in the Desktop panel.
+Run navigate --url <url> directly to open a page.
 The assistant-desktop feature flag and completed installation are required.
 The first browser command installs missing components, starts Chrome, and completes
 the requested action in one call. Allow up to 600 seconds for this command when
-using bash (timeout_seconds: 600). Opening the Virtual desktop panel also starts
+using bash (timeout_seconds: 600). Opening the Desktop panel also starts
 the same installation and shows progress. No separate setup command is needed.
 Report other availability errors without switching to a personal computer.
 The assistant manages Chrome startup. Do not launch a separate desktop stack,
@@ -155,9 +155,9 @@ A purple page pointer shows CDP mouse movement in the stream. Browser toolbar
 controls, native dialogs and other apps are outside this CLI's page controls.
 Do not combine --virtual-desktop with personal browser targets, other browser modes
 or --use-active-tab. Download waiting is unavailable on this target.
-If the user selects Take control, stop. After they select Allow assistant
-and ask you to continue, take a fresh snapshot. Closing the viewer does not
-release control. Run assistant browser --virtual-desktop detach when finished or
+Users can interact directly with the expanded desktop. If they ask you to pause,
+stop and wait. Take a fresh snapshot before resuming. Closing the viewer does not
+end automation. Run assistant browser --virtual-desktop detach when finished or
 blocked, including before asking a question. Chrome stays running.
 Each subcommand maps to a browser operation and communicates
 with the assistant process.
