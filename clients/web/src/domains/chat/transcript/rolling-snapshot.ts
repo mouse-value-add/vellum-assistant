@@ -137,6 +137,9 @@ export function appendEventToMessages(
         id: event.toolUseId ?? `tool-${at}`,
         name: event.toolName,
         input: event.input,
+        ...(event.activityIsStatus !== undefined
+          ? { activityIsStatus: event.activityIsStatus }
+          : {}),
         startedAt:
           "startedAt" in event && typeof event.startedAt === "number"
             ? event.startedAt

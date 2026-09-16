@@ -66,6 +66,8 @@ export interface SubagentTimelineEvent {
    * `result` are the raw payloads used only by the nested tool-detail view.
    */
   input?: Record<string, unknown>;
+  /** The daemon's `activityIsStatus` for a tool call; see `toolCallActivity`. */
+  activityIsStatus?: boolean;
   result?: string;
   /**
    * Resolved web-search query, captured from a `tool_result` event's
@@ -1027,6 +1029,10 @@ const useSubagentStoreBase = create<SubagentStore>()((set, get) => ({
       // disturbing the `content` summary computed above.
       input:
         params.event.type === "tool_use_start" ? params.event.input : undefined,
+      activityIsStatus:
+        params.event.type === "tool_use_start"
+          ? params.event.activityIsStatus
+          : undefined,
       // Key off the RAW event type, not the mapped timeline type: a failed
       // tool emits `tool_result` with `isError: true`, which `mapInnerEventType`
       // routes to `"error"`. Using `eventType` here would drop the error output

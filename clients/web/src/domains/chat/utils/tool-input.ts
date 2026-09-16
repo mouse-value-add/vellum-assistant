@@ -46,7 +46,20 @@ export const FILE_PATH_KEYS = ["path", "file_path", "filePath"] as const;
 export const COMMAND_KEYS = ["command", "cmd"] as const;
 
 /**
- * Spellings of the activity sentence the daemon attaches to an input, mirroring
- * macOS `reasonDescription`; `reason` is the legacy one.
+ * The status sentence the daemon asked the model to put in a tool call's
+ * `input.activity`, or "" when the call has none.
+ *
+ * A tool can own an `activity` parameter of its own (an MCP server's, say); the
+ * daemon then reports `activityIsStatus: false` and the value is input, not a
+ * description of the call. Older daemons do not report it, and every
+ * `activity` they sent was the status sentence.
  */
-export const ACTIVITY_KEYS = ["activity", "reason"] as const;
+export function toolCallActivity(call: {
+  input?: Record<string, unknown>;
+  activityIsStatus?: boolean;
+}): string {
+  if (call.activityIsStatus === false) {
+    return "";
+  }
+  return readToolInputString(call.input ?? {}, "activity");
+}

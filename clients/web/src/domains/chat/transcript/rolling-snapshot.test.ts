@@ -443,6 +443,22 @@ describe("rolling-snapshot reducer", () => {
       ).toHaveLength(1);
     });
 
+    test("tool_use_start carries whether the call's activity is the status sentence", () => {
+      const next = applyEvent(
+        SEED,
+        env(1, {
+          type: "tool_use_start",
+          messageId: "a1",
+          toolUseId: "t1",
+          toolName: "mcp__calendar__create_event",
+          input: { activity: "planning" },
+          activityIsStatus: false,
+        } as AssistantEvent),
+      );
+      const tc = next.messages.find((m) => m.id === "a1")?.toolCalls?.[0];
+      expect(tc?.activityIsStatus).toBe(false);
+    });
+
     test("confirmation_request attaches, interaction_resolved clears the marker", () => {
       const withTool = applyEventsToHistory(SEED, [
         toolUseStart(1, "a1", "t1", "bash"),

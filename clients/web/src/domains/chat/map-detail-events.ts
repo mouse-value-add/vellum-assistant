@@ -61,6 +61,7 @@ export function mapDetailEvents(
       // falls back to.
       toolUseId: evt.toolUseId,
       input: evt.input,
+      activityIsStatus: evt.activityIsStatus,
       timestamp: Date.now(),
     });
   }

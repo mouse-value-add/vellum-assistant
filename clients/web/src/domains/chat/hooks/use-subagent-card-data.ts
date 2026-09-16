@@ -229,7 +229,11 @@ export function mapToolEventToStep(
   // activity label. Mirrors `buildSubagentStepDetails` so the timeline pill and
   // the nested detail view agree.
   const input = event.input ?? reconstructInputBag(toolName, content);
-  const label = deriveStepLabelFromName(toolName, input);
+  const label = deriveStepLabelFromName(
+    toolName,
+    input,
+    event.activityIsStatus,
+  );
   return {
     kind: "tool",
     durationLabel: "",
@@ -891,7 +895,11 @@ export function applyDetailEvent(
     }
     const labelInput =
       event.input ?? reconstructInputBag(toolName, event.content ?? "");
-    const label = deriveStepLabelFromName(toolName, labelInput);
+    const label = deriveStepLabelFromName(
+      toolName,
+      labelInput,
+      event.activityIsStatus,
+    );
     payloads.push({
       toolCallId,
       toolName,

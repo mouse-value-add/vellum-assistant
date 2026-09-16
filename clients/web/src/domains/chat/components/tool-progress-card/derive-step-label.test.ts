@@ -311,4 +311,22 @@ describe("deriveStepLabel", () => {
       ).title,
     );
   });
+
+  test("reads activity as the status sentence unless the tool owns the parameter", () => {
+    const input = { date: "2026-09-16", activity: "planning" };
+    expect(
+      deriveStepLabel(
+        buildToolCall({ name: "mcp__calendar__create_event", input }),
+      ).activity,
+    ).toBe("planning");
+    expect(
+      deriveStepLabel(
+        buildToolCall({
+          name: "mcp__calendar__create_event",
+          input,
+          activityIsStatus: false,
+        }),
+      ).activity,
+    ).toBe("");
+  });
 });

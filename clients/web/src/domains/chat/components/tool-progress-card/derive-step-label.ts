@@ -13,10 +13,10 @@
 
 import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
 import {
-  ACTIVITY_KEYS,
   COMMAND_KEYS,
   FILE_PATH_KEYS,
   readToolInputString,
+  toolCallActivity,
 } from "@/domains/chat/utils/tool-input";
 import { titleCaseToolName } from "@/domains/chat/components/tool-call-chip/utils";
 import { truncate } from "@/domains/chat/utils/truncate";
@@ -107,6 +107,8 @@ function parseMcpToolName(
 export function deriveStepLabelFromName(
   toolName: string,
   input?: unknown,
+  /** The daemon's `activityIsStatus` for the call; see `toolCallActivity`. */
+  activityIsStatus?: boolean,
 ): StepLabel {
   const inputBag: Record<string, unknown> =
     input && typeof input === "object"
@@ -116,9 +118,9 @@ export function deriveStepLabelFromName(
 
   // Rich activity sentence the daemon attaches to the input. Computed once and
   // spread onto every branch so phase-grouping (`title`/`info`/`iconName`)
-  // stays untouched. `readToolInputString` trims and returns "" when neither
-  // key is set.
-  const activity = readToolInputString(inputBag, ...ACTIVITY_KEYS);
+  // stays untouched. "" when the call has none, or its `activity` is a
+  // parameter the tool owns.
+  const activity = toolCallActivity({ input: inputBag, activityIsStatus });
 
   const mcp = parseMcpToolName(toolName);
   if (mcp) {
@@ -287,5 +289,9 @@ export function deriveStepLabelFromName(
  * the unified card needs to label.
  */
 export function deriveStepLabel(toolCall: ChatMessageToolCall): StepLabel {
-  return deriveStepLabelFromName(toolCall.name, toolCall.input);
+  return deriveStepLabelFromName(
+    toolCall.name,
+    toolCall.input,
+    toolCall.activityIsStatus,
+  );
 }

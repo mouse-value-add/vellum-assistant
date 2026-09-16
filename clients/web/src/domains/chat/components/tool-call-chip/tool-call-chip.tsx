@@ -24,10 +24,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  ACTIVITY_KEYS,
-  readToolInputString,
-} from "@/domains/chat/utils/tool-input";
+import { toolCallActivity } from "@/domains/chat/utils/tool-input";
 import { useTranslation } from "@/i18n";
 
 import { Button } from "@vellumai/design-library";
@@ -171,7 +168,7 @@ export function InlineConfirmationCard({
   // it hit the gate, and the human-readable ask.
   const { context: contextLabel, ask: body } = confirmationAsk(
     toolCall.name,
-    toolCall.input,
+    toolCall,
     confirmation,
   );
 
@@ -335,8 +332,7 @@ export function ToolCallChip({
   );
 
   const inputSummary = extractInputSummary(toolCall.name, toolCall.input);
-  const activityLabel =
-    readToolInputString(toolCall.input ?? {}, ...ACTIVITY_KEYS) || null;
+  const activityLabel = toolCallActivity(toolCall) || null;
   const label =
     activityLabel ??
     (isRunning

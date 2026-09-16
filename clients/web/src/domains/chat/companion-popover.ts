@@ -213,14 +213,18 @@ function popoverForPicker(): CompanionPopover | undefined {
     return {
       kind: "voices",
       id: COMPANION_PICKER_VOICES,
-      groups: voices.groups.slice(0, COMPANION_PICKER_OPTIONS_MAX).map((group) => ({
-        accent: bounded(group.accent, 120),
-        voices: group.voices.slice(0, COMPANION_PICKER_OPTIONS_MAX).map((voice) => ({
-          ...voice,
-          label: bounded(voice.label, 200),
-          sampleUrl: voice.sampleUrl.length > 2048 ? "" : voice.sampleUrl,
+      groups: voices.groups
+        .slice(0, COMPANION_PICKER_OPTIONS_MAX)
+        .map((group) => ({
+          accent: bounded(group.accent, 120),
+          voices: group.voices
+            .slice(0, COMPANION_PICKER_OPTIONS_MAX)
+            .map((voice) => ({
+              ...voice,
+              label: bounded(voice.label, 200),
+              sampleUrl: voice.sampleUrl.length > 2048 ? "" : voice.sampleUrl,
+            })),
         })),
-      })),
       selected: voices.selected,
     };
   }
@@ -272,11 +276,17 @@ export function pendingApprovals(): PendingApproval[] {
   return approvals;
 }
 
-function popoverApproval({ confirmation }: PendingApproval): CompanionApproval {
+function popoverApproval({
+  confirmation,
+  toolCall,
+}: PendingApproval): CompanionApproval {
   const toolName = confirmation.toolName ?? "";
   const { context, ask } = confirmationAsk(
     toolName,
-    confirmation.input,
+    {
+      input: confirmation.input,
+      activityIsStatus: toolCall?.activityIsStatus,
+    },
     confirmation,
   );
   const requested = confirmation.input?.permission_type;
