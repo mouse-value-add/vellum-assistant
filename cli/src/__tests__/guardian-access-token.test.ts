@@ -106,18 +106,16 @@ describe("resolveGuardianAccessToken", () => {
     expect(refreshSpy).not.toHaveBeenCalled();
   });
 
-  test("fails without a lease when nothing is stored and no secret is known", async () => {
+  test("leases secretless when nothing is stored and the lockfile has no secret", async () => {
+    // Bare-metal gateways accept a secretless guardian/init from loopback.
     loadSpy.mockReturnValue(null);
+    leaseSpy.mockResolvedValue(storedToken({ accessToken: "leased-token" }));
 
-    const err = await resolveGuardianAccessToken(GATEWAY, ASSISTANT).catch(
-      (e: unknown) => e,
-    );
+    const token = await resolveGuardianAccessToken(GATEWAY, ASSISTANT);
 
-    expect(err).toBeInstanceOf(GuardianAccessTokenError);
-    expect((err as GuardianAccessTokenError).message).toContain(
-      `vellum wake ${ASSISTANT} --repair-guardian`,
-    );
-    expect(leaseSpy).not.toHaveBeenCalled();
+    expect(token).toBe("leased-token");
+    expect(leaseSpy).toHaveBeenCalledWith(GATEWAY, ASSISTANT, undefined);
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 
   test("a spent pairing names the repair command instead of re-leasing", async () => {
@@ -203,7 +201,16 @@ describe("resolveGuardianAccessTokenOrExit", () => {
   });
 
   test("surfaces a spent pairing with its repair command and exits 1", async () => {
-    loadSpy.mockReturnValue(null);
+    loadSpy.mockReturnValue(
+      storedToken({
+        accessTokenExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }),
+    );
+    refreshSpy.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: "Failed to refresh guardian token",
+    });
     const errorSpy = spyOn(console, "error").mockImplementation(() => {});
     const exitSpy = spyOn(process, "exit").mockImplementation(((
       code?: number,

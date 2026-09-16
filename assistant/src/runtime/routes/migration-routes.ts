@@ -284,10 +284,9 @@ export function computeSecretsRedacted(
 /**
  * Compute the v1 manifest inputs that aren't tied to per-call options.
  *
- * `walkDirectoryForMetadata` skips `embedding-models`, `data/qdrant`,
- * `signals`, and `deprecated` — `logs` is NOT in the skip list, so log
- * files end up in `manifest.contents`. Browser state and memory vectors
- * (qdrant) are skipped, so those flags are false.
+ * The workspace walk in `vbundle-builder` skips `data/logs`, browser
+ * state, and memory vectors (`data/qdrant`), so all three export-option
+ * flags are false.
  */
 async function buildExportManifestInputs(): Promise<ExportManifestInputs> {
   const assistantId = await resolveAssistantId();
@@ -308,7 +307,7 @@ async function buildExportManifestInputs(): Promise<ExportManifestInputs> {
       max_runtime_version: null,
     },
     exportOptions: {
-      include_logs: true,
+      include_logs: false,
       include_browser_state: false,
       include_memory_vectors: false,
     },

@@ -6,10 +6,12 @@ import {
 
 export interface ResolveGuardianAccessTokenOptions {
   /**
-   * Single-use gateway bootstrap secret from the lockfile. Only consulted
-   * when no guardian token is stored for the assistant: `guardian/init`
-   * consumes the secret and revokes every other device-bound token, so it
-   * is never used to replace a token that merely expired.
+   * Single-use gateway bootstrap secret from the lockfile, when the hatch
+   * minted one. Only consulted when no guardian token is stored for the
+   * assistant: `guardian/init` consumes the secret and revokes every other
+   * device-bound token, so it is never used to replace a token that merely
+   * expired. Bare-metal gateways accept a secretless init from loopback, so
+   * the lease is attempted without one.
    */
   bootstrapSecret?: string;
   /**
@@ -41,7 +43,8 @@ export class GuardianAccessTokenError extends Error {
  * Resolution order:
  *  1. Stored token whose access token has not expired (unless `forceRefresh`).
  *  2. Stored token with a refresh token: rotate via `POST /v1/guardian/refresh`.
- *  3. No stored token and a `bootstrapSecret`: lease via `POST /v1/guardian/init`.
+ *  3. No stored token: lease via `POST /v1/guardian/init`, with the lockfile
+ *     bootstrap secret when the hatch minted one.
  *
  * A stored token that cannot be refreshed is a spent pairing; the only way
  * back is the explicit `vellum wake <id> --repair-guardian` reset, which the
@@ -55,12 +58,6 @@ export async function resolveGuardianAccessToken(
   const stored = loadGuardianToken(assistantId);
 
   if (!stored) {
-    if (!options.bootstrapSecret) {
-      throw new GuardianAccessTokenError(
-        `No guardian token is stored for '${assistantId}'. Re-pair with: vellum wake ${assistantId} --repair-guardian`,
-        401,
-      );
-    }
     const leased = await leaseGuardianToken(
       gatewayUrl,
       assistantId,

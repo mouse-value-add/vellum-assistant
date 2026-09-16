@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 
 import { findAssistantByName } from "../lib/assistant-config.js";
 import type { AssistantEntry } from "../lib/assistant-config.js";
-import { fetchThroughStartingGate } from "../lib/backup-ops.js";
+import { fetchWithTokenRotation } from "../lib/backup-ops.js";
 import {
   bundleFileSizeBytes,
   formatBundleSizeMb,
@@ -596,6 +596,13 @@ async function runLocalRestore(opts: {
 }): Promise<void> {
   const { entry, name, version, dryRun, stagedRelativePath, bundleData } = opts;
   let accessToken = opts.accessToken;
+  const rotateToken = () =>
+    resolveGuardianAccessTokenOrExit(
+      entry.runtimeUrl,
+      entry.assistantId,
+      name,
+      { forceRefresh: true },
+    );
 
   if (dryRun) {
     // Preflight check
@@ -603,26 +610,25 @@ async function runLocalRestore(opts: {
 
     let response: Response;
     try {
-      response = await fetchThroughStartingGate(() =>
-        stagedRelativePath
-          ? preflightStagedBundle(
-              entry.runtimeUrl,
-              accessToken,
-              stagedRelativePath,
-            )
-          : loopbackSafeFetch(
-              `${entry.runtimeUrl}/v1/migrations/import-preflight`,
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  "Content-Type": "application/octet-stream",
+      ({ response, token: accessToken } = await fetchWithTokenRotation(
+        accessToken,
+        (token) =>
+          stagedRelativePath
+            ? preflightStagedBundle(entry.runtimeUrl, token, stagedRelativePath)
+            : loopbackSafeFetch(
+                `${entry.runtimeUrl}/v1/migrations/import-preflight`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/octet-stream",
+                  },
+                  body: bundleData ? new Uint8Array(bundleData) : undefined,
+                  signal: AbortSignal.timeout(120_000),
                 },
-                body: bundleData ? new Uint8Array(bundleData) : undefined,
-                signal: AbortSignal.timeout(120_000),
-              },
-            ),
-      );
+              ),
+        rotateToken,
+      ));
     } catch (err) {
       if (err instanceof Error && err.name === "TimeoutError") {
         console.error("Error: Preflight request timed out after 2 minutes.");
@@ -717,22 +723,21 @@ async function runLocalRestore(opts: {
 
     let result: ImportResponse;
     try {
-      const response = await fetchThroughStartingGate(() =>
-        stagedRelativePath
-          ? importStagedBundle(
-              entry.runtimeUrl,
-              accessToken,
-              stagedRelativePath,
-            )
-          : loopbackSafeFetch(`${entry.runtimeUrl}/v1/migrations/import`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/octet-stream",
-              },
-              body: bundleData ? new Uint8Array(bundleData) : undefined,
-              signal: AbortSignal.timeout(120_000),
-            }),
+      const { response } = await fetchWithTokenRotation(
+        accessToken,
+        (token) =>
+          stagedRelativePath
+            ? importStagedBundle(entry.runtimeUrl, token, stagedRelativePath)
+            : loopbackSafeFetch(`${entry.runtimeUrl}/v1/migrations/import`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/octet-stream",
+                },
+                body: bundleData ? new Uint8Array(bundleData) : undefined,
+                signal: AbortSignal.timeout(120_000),
+              }),
+        rotateToken,
       );
       if (!response.ok) {
         const body = await response.text();

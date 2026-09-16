@@ -1374,9 +1374,8 @@ describe("streamCommitImport — preserves live workspace paths when bundle omit
   });
 
   test("keeps the live pid files and logs, which a bundle never carries", async () => {
-    // The daemon writes its pid file and holds the day's log open. A
-    // restore that wiped either would leave the CLI unable to find the
-    // daemon and the logger writing into the discarded pre-import tree.
+    // The daemon writes its pid file and holds the day's log open; both
+    // must survive a restore untouched.
     mkdirSync(join(workspaceDir, "data", "logs"), { recursive: true });
     writeFileSync(join(workspaceDir, "vellum.pid"), "4242");
     writeFileSync(
@@ -1402,8 +1401,8 @@ describe("streamCommitImport — preserves live workspace paths when bundle omit
           path: "workspace/config.json",
           data: new TextEncoder().encode("{}"),
         },
-        // A pre-fix bundle still carries the source host's pid file; it
-        // must neither land on disk nor displace the live one.
+        // Older exporters archive the source host's pid file. It must
+        // neither land on disk nor displace the live one.
         {
           path: "workspace/vellum.pid",
           data: new TextEncoder().encode("9999"),

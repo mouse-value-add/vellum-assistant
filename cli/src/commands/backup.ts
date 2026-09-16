@@ -4,7 +4,7 @@ import { dirname, join } from "path";
 import type { AssistantEntry } from "../lib/assistant-config.js";
 import { findAssistantByName } from "../lib/assistant-config.js";
 import {
-  fetchThroughStartingGate,
+  fetchWithTokenRotation,
   formatSize,
   getBackupsDir,
 } from "../lib/backup-ops.js";
@@ -109,39 +109,35 @@ export async function backup(): Promise<void> {
     return;
   }
 
-  let accessToken = await resolveGuardianAccessTokenOrExit(
+  const accessToken = await resolveGuardianAccessTokenOrExit(
     entry.runtimeUrl,
     entry.assistantId,
     name,
     { bootstrapSecret: entry.guardianBootstrapSecret },
   );
 
-  const postExport = (token: string) =>
-    loopbackSafeFetch(`${entry.runtimeUrl}/v1/migrations/export`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ description: "CLI backup" }),
-      signal: AbortSignal.timeout(exportTimeoutMs),
-    });
-
   let response: Response;
   try {
-    response = await fetchThroughStartingGate(() => postExport(accessToken));
-
-    // Retry once with a rotated token on 401: the cached token may be stale
-    // after a container restart that generated a new gateway signing key.
-    if (response.status === 401) {
-      accessToken = await resolveGuardianAccessTokenOrExit(
-        entry.runtimeUrl,
-        entry.assistantId,
-        name,
-        { forceRefresh: true },
-      );
-      response = await fetchThroughStartingGate(() => postExport(accessToken));
-    }
+    ({ response } = await fetchWithTokenRotation(
+      accessToken,
+      (token) =>
+        loopbackSafeFetch(`${entry.runtimeUrl}/v1/migrations/export`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ description: "CLI backup" }),
+          signal: AbortSignal.timeout(exportTimeoutMs),
+        }),
+      () =>
+        resolveGuardianAccessTokenOrExit(
+          entry.runtimeUrl,
+          entry.assistantId,
+          name,
+          { forceRefresh: true },
+        ),
+    ));
   } catch (err) {
     if (err instanceof Error && err.name === "TimeoutError") {
       console.error(

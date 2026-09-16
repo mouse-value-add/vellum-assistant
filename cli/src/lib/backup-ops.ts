@@ -15,6 +15,7 @@ import {
   stageBundleForRestore,
   type RestoreStagingTarget,
 } from "./bundle-staging.js";
+import { loadGuardianToken } from "./guardian-token.js";
 import { resolveGuardianAccessToken } from "./guardian-access-token.js";
 import { loopbackSafeFetch } from "./loopback-fetch.js";
 
@@ -43,6 +44,9 @@ async function getGuardianAccessToken(
   assistantId: string,
   options?: { forceRefresh?: boolean },
 ): Promise<string | null> {
+  if (!loadGuardianToken(assistantId)) {
+    return null;
+  }
   try {
     return await resolveGuardianAccessToken(runtimeUrl, assistantId, options);
   } catch {
@@ -62,7 +66,7 @@ export async function createBackup(
 ): Promise<string | null> {
   const timeoutMs = options?.timeoutMs ?? 120_000;
   try {
-    let accessToken = await getGuardianAccessToken(runtimeUrl, assistantId);
+    const accessToken = await getGuardianAccessToken(runtimeUrl, assistantId);
     if (!accessToken) {
       console.warn(
         "Warning: backup skipped — no valid guardian token available",
@@ -70,36 +74,23 @@ export async function createBackup(
       return null;
     }
 
-    const postExport = () =>
-      loopbackSafeFetch(`${runtimeUrl}/v1/migrations/export`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          description: options?.description ?? "CLI backup",
+    const { response } = await fetchWithTokenRotation(
+      accessToken,
+      (token) =>
+        loopbackSafeFetch(`${runtimeUrl}/v1/migrations/export`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            description: options?.description ?? "CLI backup",
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
         }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-
-    let response = await fetchThroughStartingGate(postExport);
-
-    // Retry once with a refreshed token on 401 — the cached token may be
-    // stale after a container restart that regenerated the gateway signing key.
-    if (response.status === 401) {
-      const refreshed = await getGuardianAccessToken(runtimeUrl, assistantId, {
-        forceRefresh: true,
-      });
-      if (!refreshed) {
-        console.warn(
-          `Warning: backup export failed (401) and token refresh failed`,
-        );
-        return null;
-      }
-      accessToken = refreshed;
-      response = await fetchThroughStartingGate(postExport);
-    }
+      () =>
+        getGuardianAccessToken(runtimeUrl, assistantId, { forceRefresh: true }),
+    );
 
     if (!response.ok) {
       const body = await response.text();
@@ -161,7 +152,7 @@ async function isGatewayStartingGate(response: Response): Promise<boolean> {
  * daemon is ready, so a backup or restore issued right after it lands on
  * the gate. Returns the last response, ok or not, with its body unread.
  */
-export async function fetchThroughStartingGate(
+async function fetchThroughStartingGate(
   send: () => Promise<Response>,
 ): Promise<Response> {
   const deadline = Date.now() + STARTING_GATE_WAIT_MS;
@@ -173,27 +164,42 @@ export async function fetchThroughStartingGate(
   return response;
 }
 
+/**
+ * Send an authenticated gateway request through the starting gate, then
+ * once more with a rotated token when the gateway answers 401: a locally
+ * unexpired token is still stale after a gateway restart regenerated the
+ * signing key. When `rotate` yields no token the 401 response is returned
+ * as-is. Returns the last response with its body unread, plus the token it
+ * was sent with.
+ */
+export async function fetchWithTokenRotation(
+  token: string,
+  send: (token: string) => Promise<Response>,
+  rotate: () => Promise<string | null>,
+): Promise<{ response: Response; token: string }> {
+  const response = await fetchThroughStartingGate(() => send(token));
+  if (response.status !== 401) {
+    return { response, token };
+  }
+  const rotated = await rotate();
+  if (!rotated) {
+    return { response, token };
+  }
+  return {
+    response: await fetchThroughStartingGate(() => send(rotated)),
+    token: rotated,
+  };
+}
+
 async function postRestoreWithRetries(
-  postImport: () => Promise<Response>,
+  postImport: (token: string) => Promise<Response>,
   runtimeUrl: string,
   assistantId: string,
-  onTokenRefresh: (token: string) => void,
+  token: string,
 ): Promise<Response | null> {
-  let response = await fetchThroughStartingGate(postImport);
-
-  // Retry once with a refreshed token on 401 — the cached token may be
-  // stale after a container restart that regenerated the gateway signing key.
-  if (response.status === 401) {
-    const refreshed = await getGuardianAccessToken(runtimeUrl, assistantId, {
-      forceRefresh: true,
-    });
-    if (!refreshed) {
-      console.warn(`Warning: restore failed (401) and token refresh failed`);
-      return null;
-    }
-    onTokenRefresh(refreshed);
-    response = await fetchThroughStartingGate(postImport);
-  }
+  const { response } = await fetchWithTokenRotation(token, postImport, () =>
+    getGuardianAccessToken(runtimeUrl, assistantId, { forceRefresh: true }),
+  );
 
   if (!response.ok) {
     const body = await response.text();
@@ -236,27 +242,23 @@ export async function restoreBackup(
       return false;
     }
 
-    const initialToken = await getGuardianAccessToken(runtimeUrl, assistantId);
-    if (!initialToken) {
+    const token = await getGuardianAccessToken(runtimeUrl, assistantId);
+    if (!token) {
       console.warn(
         "Warning: restore skipped — no valid guardian token available",
       );
       return false;
     }
-    let token = initialToken;
 
     if (staging) {
       const staged = await stageBundleForRestore(staging, backupPath);
       try {
-        const postImport = () =>
-          importStagedBundle(runtimeUrl, token, staged.relativePath);
         const response = await postRestoreWithRetries(
-          postImport,
+          (sendToken) =>
+            importStagedBundle(runtimeUrl, sendToken, staged.relativePath),
           runtimeUrl,
           assistantId,
-          (nextToken) => {
-            token = nextToken;
-          },
+          token,
         );
         if (!response) {
           return false;
@@ -268,23 +270,20 @@ export async function restoreBackup(
     }
 
     const bundleData = new Uint8Array(readFileSync(backupPath));
-    const postImport = () =>
-      loopbackSafeFetch(`${runtimeUrl}/v1/migrations/import`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/octet-stream",
-        },
-        body: bundleData,
-        signal: AbortSignal.timeout(120_000),
-      });
     const response = await postRestoreWithRetries(
-      postImport,
+      (sendToken) =>
+        loopbackSafeFetch(`${runtimeUrl}/v1/migrations/import`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${sendToken}`,
+            "Content-Type": "application/octet-stream",
+          },
+          body: bundleData,
+          signal: AbortSignal.timeout(120_000),
+        }),
       runtimeUrl,
       assistantId,
-      (nextToken) => {
-        token = nextToken;
-      },
+      token,
     );
     if (!response) {
       return false;
