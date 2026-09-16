@@ -4,17 +4,12 @@ import { chromium, webkit, type Page } from "playwright";
 
 import type {} from "./fixtures/edge-swipe";
 
+import { bundleFixture, PHONE_CONTEXT } from "./browser-harness";
+
 // Real layout and CSS overflow coercion are required for these regressions.
-const build = await Bun.build({
-  entrypoints: [
-    fileURLToPath(new URL("./fixtures/edge-swipe.tsx", import.meta.url)),
-  ],
-  target: "browser",
-  format: "iife",
-  define: { "process.env.NODE_ENV": '"development"', "import.meta.env": "{}" },
-});
-assert.ok(build.success, build.logs.join("\n"));
-const bundle = await build.outputs[0].text();
+const bundle = await bundleFixture(
+  fileURLToPath(new URL("./fixtures/edge-swipe.tsx", import.meta.url)),
+);
 
 async function setFixture(page: Page, content: string, contain = true) {
   await page.locator("#fixture").evaluate(
@@ -67,11 +62,7 @@ async function swipe(
 for (const engine of [chromium, webkit]) {
   const browser = await engine.launch({ headless: true });
   try {
-    const page = await browser.newPage({
-      viewport: { width: 390, height: 844 },
-      isMobile: true,
-      hasTouch: true,
-    });
+    const page = await browser.newPage(PHONE_CONTEXT);
     const errors: string[] = [];
     page.on("pageerror", (error) => {
       errors.push(error.message);

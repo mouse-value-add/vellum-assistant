@@ -151,6 +151,9 @@ jobs:
       - name: Test gestures in Chromium and WebKit
         run: bun run test:edge-swipe:browser
 
+      - name: Test touch-mobile layout in Chromium and WebKit
+        run: bun run test:touch-layout:browser
+
   build:
     name: Build
     runs-on: ubuntu-latest
