@@ -1147,13 +1147,13 @@ export function createResolveToolsCallback(
         {},
         browserContext,
       )
-        ? "The default is virtual desktop Chrome, even when the viewer is closed. The command installs missing components, starts Chrome, and completes the action in one call. This also repairs missing packages after a restart while keeping the browser profile. Do not switch to headless Chrome or Playwright unless the user explicitly requests another browser."
+        ? "Virtual desktop Chrome is the default even with the viewer closed. The command restores missing packages, starts Chrome with the saved profile and completes the action. Switch browsers only when the user requests it."
         : "Continue the selected browser session through this CLI; do not switch backends unless the user asks.";
       allBaseDefs = allBaseDefs.map((definition) =>
         definition.name === "bash"
           ? {
               ...definition,
-              description: `${definition.description} For browser tasks, use assistant browser navigate --url <url> directly. ${browserTarget} Use timeout_seconds: ${getConfig().timeouts.shellMaxTimeoutSec} for first use; setup progress is visible in the Virtual desktop panel. Use assistant browser --help for other browser actions. Current CLI guidance takes precedence over saved browser setup notes. Do not install packages, launch Chrome or X servers, change supervisor settings, or use raw CDP or screenshot scripts yourself. If managed setup fails, report the error instead of starting a different browser.`,
+              description: `${definition.description} For browser tasks, run assistant browser navigate --url <url> directly with timeout_seconds: ${getConfig().timeouts.shellMaxTimeoutSec}. ${browserTarget} See assistant browser --help for actions and the Virtual desktop panel for setup progress. Follow this CLI over saved setup notes. Do not manually launch or install the browser stack, change supervisor settings, or use raw CDP/screenshot scripts. Report setup errors.`,
             }
           : definition,
       );
