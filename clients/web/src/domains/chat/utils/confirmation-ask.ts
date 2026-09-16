@@ -9,9 +9,9 @@ import { toolCallActivity } from "@/domains/chat/utils/tool-input";
  *
  * `context` is what the assistant was doing when it hit the gate: the live
  * activity label when the tool call carries one (see `toolCallActivity`), then
- * a custom confirmation title, then the friendly tool label. `ask` is the human-readable request;
- * older daemons send only the risk reason, which reads well enough in the same
- * slot. Null when there is neither.
+ * a custom confirmation title, then the friendly tool label. `ask` is the
+ * human-readable request; older daemons send only the risk reason, which reads
+ * well enough in the same slot. Null when there is neither.
  */
 export function confirmationAsk(
   toolName: string,

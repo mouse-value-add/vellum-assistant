@@ -77,12 +77,12 @@ export async function createGuardianRequestForConfirmation(
     // it. Without the conversation's definitions, read it as the status
     // sentence, which every other tool's is.
     const activityIsStatus =
-      conversation === undefined
-        ? true
-        : (activityIsStatusAmong(
-            conversation.registeredToolDefinitions,
-            msg.toolName,
-          ) ?? true);
+      (conversation &&
+        activityIsStatusAmong(
+          conversation.registeredToolDefinitions,
+          msg.toolName,
+        )) ??
+      true;
     const activityRaw =
       activityIsStatus && typeof inputRecord.activity === "string"
         ? inputRecord.activity
