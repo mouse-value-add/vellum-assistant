@@ -3,8 +3,8 @@ import { useTranslation } from "@/i18n";
  * Nested detail view for a subagent "Searching the web" query pill: the search
  * query rendered verbatim, then the sources it returned as the same favicon
  * source chips the timeline uses. Opened in-place by `SubagentDetailPanel` when
- * a query pill is clicked — the search analogue of the thinking pill's reasoning
- * view.
+ * a query pill is clicked. It is the search analogue of the thinking pill's
+ * reasoning view.
  *
  * Static / presentational: reads only the `searchQuery` + `searchResults` the
  * panel already built into the `WebSearchDetailPayload` (see
