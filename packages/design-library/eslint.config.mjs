@@ -2,6 +2,9 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
+// Transitional: this library reaches into an app folder for a rule both
+// packages share. The rule belongs in a shared workspace package; do not add
+// further imports from `clients/web` here.
 import { noEmDash } from "../../clients/web/eslint-rules/no-em-dash.mjs";
 
 /**
