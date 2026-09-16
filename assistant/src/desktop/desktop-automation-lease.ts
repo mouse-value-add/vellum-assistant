@@ -1,6 +1,4 @@
 import { getConfig } from "../config/loader.js";
-import { SYNC_TAGS } from "../daemon/message-types/sync.js";
-import { publishSyncInvalidation } from "../runtime/sync/sync-publisher.js";
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
 import { getLogger } from "../util/logger.js";
 import { desktopDependencyInstaller } from "./desktop-dependencies.js";
@@ -9,15 +7,11 @@ import {
   type DesktopViewer,
   getDesktopSessionManager,
 } from "./desktop-session-manager.js";
-import { DesktopViewerInput } from "./desktop-viewer-input.js";
 import { isVirtualDesktopEnabled } from "./virtual-desktop-feature.js";
 
-const log = getLogger("desktop-control");
+const log = getLogger("desktop-automation-lease");
 const IDLE_TIMEOUT_MS = 5 * 60_000;
 const MAX_ACTIONS = 100;
-export type DesktopControlLeaseStatus = {
-  state: "idle" | "assistant" | "human";
-};
 type Owner = {
   conversationId: string;
   actorId: string;
@@ -29,13 +23,10 @@ type Owner = {
   desktopLost: boolean;
 };
 
-export class DesktopControlLease {
+export class DesktopAutomationLease {
   private owner: Owner | null = null;
-  private humanControl = false;
-  private inputCleanupPending = false;
   private generation = 0;
   private tail: Promise<unknown> = Promise.resolve();
-  private setupAbort: AbortController | undefined;
   private watchdog: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -44,28 +35,13 @@ export class DesktopControlLease {
       ready: () => boolean;
       ensureReady: (signal: AbortSignal) => Promise<void>;
       manager: () => DesktopSessionManager;
-      input: Pick<DesktopViewerInput, "setViewerInput">;
-      notify: () => Promise<unknown>;
     } = {
       enabled: () => isVirtualDesktopEnabled(getConfig()),
       ready: () => desktopDependencyInstaller.getStatus().state === "ready",
       ensureReady: (signal) => desktopDependencyInstaller.ensureReady(signal),
       manager: getDesktopSessionManager,
-      input: new DesktopViewerInput(),
-      notify: () => publishSyncInvalidation([SYNC_TAGS.assistantDesktop]),
     },
   ) {}
-
-  getStatus(): DesktopControlLeaseStatus {
-    return {
-      state:
-        this.owner || this.inputCleanupPending
-          ? "assistant"
-          : this.humanControl
-            ? "human"
-            : "idle",
-    };
-  }
 
   private exclusive<T>(run: () => Promise<T>): Promise<T> {
     const next = this.tail.then(run, run);
@@ -73,77 +49,33 @@ export class DesktopControlLease {
     return next;
   }
 
-  private notify(): void {
-    void this.deps
-      .notify()
-      .catch((err) => log.warn({ err }, "Desktop control notification failed"));
-  }
-
   private assertAvailable(): void {
     if (!this.deps.enabled()) {
       throw new Error(
-        "Virtual desktop control is available only on enabled platform-hosted assistants",
+        "Virtual desktop browser automation is available only on enabled platform-hosted assistants",
       );
     }
     if (!this.deps.ready()) {
       throw new Error(
-        "Open the Virtual desktop panel and wait for automatic installation to finish before using desktop control",
+        "Open the Virtual desktop panel and wait for automatic installation to finish before using desktop browser automation",
       );
     }
   }
 
-  async takeControl(): Promise<DesktopControlLeaseStatus> {
-    this.humanControl = true;
-    this.generation += 1;
-    this.owner?.abort.abort();
-    this.setupAbort?.abort(
-      new Error("Virtual desktop setup wait interrupted by user control"),
-    );
-    return this.exclusive(async () => {
-      await this.release();
-      this.notify();
-      return this.getStatus();
-    });
-  }
-
-  allowAssistant(): Promise<DesktopControlLeaseStatus> {
-    return this.exclusive(async () => {
-      this.assertAvailable();
-      this.humanControl = false;
-      this.generation += 1;
-      this.notify();
-      return this.getStatus();
-    });
-  }
-
   private async release(): Promise<void> {
     const owner = this.owner;
-    if (!owner && !this.inputCleanupPending) {
+    if (!owner) {
       return;
     }
-    owner?.abort.abort();
-    owner?.removeAbortListener();
-    this.inputCleanupPending = true;
+    owner.abort.abort();
+    owner.removeAbortListener();
     clearInterval(this.watchdog);
     this.watchdog = undefined;
-    try {
-      if (!owner?.desktopLost) {
-        try {
-          await this.deps.manager().browser.release();
-        } finally {
-          await this.deps.input.setViewerInput(true);
-        }
-      }
-      this.inputCleanupPending = false;
-    } finally {
-      if (!this.inputCleanupPending) {
-        if (owner) {
-          this.deps.manager().releaseAutomationSlot(owner.holder);
-        }
-        this.owner = null;
-      }
-      this.notify();
+    if (!owner.desktopLost) {
+      await this.deps.manager().browser.release();
     }
+    this.deps.manager().releaseAutomationSlot(owner.holder);
+    this.owner = null;
   }
 
   private cancel(owner: Owner): void {
@@ -153,7 +85,7 @@ export class DesktopControlLease {
     this.generation += 1;
     owner.abort.abort();
     void this.exclusive(() => this.release()).catch((err) =>
-      log.warn({ err }, "Desktop control cleanup failed"),
+      log.warn({ err }, "Desktop browser session cleanup failed"),
     );
   }
 
@@ -202,7 +134,7 @@ export class DesktopControlLease {
           cancel();
         }
       } catch (err) {
-        log.warn({ err }, "Desktop control availability check failed");
+        log.warn({ err }, "Desktop browser session availability check failed");
         cancel();
       }
     }, 1_000);
@@ -211,14 +143,14 @@ export class DesktopControlLease {
       await this.deps.manager().ensureDesktopRunning();
       owner.abort.signal.throwIfAborted();
       this.assertAvailable();
-      await this.deps.input.setViewerInput(false);
       await this.deps.manager().browser.release();
-      this.inputCleanupPending = false;
-      this.notify();
       return owner;
     } catch (err) {
       await this.release().catch((cleanupError) =>
-        log.warn({ err: cleanupError }, "Desktop control cleanup failed"),
+        log.warn(
+          { err: cleanupError },
+          "Desktop browser session cleanup failed",
+        ),
       );
       throw err;
     }
@@ -237,7 +169,7 @@ export class DesktopControlLease {
         !context.conversationId
       ) {
         throw new Error(
-          "Desktop control requires an identified guardian conversation",
+          "Desktop browser session requires an identified guardian conversation",
         );
       }
       if (
@@ -249,19 +181,17 @@ export class DesktopControlLease {
       }
       if (done) {
         await this.release();
-        return { content: "Desktop control released.", isError: false };
+        return { content: "Desktop browser session released.", isError: false };
       }
       context.signal?.throwIfAborted();
       try {
         if (
           !this.owner &&
-          !this.humanControl &&
           generation === this.generation &&
           this.deps.enabled() &&
           !this.deps.ready()
         ) {
           const abort = new AbortController();
-          this.setupAbort = abort;
           const signal = AbortSignal.any([
             abort.signal,
             ...(context.signal ? [context.signal] : []),
@@ -288,7 +218,6 @@ export class DesktopControlLease {
           } finally {
             clearTimeout(timeout);
             clearInterval(watchdog);
-            this.setupAbort = undefined;
           }
         }
         this.assertAvailable();
@@ -296,12 +225,11 @@ export class DesktopControlLease {
         await this.release();
         throw error;
       }
-      if (this.humanControl || generation !== this.generation) {
+      if (generation !== this.generation) {
         return {
           content:
-            "Desktop control was interrupted. The user can select Allow assistant in the desktop modal, then ask you to continue. Observe again before acting.",
+            "Desktop browser session was interrupted. Take a fresh snapshot before continuing.",
           isError: true,
-          yieldToUser: true,
         };
       }
       if (this.owner) {
@@ -328,7 +256,10 @@ export class DesktopControlLease {
         return result;
       } catch (err) {
         await this.release().catch((cleanupError) =>
-          log.warn({ err: cleanupError }, "Desktop control cleanup failed"),
+          log.warn(
+            { err: cleanupError },
+            "Desktop browser session cleanup failed",
+          ),
         );
         throw err;
       }
@@ -336,4 +267,4 @@ export class DesktopControlLease {
   }
 }
 
-export const desktopControlLease = new DesktopControlLease();
+export const desktopAutomationLease = new DesktopAutomationLease();

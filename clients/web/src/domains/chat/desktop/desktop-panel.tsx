@@ -3,7 +3,6 @@ import { lazy, Suspense } from "react";
 
 import { useTranslation } from "@/i18n";
 
-import { DesktopControlPanel } from "./desktop-control-panel";
 import { DesktopStatus } from "./desktop-status";
 import { useDesktopSetup } from "./use-desktop-setup";
 
@@ -16,7 +15,6 @@ const DesktopViewer = lazy(() =>
 interface DesktopPanelProps {
   assistantId: string;
   viewOnly?: boolean;
-  controlsContainer?: HTMLElement | null;
 }
 
 const SETUP_STAGE_KEY = {
@@ -25,37 +23,23 @@ const SETUP_STAGE_KEY = {
   checking: "assistantDesktop.checkingInstall",
 } as const;
 
-export function DesktopPanel({
-  assistantId,
-  viewOnly,
-  controlsContainer,
-}: DesktopPanelProps) {
+export function DesktopPanel({ assistantId, viewOnly }: DesktopPanelProps) {
   const { t } = useTranslation("chat");
   const { query, install } = useDesktopSetup(assistantId);
   const setup = query.data;
   if (setup?.state === "ready") {
     return (
-      <DesktopControlPanel
-        assistantId={assistantId}
-        controlsContainer={controlsContainer}
+      <Suspense
+        fallback={
+          <DesktopStatus loading message={t("assistantDesktop.connecting")} />
+        }
       >
-        {(assistantOwnsInput) => (
-          <Suspense
-            fallback={
-              <DesktopStatus
-                loading
-                message={t("assistantDesktop.connecting")}
-              />
-            }
-          >
-            <DesktopViewer
-              key={assistantId}
-              assistantId={assistantId}
-              viewOnly={viewOnly || assistantOwnsInput}
-            />
-          </Suspense>
-        )}
-      </DesktopControlPanel>
+        <DesktopViewer
+          key={assistantId}
+          assistantId={assistantId}
+          viewOnly={viewOnly}
+        />
+      </Suspense>
     );
   }
   const busy =

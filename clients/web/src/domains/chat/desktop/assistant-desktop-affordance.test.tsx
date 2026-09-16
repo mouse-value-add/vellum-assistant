@@ -8,7 +8,6 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 
 import { useAssistantIdentityStore } from "@/stores/assistant-identity-store";
 
@@ -47,25 +46,13 @@ mock.module("@/stores/resolved-assistants-store", () => ({
 let panelUnmounts = 0;
 
 mock.module("./desktop-panel", () => ({
-  DesktopPanel: ({
-    viewOnly,
-    controlsContainer,
-  }: {
-    viewOnly: boolean;
-    controlsContainer?: HTMLElement | null;
-  }) => {
+  DesktopPanel: ({ viewOnly }: { viewOnly: boolean }) => {
     useEffect(() => {
       return () => {
         panelUnmounts += 1;
       };
     }, []);
-    return (
-      <>
-        {controlsContainer &&
-          createPortal(<button>Take control</button>, controlsContainer)}
-        <div data-testid="desktop-panel" data-view-only={viewOnly}></div>
-      </>
-    );
+    return <div data-testid="desktop-panel" data-view-only={viewOnly}></div>;
   },
 }));
 
@@ -236,16 +223,7 @@ describe("AssistantDesktopAffordance", () => {
       screen.getByRole("button", { name: "Expand virtual desktop" }),
     );
     expect(screen.getByTestId("desktop-panel").dataset.viewOnly).toBe("false");
-    const takeControl = await screen.findByRole("button", {
-      name: "Take control",
-    });
-    expect(screen.getByRole("dialog").contains(takeControl)).toBe(true);
-    expect(screen.getByTestId("desktop-panel").contains(takeControl)).toBe(
-      false,
-    );
-    fireEvent.pointerDown(takeControl);
-    fireEvent.click(takeControl);
-    expect(screen.getByRole("dialog")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
