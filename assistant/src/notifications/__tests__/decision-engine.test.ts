@@ -766,6 +766,7 @@ function makeSchedulerShareSignal(
       requestedMessage: SCHEDULER_OWNED_REPORT,
       requestedBySource: "scheduler",
       requestedTitle: "Your day",
+      deepLinkMetadata: { conversationId: "conv-xyz" },
     },
     attentionHints: {
       requiresAction: true,
@@ -803,6 +804,7 @@ describe("scheduler requested copy preservation in notification decision engine"
             conversationSeedMessage: "Confirm the new device sign-in.",
           },
         },
+        deepLinkTarget: { route: "model-rewrite" },
       },
     };
 
@@ -828,6 +830,7 @@ describe("scheduler requested copy preservation in notification decision engine"
       expect(decision.renderedCopy.platform?.deliveryText).toBe(
         SCHEDULER_OWNED_REPORT,
       );
+      expect(decision.deepLinkTarget).toEqual({ conversationId: "conv-xyz" });
       expect(decision.verbatimCopy).toBe(true);
     } finally {
       toolUseBlock = null;

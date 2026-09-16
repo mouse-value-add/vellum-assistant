@@ -869,7 +869,16 @@ function pinSchedulerRequestedCopy(
     };
   }
 
-  return { ...decision, renderedCopy: nextCopy, verbatimCopy: true };
+  const deepLinkTarget = readPayloadObject(
+    signal.contextPayload,
+    "deepLinkMetadata",
+  );
+  return {
+    ...decision,
+    renderedCopy: nextCopy,
+    verbatimCopy: true,
+    ...(deepLinkTarget ? { deepLinkTarget } : {}),
+  };
 }
 
 /**
