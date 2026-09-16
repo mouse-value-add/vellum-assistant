@@ -22,6 +22,14 @@ export const ToolUseStartEventSchema = z.object({
   type: z.literal("tool_use_start"),
   toolName: z.string(),
   input: z.record(z.string(), z.unknown()),
+  /**
+   * Whether `input.activity` is the daemon's status sentence (true) or a
+   * parameter the tool itself defines under that name (false), such as an MCP
+   * server's own `activity`. Absent from older daemons, whose every `activity`
+   * was the status sentence, and for tools the daemon does not register, such
+   * as a provider's native server tools.
+   */
+  activityIsStatus: z.boolean().optional(),
   toolUseId: z.string().optional(),
   messageId: z.string().optional(),
   conversationId: z.string().optional(),

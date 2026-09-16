@@ -48,6 +48,14 @@ export const SubagentDetailEventSchema = z.object({
    * tool-detail view's input section.
    */
   input: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Whether `input.activity` is the daemon's status sentence (true) or a
+   * parameter the tool itself defines under that name (false), such as an MCP
+   * server's own `activity`. Absent from older daemons, whose every `activity`
+   * was the status sentence, and for tools the daemon does not register, such
+   * as a provider's native server tools.
+   */
+  activityIsStatus: z.boolean().optional(),
 });
 
 export type SubagentDetailEvent = z.infer<typeof SubagentDetailEventSchema>;

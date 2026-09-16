@@ -12,6 +12,7 @@ const createCalls: Array<Record<string, unknown>> = [];
 const expireCalls: string[] = [];
 const bridgeCalls: Array<Record<string, unknown>> = [];
 let confirmationPending = true;
+let registeredToolDefinitions: ToolDefinition[] = [];
 
 mock.module("../util/logger.js", () => ({
   getLogger: () =>
@@ -33,6 +34,7 @@ mock.module("../daemon/conversation-registry.js", () => ({
         guardianPrincipalId: "principal-1",
       } satisfies TrustContext,
       hasPendingConfirmation: () => confirmationPending,
+      registeredToolDefinitions,
     }),
 }));
 
@@ -66,6 +68,7 @@ mock.module("../tools/tool-approval-handler.js", () => ({
 import { asConversation } from "../__tests__/helpers/mock-conversation.js";
 import type { AssistantEvent } from "../api/index.js";
 import type { TrustContext } from "../daemon/trust-context-types.js";
+import type { ToolDefinition } from "../providers/types.js";
 import { createGuardianRequestForConfirmation } from "./confirmation-guardian-request.js";
 
 const MSG = {
@@ -82,6 +85,7 @@ describe("createGuardianRequestForConfirmation", () => {
     expireCalls.length = 0;
     bridgeCalls.length = 0;
     confirmationPending = true;
+    registeredToolDefinitions = [];
   });
 
   test("creates the gateway row and bridges while the confirmation is pending", async () => {
@@ -95,6 +99,51 @@ describe("createGuardianRequestForConfirmation", () => {
     });
     expect(expireCalls).toHaveLength(0);
     expect(bridgeCalls).toHaveLength(1);
+  });
+
+  test("describes the request with the tool call's activity sentence", async () => {
+    registeredToolDefinitions = [
+      {
+        name: "Bash",
+        description: "Run a command",
+        input_schema: {
+          type: "object",
+          properties: { command: { type: "string" } },
+        },
+      },
+    ];
+    await createGuardianRequestForConfirmation(
+      { ...MSG, input: { command: "ls", activity: "Listing the project" } },
+      "conv-1",
+    );
+
+    expect(createCalls[0].activityText).toBe("Listing the project");
+  });
+
+  test("does not describe the request with an activity parameter the tool owns", async () => {
+    registeredToolDefinitions = [
+      {
+        name: "mcp__calendar__create_event",
+        description: "Create a calendar event",
+        input_schema: {
+          type: "object",
+          properties: {
+            date: { type: "string" },
+            activity: { type: "string" },
+          },
+        },
+      },
+    ];
+    await createGuardianRequestForConfirmation(
+      {
+        ...MSG,
+        toolName: "mcp__calendar__create_event",
+        input: { date: "2026-09-16", activity: "planning" },
+      },
+      "conv-1",
+    );
+
+    expect(createCalls[0].activityText).toBeUndefined();
   });
 
   test("takes the row deadline from the approval-window resolver", async () => {

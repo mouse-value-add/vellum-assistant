@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type { ToolDefinition } from "../providers/types.js";
 import {
   ACTIVITY_SKIP_SET,
+  activityIsStatus,
+  activityIsStatusAmong,
   declareDaemonActivityField,
+  definesDaemonActivityField,
   injectActivityField,
   schemaDefinesProperty,
   stripActivityField,
@@ -332,6 +335,71 @@ describe("injectActivityField", () => {
     // tool_d, tool_e: unchanged
     expect(Object.is(result[3], defs[3])).toBe(true);
     expect(Object.is(result[4], defs[4])).toBe(true);
+  });
+});
+
+describe("activityIsStatus", () => {
+  const leavesItToInjection = {
+    type: "object",
+    properties: { path: { type: "string" } },
+  };
+  const declaresIt = declareDaemonActivityField({
+    type: "object",
+    properties: { slug: { type: "string" }, activity: { type: "string" } },
+  });
+  const ownsIt = {
+    type: "object",
+    properties: {
+      date: { type: "string" },
+      activity: { type: "string", description: "Calendar activity type" },
+    },
+  };
+
+  test("is true for a schema the daemon injects activity into", () => {
+    expect(activityIsStatus("file_read", leavesItToInjection)).toBe(true);
+  });
+
+  test("is true for a schema that declares the daemon's own activity field", () => {
+    expect(activityIsStatus("delete_memory_page", declaresIt)).toBe(true);
+  });
+
+  test("is false for a schema that owns an activity parameter", () => {
+    expect(activityIsStatus("mcp__calendar__create_event", ownsIt)).toBe(false);
+  });
+
+  test("is false for a schema that is never given activity", () => {
+    expect(activityIsStatus("raw", { type: "string" })).toBe(false);
+    expect(activityIsStatus("none", undefined)).toBe(false);
+    expect(
+      activityIsStatus("skipped", leavesItToInjection, new Set(["skipped"])),
+    ).toBe(false);
+  });
+
+  test("agrees with the declaration on the injected copy the model is offered", () => {
+    // The agent loop reads the advertised copy; the guardian request reads the
+    // raw one. The two answers must never differ for the same tool.
+    for (const [name, schema] of [
+      ["file_read", leavesItToInjection],
+      ["delete_memory_page", declaresIt],
+      ["mcp__calendar__create_event", ownsIt],
+    ] as const) {
+      const [advertised] = injectActivityField([makeDef(name, schema)]);
+      expect(definesDaemonActivityField(advertised.input_schema)).toBe(
+        activityIsStatus(name, schema),
+      );
+    }
+  });
+
+  test("looks the tool up among a turn's definitions", () => {
+    const definitions = [
+      makeDef("file_read", leavesItToInjection),
+      makeDef("mcp__calendar__create_event", ownsIt),
+    ];
+    expect(activityIsStatusAmong(definitions, "file_read")).toBe(true);
+    expect(
+      activityIsStatusAmong(definitions, "mcp__calendar__create_event"),
+    ).toBe(false);
+    expect(activityIsStatusAmong(definitions, "web_search")).toBeUndefined();
   });
 });
 

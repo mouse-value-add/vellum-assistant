@@ -237,6 +237,45 @@ describe("handleToolUse — tool start timestamp", () => {
     }
   });
 
+  test("carries the loop's activity ownership onto tool_use_start and the persisted block", () => {
+    // GIVEN a durable tool_use block for a tool that owns its activity parameter
+    const toolUseId = "tu_mcp";
+    const state: EventHandlerState = createEventHandlerState();
+    state.lastAssistantMessageId = "msg-1";
+    mockedRowContent = JSON.stringify([
+      {
+        type: "tool_use",
+        id: toolUseId,
+        name: "mcp__calendar__create_event",
+        input: { activity: "planning" },
+      },
+    ]);
+    const events: AssistantEvent[] = [];
+
+    // WHEN the loop reports that its activity is not the status sentence
+    handleToolUse(
+      state,
+      makeDeps((e) => events.push(e)),
+      {
+        ...toolUseEvent(toolUseId, "mcp__calendar__create_event"),
+        activityIsStatus: false,
+      },
+    );
+
+    // THEN clients hear it live, and a snapshot reads it back from history
+    const startEvent = events.find((e) => e.type === "tool_use_start");
+    expect(
+      startEvent?.type === "tool_use_start"
+        ? startEvent.activityIsStatus
+        : undefined,
+    ).toBe(false);
+    const stamped = updates.find(
+      (u) => findBlockById(u.content, toolUseId)._activityIsStatus === false,
+    );
+    expect(stamped).toBeDefined();
+    expect(state.toolActivityIsStatus.get(toolUseId)).toBe(false);
+  });
+
   test("does not write when no persisted block matches the tool id", () => {
     // GIVEN a persisted message whose only block is unrelated to the tool
     const state: EventHandlerState = createEventHandlerState();

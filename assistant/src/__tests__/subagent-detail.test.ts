@@ -221,6 +221,26 @@ describe("parseSubagentMessages", () => {
     expect(toolResult!.toolUseId).toBe("t-abc");
   });
 
+  test("carries a persisted activity ownership on tool_use", () => {
+    const messages = [
+      msg("user", [{ type: "text", text: "Do something" }]),
+      msg("assistant", [
+        {
+          type: "tool_use",
+          id: "t-mcp",
+          name: "mcp__calendar__create_event",
+          input: { activity: "planning" },
+          _activityIsStatus: false,
+        },
+      ]),
+    ];
+
+    const toolUse = parseSubagentMessages("sub-1", messages).events.find(
+      (e) => e.type === "tool_use",
+    );
+    expect(toolUse?.activityIsStatus).toBe(false);
+  });
+
   test("includes messageId on text events from assistant messages", () => {
     const messages = [
       msg("user", [{ type: "text", text: "Do something" }]),

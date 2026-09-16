@@ -56,6 +56,7 @@ import {
   CANCELLED_UNSETTLED_TOOL_RESULT,
 } from "../tools/execution-timeout.js";
 import { getTool } from "../tools/registry.js";
+import { definesDaemonActivityField } from "../tools/schema-transforms.js";
 import type { SensitiveOutputBinding } from "../tools/sensitive-output-placeholders.js";
 import {
   applyStreamingSubstitution,
@@ -363,6 +364,12 @@ export type AgentEvent =
       id: string;
       name: string;
       input: Record<string, unknown>;
+      /**
+       * Whether `input.activity` is the daemon's status sentence rather than a
+       * parameter the tool owns under that name, read off the definition this
+       * turn advertised. Absent for a name no advertised definition carries.
+       */
+      activityIsStatus?: boolean;
     }
   | { type: "tool_output_chunk"; toolUseId: string; chunk: string }
   | {
@@ -2721,11 +2728,20 @@ export class AgentLoop {
 
         // Emit all tool_use events upfront, then execute tools in parallel
         for (const toolUse of toolUseBlocks) {
+          const advertised = currentTools.find(
+            (tool) => tool.name === toolUse.name,
+          );
           onEvent({
             type: "tool_use",
             id: toolUse.id,
             name: toolUse.name,
             input: toolUse.input,
+            // The advertised copy carries the daemon's declaration whether the
+            // tool declared the field itself or had it injected; a schema that
+            // owns its own `activity` never does.
+            activityIsStatus: advertised
+              ? definesDaemonActivityField(advertised.input_schema)
+              : undefined,
           });
         }
 

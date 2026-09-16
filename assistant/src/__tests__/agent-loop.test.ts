@@ -22,6 +22,7 @@ import {
   CANCELLED_TOOL_RESULT,
   CANCELLED_UNSETTLED_TOOL_RESULT,
 } from "../tools/execution-timeout.js";
+import { injectActivityField } from "../tools/schema-transforms.js";
 import {
   createMockProvider,
   textResponse,
@@ -1047,6 +1048,74 @@ describe("AgentLoop", () => {
     ).toBe("assistant");
   });
 
+  test("marks a tool_use event's activity as the status sentence only when the advertised schema declares it", async () => {
+    // Advertised as the conversation offers them: activity injected into the
+    // tool that lacks it, left alone on the tool that owns one.
+    const advertised = injectActivityField([
+      {
+        name: "read_file",
+        description: "Read a file",
+        input_schema: {
+          type: "object",
+          properties: { path: { type: "string" } },
+        },
+      },
+      {
+        name: "mcp__calendar__create_event",
+        description: "Create a calendar event",
+        input_schema: {
+          type: "object",
+          properties: {
+            date: { type: "string" },
+            activity: { type: "string" },
+          },
+        },
+      },
+    ]);
+    const { provider } = createMockProvider([
+      toolUseResponse("t1", "read_file", {
+        path: "/test.txt",
+        activity: "Reading the test file",
+      }),
+      toolUseResponse("t2", "mcp__calendar__create_event", {
+        date: "2026-09-16",
+        activity: "planning",
+      }),
+      toolUseResponse("t3", "not_advertised", { activity: "Guessing" }),
+      textResponse("Done"),
+    ]);
+
+    const loop = new AgentLoop({
+      provider,
+      systemPrompt: "system",
+      conversationId: "test-conversation",
+      tools: advertised,
+      toolExecutor: async () => ({ content: "ok", isError: false }),
+    });
+
+    const events: AgentEvent[] = [];
+    await loop.run({
+      requestId: "test-request",
+      messages: [userMessage],
+      onEvent: collectEvents(events),
+      trust: { sourceChannel: "vellum", trustClass: "unknown" },
+    });
+
+    const flags = Object.fromEntries(
+      events
+        .filter(
+          (e): e is Extract<AgentEvent, { type: "tool_use" }> =>
+            e.type === "tool_use",
+        )
+        .map((e) => [e.name, e.activityIsStatus]),
+    );
+    expect(flags).toEqual({
+      read_file: true,
+      mcp__calendar__create_event: false,
+      not_advertised: undefined,
+    });
+  });
+
   test("emits tool_use and tool_result events during tool execution", async () => {
     const { provider } = createMockProvider([
       toolUseResponse("t1", "read_file", { path: "/test.txt" }),
@@ -1077,6 +1146,8 @@ describe("AgentLoop", () => {
       id: "t1",
       name: "read_file",
       input: { path: "/test.txt" },
+      // The dummy schema was never given the daemon's activity field.
+      activityIsStatus: false,
     });
 
     const toolResultEvents = events.filter((e) => e.type === "tool_result");

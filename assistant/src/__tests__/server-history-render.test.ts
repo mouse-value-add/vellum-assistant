@@ -736,6 +736,30 @@ describe("renderHistoryContent", () => {
     expect(entry.confirmationLabel).toBe("Run Command");
   });
 
+  test("reads back whether a tool call's activity is the status sentence", () => {
+    const output = renderHistoryContent([
+      {
+        type: "tool_use",
+        id: "tu_1",
+        name: "mcp__calendar__create_event",
+        input: { activity: "planning" },
+        _activityIsStatus: false,
+      },
+      {
+        type: "tool_use",
+        id: "tu_2",
+        name: "bash",
+        input: { command: "ls" },
+      },
+    ]);
+
+    const [owned, unstamped] = output.toolCalls;
+    expect(owned.activityIsStatus).toBe(false);
+    // A row persisted before the field existed says nothing, so clients keep
+    // reading its activity as the status sentence.
+    expect(unstamped.activityIsStatus).toBeUndefined();
+  });
+
   test("drops a _confirmationDecision outside the closed enum", () => {
     // GIVEN a malformed persisted decision the daemon never writes
     const output = renderHistoryContent([

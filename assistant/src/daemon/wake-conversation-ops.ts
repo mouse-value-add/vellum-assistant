@@ -68,6 +68,7 @@ function translateAgentEventToServerMessage(
         type: "tool_use_start",
         toolName: event.name,
         input: event.input,
+        activityIsStatus: event.activityIsStatus,
         conversationId,
         toolUseId: event.id,
       };

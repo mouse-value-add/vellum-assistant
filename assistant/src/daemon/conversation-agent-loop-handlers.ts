@@ -389,6 +389,12 @@ export interface EventHandlerState {
    * refresh.
    */
   readonly toolPreviewStartedAt: Map<string, number>;
+  /**
+   * tool_use_id → whether its `input.activity` is the daemon's status sentence,
+   * from the agent loop's `tool_use` event. Re-stamped onto the persisted block
+   * at end of turn in case the early stamp failed.
+   */
+  readonly toolActivityIsStatus: Map<string, boolean>;
   /** The tool_use_id of the currently executing tool (set in handleToolUse, cleared in handleToolResult). */
   currentToolUseId: string | undefined;
   /** Maps confirmation requestId → tool_use_id for linking decisions to tools. */
@@ -723,6 +729,7 @@ export function createEventHandlerState(): EventHandlerState {
     lastCompletedToolName: undefined,
     toolCallTimestamps: new Map(),
     toolPreviewStartedAt: new Map(),
+    toolActivityIsStatus: new Map(),
     currentToolUseId: undefined,
     requestIdToToolUseId: new Map(),
     toolConfirmationOutcomes: new Map(),
@@ -1824,6 +1831,11 @@ export function handleToolUse(
   if (previewStartedAt != null) {
     recordToolPreviewStartOnPersistedMessage(state, event.id, previewStartedAt);
   }
+  const { activityIsStatus } = event;
+  if (activityIsStatus !== undefined) {
+    state.toolActivityIsStatus.set(event.id, activityIsStatus);
+    recordActivityIsStatusOnPersistedMessage(state, event.id, activityIsStatus);
+  }
   const statusText = computeToolUseStatusText(event.name, event.input);
   deps.ctx.emitActivityState("tool_running", "tool_use_start", {
     requestId: deps.reqId,
@@ -1833,6 +1845,7 @@ export function handleToolUse(
     type: "tool_use_start",
     toolName: event.name,
     input: event.input,
+    activityIsStatus,
     conversationId: deps.ctx.conversationId,
     toolUseId: event.id,
     messageId: state.lastAssistantMessageId,
@@ -2699,6 +2712,24 @@ function recordToolStartOnPersistedMessage(
 }
 
 /**
+ * Stamp `_activityIsStatus` when the tool begins, so history can tell a status
+ * sentence in `input.activity` from a parameter the tool owns under that name.
+ */
+function recordActivityIsStatusOnPersistedMessage(
+  state: EventHandlerState,
+  toolUseId: string,
+  activityIsStatus: boolean,
+): void {
+  stampToolUseBlockEarly(state, toolUseId, "activity ownership", (rec) => {
+    if (rec._activityIsStatus === activityIsStatus) {
+      return false;
+    }
+    rec._activityIsStatus = activityIsStatus;
+    return true;
+  });
+}
+
+/**
  * Stamp `_previewStartedAt` (the first-byte timestamp). Called from
  * `handleToolUse` rather than `handleToolUsePreviewStart`: the block only
  * exists once message_complete has written it, which happens after the preview
@@ -2792,6 +2823,14 @@ function annotatePersistedAssistantMessage(
       const previewStartedAt = state.toolPreviewStartedAt.get(id);
       if (previewStartedAt != null) {
         rec._previewStartedAt = previewStartedAt;
+        modified = true;
+      }
+      const activityIsStatus = state.toolActivityIsStatus.get(id);
+      if (
+        activityIsStatus !== undefined &&
+        rec._activityIsStatus !== activityIsStatus
+      ) {
+        rec._activityIsStatus = activityIsStatus;
         modified = true;
       }
       const confirmation = state.toolConfirmationOutcomes.get(id);

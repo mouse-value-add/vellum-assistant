@@ -13,6 +13,7 @@ import { getConfig, getConfigReadOnly } from "../../../config/loader.js";
 import { usesConceptPageMemory } from "../../../config/memory-v3-gate.js";
 import { RiskLevel } from "../../../permissions/types.js";
 import { resolveCapabilities } from "../../../runtime/capabilities.js";
+import { declareDaemonActivityField } from "../../../tools/schema-transforms.js";
 import type {
   ToolContext,
   ToolDefinition,
@@ -131,7 +132,7 @@ export const deleteMemoryPageTool = {
   category: "memory",
   executionTarget: "sandbox",
   defaultRiskLevel: RiskLevel.Low,
-  input_schema: {
+  input_schema: declareDaemonActivityField({
     type: "object",
     properties: {
       slug: {
@@ -146,7 +147,7 @@ export const deleteMemoryPageTool = {
       },
     },
     required: ["slug", "activity"],
-  },
+  }),
 
   async execute(
     input: Record<string, unknown>,

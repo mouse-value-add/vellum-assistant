@@ -613,6 +613,9 @@ export function renderHistoryContent(
       if (typeof block._previewStartedAt === "number") {
         entry.previewStartedAt = block._previewStartedAt;
       }
+      if (typeof block._activityIsStatus === "boolean") {
+        entry.activityIsStatus = block._activityIsStatus;
+      }
       if (typeof block._completedAt === "number") {
         entry.completedAt = block._completedAt;
       }

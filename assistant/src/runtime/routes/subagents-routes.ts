@@ -12,7 +12,10 @@ import {
   SubagentStatusSchema,
   SubagentUsageStatsSchema,
 } from "../../api/events/subagent-status-changed.js";
-import { SubagentDetailResponseSchema } from "../../api/responses/subagent-detail.js";
+import {
+  type SubagentDetailEvent,
+  SubagentDetailResponseSchema,
+} from "../../api/responses/subagent-detail.js";
 import {
   getMessages,
   type MessageRow,
@@ -49,15 +52,7 @@ export interface SubagentDetailResult {
   subagentId: string;
   objective?: string;
   usage?: { inputTokens: number; outputTokens: number; estimatedCost: number };
-  events: Array<{
-    type: string;
-    content: string;
-    toolName?: string;
-    isError?: boolean;
-    messageId?: string;
-    toolUseId?: string;
-    input?: Record<string, unknown>;
-  }>;
+  events: SubagentDetailEvent[];
 }
 
 const FORK_DIRECTIVE_RE =
@@ -127,6 +122,10 @@ export function parseSubagentMessages(
           toolName: name,
           toolUseId: id || undefined,
           input,
+          activityIsStatus:
+            typeof block._activityIsStatus === "boolean"
+              ? block._activityIsStatus
+              : undefined,
         });
         if (id) {
           pendingTools.set(id, name);

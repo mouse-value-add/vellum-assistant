@@ -62,6 +62,11 @@ export const SubagentInnerEventSchema = z
      * alone cannot disambiguate.
      */
     toolUseId: z.string().optional(),
+    /**
+     * Whether a `tool_use_start` event's `input.activity` is the daemon's
+     * status sentence, as on the top-level event.
+     */
+    activityIsStatus: z.boolean().optional(),
   })
   .passthrough();
 

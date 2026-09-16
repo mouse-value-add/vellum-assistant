@@ -21009,6 +21009,8 @@ paths:
                                 propertyNames:
                                   type: string
                                 additionalProperties: {}
+                              activityIsStatus:
+                                type: boolean
                               result:
                                 type: string
                               isError:
@@ -21520,6 +21522,8 @@ paths:
                                         propertyNames:
                                           type: string
                                         additionalProperties: {}
+                                      activityIsStatus:
+                                        type: boolean
                                       result:
                                         type: string
                                       isError:
@@ -34113,6 +34117,8 @@ paths:
                           propertyNames:
                             type: string
                           additionalProperties: {}
+                        activityIsStatus:
+                          type: boolean
                       required:
                         - type
                         - content

@@ -76,6 +76,61 @@ export function withActivityProperty(
 }
 
 /**
+ * Whether {@link injectActivityField} adds the daemon's `activity` property to
+ * `schema`: an object schema with properties that does not define one already.
+ */
+function receivesInjectedActivityField(
+  schema: Record<string, unknown> | undefined,
+): boolean {
+  return (
+    schema != null &&
+    typeof schema === "object" &&
+    schema.type === "object" &&
+    Boolean(schema.properties) &&
+    !schemaDefinesProperty(schema, ACTIVITY_FIELD)
+  );
+}
+
+/**
+ * Whether a call's `input.activity` is the daemon's status sentence rather than
+ * input the tool itself consumes, for tool `name` with raw input `schema`.
+ *
+ * True when the schema declares the daemon's own field
+ * ({@link declareDaemonActivityField}) or leaves `activity` for
+ * {@link injectActivityField} to add. False when the tool owns an `activity`
+ * property of its own (an MCP server's, say), or is never given one. Clients
+ * read it to tell a status sentence from a real parameter that shares its name.
+ */
+export function activityIsStatus(
+  name: string,
+  schema: unknown,
+  skip: Set<string> = ACTIVITY_SKIP_SET,
+): boolean {
+  if (skip.has(name)) {
+    return false;
+  }
+  return (
+    definesDaemonActivityField(schema) ||
+    receivesInjectedActivityField(schema as Record<string, unknown> | undefined)
+  );
+}
+
+/**
+ * {@link activityIsStatus} for tool `name` among `definitions`, the raw
+ * (pre-injection) definitions a conversation offered this turn, or `undefined`
+ * when none of them is `name`, such as a provider's native server tool.
+ */
+export function activityIsStatusAmong(
+  definitions: readonly ToolDefinition[],
+  name: string,
+): boolean | undefined {
+  const definition = definitions.find((def) => def.name === name);
+  return definition
+    ? activityIsStatus(name, definition.input_schema)
+    : undefined;
+}
+
+/**
  * Injects an `activity` string property into each tool definition's input
  * schema, unless the tool is in the skip set, already has an activity field,
  * or has a non-object schema.
@@ -93,24 +148,14 @@ export function injectActivityField(
     }
 
     const schema = def.input_schema as Record<string, unknown> | undefined;
-    if (
-      schema == null ||
-      typeof schema !== "object" ||
-      schema.type !== "object" ||
-      !schema.properties
-    ) {
+    // A schema that already defines activity (top-level properties or
+    // composite sub-schemas) is left alone: MCP tools may define it as
+    // intentionally optional or with server-specific semantics.
+    if (!schema || !receivesInjectedActivityField(schema)) {
       return def;
     }
 
     const properties = schema.properties as Record<string, unknown>;
-
-    if (schemaDefinesProperty(schema, "activity")) {
-      // Activity is already defined somewhere in the schema (top-level properties
-      // or composite sub-schemas). Don't modify schemas we don't own — MCP tools
-      // may define activity as intentionally optional or with server-specific
-      // semantics.
-      return def;
-    }
 
     // Deep clone to avoid mutating shared refs
     const newProperties = {

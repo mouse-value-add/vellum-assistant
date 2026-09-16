@@ -18,6 +18,7 @@
  */
 
 import type { ConfirmationRequestEvent } from "../api/index.js";
+import { activityIsStatusAmong } from "../tools/schema-transforms.js";
 import { IntegrityError } from "../util/errors.js";
 import { getLogger } from "../util/logger.js";
 
@@ -72,11 +73,20 @@ export async function createGuardianRequestForConfirmation(
       : conversation?.getTrustContext();
     const sourceChannel = trustContext?.sourceChannel ?? "vellum";
     const inputRecord = msg.input as Record<string, unknown>;
+    // A tool that owns an `activity` parameter is not describing itself with
+    // it. Without the conversation's definitions, read it as the status
+    // sentence, which every other tool's is.
+    const activityIsStatus =
+      conversation === undefined
+        ? true
+        : (activityIsStatusAmong(
+            conversation.registeredToolDefinitions,
+            msg.toolName,
+          ) ?? true);
     const activityRaw =
-      (typeof inputRecord.activity === "string"
+      activityIsStatus && typeof inputRecord.activity === "string"
         ? inputRecord.activity
-        : undefined) ??
-      (typeof inputRecord.reason === "string" ? inputRecord.reason : undefined);
+        : undefined;
     // Tool approvals are decisionable: without a bound principal nobody could
     // ever decide them (mirrors the gateway create's integrity guard).
     const guardianPrincipalId = trustContext?.guardianPrincipalId;
