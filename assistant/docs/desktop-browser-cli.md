@@ -31,3 +31,9 @@ The client records key and mouse presses before dispatch. On release it opens a 
 `--use-active-tab` and personal browser targeting are rejected with `--virtual-desktop`. Download waiting is unsupported. Browser operations are bounded to two minutes and share the desktop lease's action budget and idle expiry.
 
 Validation: focused client tests exercise shared snapshot/click behavior, namespace isolation, stale references, target changes, cancellation and uncertain-input cleanup. Lease tests cover browser ownership, cancellation and cleanup independently of native input. The Linux smoke script exercises real Chrome, the CLI and visible pointer feedback.
+
+## CPU budget
+
+On supported Linux containers, Chrome and the desktop helpers share a cgroup v2 CPU budget of 80% of the container capacity. For example, a 2-core allocation gives the complete desktop tree up to 1.6 cores. The budget uses the existing container CPU resolver and the tightest visible ancestor quota. Every managed process joins the group before exec, including the dock whose applications inherit membership. It is an aggregate CPU bandwidth cap, not an exclusive CPU reservation or memory limit.
+
+The runtime must provide writable cgroup v2 CPU delegation and support a threaded child group. Read-only mounts, unavailable controllers, or incompatible domain hierarchies retain existing desktop behavior and log `Desktop CPU cap unavailable; running without CPU isolation`. Once preparation succeeds, a child that cannot join exits without running its desktop command. The group is reused and its quota refreshed when the desktop starts; live allocation changes take effect on the next desktop start.
