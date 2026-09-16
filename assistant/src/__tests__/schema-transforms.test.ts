@@ -6,7 +6,6 @@ import {
   activityIsStatus,
   activityIsStatusAmong,
   declareDaemonActivityField,
-  definesDaemonActivityField,
   injectActivityField,
   schemaDefinesProperty,
   stripActivityField,
@@ -375,18 +374,21 @@ describe("activityIsStatus", () => {
     ).toBe(false);
   });
 
-  test("agrees with the declaration on the injected copy the model is offered", () => {
-    // The agent loop reads the advertised copy; the guardian request reads the
-    // raw one. The two answers must never differ for the same tool.
-    for (const [name, schema] of [
-      ["file_read", leavesItToInjection],
-      ["declared_tool", declaresIt],
-      ["mcp__calendar__create_event", ownsIt],
+  test("gives the same answer for every copy of a tool the model may be offered", () => {
+    // The agent loop reads whichever copy the turn advertised: injected, or
+    // stripped of the field on the send_user_message surface. The guardian
+    // request reads the raw one. None may disagree for the same tool.
+    for (const [name, schema, expected] of [
+      ["file_read", leavesItToInjection, true],
+      ["declared_tool", declaresIt, true],
+      ["mcp__calendar__create_event", ownsIt, false],
     ] as const) {
-      const [advertised] = injectActivityField([makeDef(name, schema)]);
-      expect(definesDaemonActivityField(advertised.input_schema)).toBe(
-        activityIsStatus(name, schema),
-      );
+      const def = makeDef(name, schema);
+      const [injected] = injectActivityField([def]);
+      const [stripped] = stripActivityField([def]);
+      expect(activityIsStatus(name, schema)).toBe(expected);
+      expect(activityIsStatus(name, injected.input_schema)).toBe(expected);
+      expect(activityIsStatus(name, stripped.input_schema)).toBe(expected);
     }
   });
 

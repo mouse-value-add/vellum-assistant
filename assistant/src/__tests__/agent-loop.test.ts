@@ -22,7 +22,11 @@ import {
   CANCELLED_TOOL_RESULT,
   CANCELLED_UNSETTLED_TOOL_RESULT,
 } from "../tools/execution-timeout.js";
-import { injectActivityField } from "../tools/schema-transforms.js";
+import {
+  declareDaemonActivityField,
+  injectActivityField,
+  stripActivityField,
+} from "../tools/schema-transforms.js";
 import {
   createMockProvider,
   textResponse,
@@ -1072,10 +1076,29 @@ describe("AgentLoop", () => {
         },
       },
     ]);
+    // The send_user_message surface strips the daemon's field instead, but
+    // a stray activity the model still sends is the daemon's all the same.
+    const [stripped] = stripActivityField([
+      {
+        name: "delete_note",
+        description: "Delete a note",
+        input_schema: declareDaemonActivityField({
+          type: "object",
+          properties: {
+            slug: { type: "string" },
+            activity: { type: "string" },
+          },
+        }),
+      },
+    ]);
     const { provider } = createMockProvider([
       toolUseResponse("t1", "read_file", {
         path: "/test.txt",
         activity: "Reading the test file",
+      }),
+      toolUseResponse("t4", "delete_note", {
+        slug: "old",
+        activity: "Retiring an old note",
       }),
       toolUseResponse("t2", "mcp__calendar__create_event", {
         date: "2026-09-16",
@@ -1089,7 +1112,7 @@ describe("AgentLoop", () => {
       provider,
       systemPrompt: "system",
       conversationId: "test-conversation",
-      tools: advertised,
+      tools: [...advertised, stripped],
       toolExecutor: async () => ({ content: "ok", isError: false }),
     });
 
@@ -1111,6 +1134,7 @@ describe("AgentLoop", () => {
     );
     expect(flags).toEqual({
       read_file: true,
+      delete_note: true,
       mcp__calendar__create_event: false,
       not_advertised: undefined,
     });
@@ -1146,8 +1170,9 @@ describe("AgentLoop", () => {
       id: "t1",
       name: "read_file",
       input: { path: "/test.txt" },
-      // The dummy schema was never given the daemon's activity field.
-      activityIsStatus: false,
+      // The dummy schema leaves activity to injection, so any it carries is
+      // the daemon's status sentence.
+      activityIsStatus: true,
     });
 
     const toolResultEvents = events.filter((e) => e.type === "tool_result");

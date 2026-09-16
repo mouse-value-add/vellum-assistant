@@ -56,7 +56,7 @@ import {
   CANCELLED_UNSETTLED_TOOL_RESULT,
 } from "../tools/execution-timeout.js";
 import { getTool } from "../tools/registry.js";
-import { definesDaemonActivityField } from "../tools/schema-transforms.js";
+import { activityIsStatus } from "../tools/schema-transforms.js";
 import type { SensitiveOutputBinding } from "../tools/sensitive-output-placeholders.js";
 import {
   applyStreamingSubstitution,
@@ -2736,11 +2736,11 @@ export class AgentLoop {
             id: toolUse.id,
             name: toolUse.name,
             input: toolUse.input,
-            // The advertised copy carries the daemon's declaration whether the
-            // tool declared the field itself or had it injected; a schema that
-            // owns its own `activity` never does.
+            // The shared rule answers the same for every copy the conversation
+            // may advertise: raw, injected, or stripped of the field on the
+            // send_user_message surface.
             activityIsStatus: advertised
-              ? definesDaemonActivityField(advertised.input_schema)
+              ? activityIsStatus(toolUse.name, advertised.input_schema)
               : undefined,
           });
         }
