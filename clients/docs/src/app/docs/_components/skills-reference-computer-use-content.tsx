@@ -49,7 +49,7 @@ export function SkillsReferenceComputerUseContent() {
             <li>Accessibility (mouse/keyboard control)</li>
             <li>Screen capture (seeing screen content)</li>
             <li>Connected-computer actions follow your existing access and permission settings</li>
-            <li>The assistant desktop requires the owner&apos;s conversation; Take control interrupts automation</li>
+            <li>The assistant desktop requires the owner&apos;s conversation</li>
           </ul>
         </section>
 
@@ -130,7 +130,7 @@ export function SkillsReferenceComputerUseContent() {
           <ul className="mb-0 list-disc space-y-2 pl-6 text-zinc-600">
             <li>The assistant chooses the requested computer explicitly and does not switch machines as a fallback</li>
             <li>Browser and native actions on the assistant desktop share one control session</li>
-            <li>Use Allow assistant in the Desktop modal before asking it to resume after taking control</li>
+            <li>Open the Desktop modal to interact directly. Ask the assistant to pause if you want it to stop acting</li>
           </ul>
         </section>
 

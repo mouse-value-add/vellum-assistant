@@ -1,8 +1,8 @@
 import type { ToolContext, ToolExecutionResult } from "../tools/types.js";
 import {
-  DesktopControlLease,
-  desktopControlLease,
-} from "./desktop-control-lease.js";
+  DesktopAutomationLease,
+  desktopAutomationLease,
+} from "./desktop-automation-lease.js";
 import {
   desktopActionSchema,
   type DesktopInput,
@@ -21,7 +21,7 @@ export class DesktopControl {
   private readonly releaseInput = () => this.input.releaseInput();
 
   constructor(
-    private readonly lease: DesktopControlLease = desktopControlLease,
+    private readonly lease: DesktopAutomationLease = desktopAutomationLease,
     private readonly input: DesktopInput = new X11DesktopInput(),
     private readonly releaseBrowser: () => Promise<void> = () =>
       getDesktopSessionManager().browser.release(),

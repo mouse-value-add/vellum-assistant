@@ -58,8 +58,8 @@ Switching to native control clears browser element references; take a fresh
 browser snapshot before using them again. Browser commands invalidate the
 last native observation. Re-observe after switching back.
 
-If the user selects **Take control**, stop and yield. Resume with a fresh
-observation only after they select **Allow assistant** and ask you to continue.
+Users can interact directly with the expanded desktop. If they ask you to pause,
+stop acting and wait. Observe again before resuming.
 `computer_use_done` and `assistant browser --virtual-desktop detach` release the shared
 session and held input. Closing the viewer does not end control.
 

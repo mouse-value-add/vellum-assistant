@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import type { ToolContext } from "../tools/types.js";
+import { DesktopAutomationLease } from "./desktop-automation-lease.js";
 import { DesktopControl } from "./desktop-control.js";
-import { DesktopControlLease } from "./desktop-control-lease.js";
 import type { DesktopInput } from "./desktop-input.js";
 import type {
   DesktopSessionManager,
@@ -37,7 +37,6 @@ function fixture() {
     })),
     perform: mock<DesktopInput["perform"]>(async () => {}),
     releaseInput: mock(async () => {}),
-    setViewerInput: mock(async (_enabled: boolean) => {}),
   };
   const browserRelease = mock(async () => {});
   const manager = {
@@ -49,18 +48,16 @@ function fixture() {
     releaseAutomationSlot: released,
     ensureDesktopRunning: started,
   } as unknown as DesktopSessionManager;
-  const lease = new DesktopControlLease({
+  const lease = new DesktopAutomationLease({
     enabled: () => enabled,
     ready: () => ready,
     ensureReady: async () => {
       throw new Error("Desktop setup required");
     },
     manager: () => manager,
-    input,
-    notify: async () => {},
   });
   const control = new DesktopControl(lease, input, browserRelease);
-  cleanups.push(() => lease.takeControl());
+  cleanups.push(() => control.execute({ action: "done" }, context()));
   return {
     control,
     lease,
@@ -99,10 +96,6 @@ describe("assistant desktop control", () => {
     expect(f.input.observe).toHaveBeenCalledTimes(2);
     await f.control.execute({ action: "done" }, context());
     expect(f.released).toHaveBeenCalledTimes(1);
-    expect(f.input.setViewerInput.mock.calls.map((args) => args[0])).toEqual([
-      false,
-      true,
-    ]);
   });
 
   test("rejects a replayed observation without sending more input", async () => {
@@ -168,12 +161,12 @@ describe("assistant desktop control", () => {
       await expect(f.lease.runBrowser(ctx, operation)).rejects.toBeDefined();
       expect(f.started).not.toHaveBeenCalled();
       expect(operation).not.toHaveBeenCalled();
-      expect(f.input.setViewerInput).not.toHaveBeenCalled();
     }
   });
 
-  test("takeover aborts an in-flight action and rejects queued input until explicitly allowed", async () => {
+  test("cancellation aborts native actions and allows a fresh observation", async () => {
     const f = fixture();
+    const abort = new AbortController();
     const id = await observe(f.control);
     let started!: () => void;
     const active = new Promise<void>((resolve) => {
@@ -189,7 +182,7 @@ describe("assistant desktop control", () => {
     });
     const action = f.control.execute(
       { action: "type", text: "hello", observation_id: id },
-      context(),
+      context(abort.signal),
     );
     const rejected = action.catch((err: Error) => err);
     await active;
@@ -197,15 +190,10 @@ describe("assistant desktop control", () => {
       { action: "key", key: "Return", observation_id: id },
       context(),
     );
-    await f.lease.takeControl();
+    abort.abort();
     expect(await rejected).toBeInstanceOf(Error);
-    expect((await queued).yieldToUser).toBe(true);
+    expect((await queued).isError).toBe(true);
     expect(f.input.perform).toHaveBeenCalledTimes(1);
-    expect(f.lease.getStatus().state).toBe("human");
-    expect(
-      (await f.control.execute({ action: "observe" }, context())).yieldToUser,
-    ).toBe(true);
-    await f.lease.allowAssistant();
     await observe(f.control);
     expect(f.started).toHaveBeenCalledTimes(2);
   });
@@ -215,7 +203,7 @@ describe("assistant desktop control", () => {
     const abort = new AbortController();
     await observe(f.control, context(abort.signal));
     abort.abort();
-    await f.lease.allowAssistant();
+    await Bun.sleep(0);
     expect(f.released).toHaveBeenCalledTimes(1);
     expect(f.input.releaseInput).toHaveBeenCalledTimes(2);
   });
@@ -224,7 +212,7 @@ describe("assistant desktop control", () => {
     const f = fixture();
     await observe(f.control);
     f.lose();
-    await f.lease.allowAssistant();
+    await Bun.sleep(0);
     expect(f.released).toHaveBeenCalledTimes(1);
     await observe(f.control);
     f.disable();
@@ -245,7 +233,6 @@ describe.each(["disable", "uninstall"] as const)(
       await expect(f.lease.runBrowser(context(), operation)).rejects.toThrow();
       expect(operation).not.toHaveBeenCalled();
       expect(f.input.observe).not.toHaveBeenCalled();
-      expect(f.input.setViewerInput.mock.calls).not.toContainEqual([false]);
       expect(f.released).toHaveBeenCalledTimes(1);
     });
 
@@ -257,8 +244,6 @@ describe.each(["disable", "uninstall"] as const)(
       await expect(f.lease.runBrowser(context(), operation)).rejects.toThrow();
       expect(operation).toHaveBeenCalledTimes(1);
       expect(f.released).toHaveBeenCalledTimes(1);
-      expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
-      expect(f.lease.getStatus().state).toBe("idle");
     });
 
     test("cancels an in-flight browser operation and releases control", async () => {
@@ -278,29 +263,21 @@ describe.each(["disable", "uninstall"] as const)(
       f[lose]();
       expect(await rejected).toBeInstanceOf(Error);
       expect(f.released).toHaveBeenCalledTimes(1);
-      expect(f.lease.getStatus().state).toBe("idle");
     });
   },
 );
 
-test.each(["releaseInput", "setViewerInput"] as const)(
-  "a failed %s remains retryable before handing input back",
-  async (operation) => {
-    const f = fixture();
-    await observe(f.control);
-    f.input[operation].mockImplementationOnce(async () => {
-      throw new Error("X server busy");
-    });
-    await expect(f.lease.takeControl()).rejects.toThrow("X server busy");
-    expect(f.lease.getStatus().state).toBe("assistant");
-    expect(
-      (await f.control.execute({ action: "observe" }, context())).yieldToUser,
-    ).toBe(true);
-    await f.lease.takeControl();
-    expect(f.lease.getStatus().state).toBe("human");
-    expect(f.released).toHaveBeenCalledTimes(1);
-  },
-);
+test("failed native input cleanup retains the automation slot for retry", async () => {
+  const f = fixture();
+  await observe(f.control);
+  f.input.releaseInput.mockRejectedValueOnce(new Error("X server busy"));
+  await expect(
+    f.control.execute({ action: "done" }, context()),
+  ).rejects.toThrow("X server busy");
+  expect(f.released).not.toHaveBeenCalled();
+  await f.control.execute({ action: "done" }, context());
+  expect(f.released).toHaveBeenCalledTimes(1);
+});
 
 test("rejects clicks and drag destinations outside the observed image before sending input", async () => {
   for (const action of [
@@ -339,36 +316,6 @@ test("browser commands share ownership and invalidate X11 observations", async (
   expect(f.input.perform).not.toHaveBeenCalled();
 });
 
-test("takeover cancels active and queued browser commands", async () => {
-  const f = fixture();
-  const started = Promise.withResolvers<void>();
-  const running = f.lease
-    .runBrowser(context(), async (signal) => {
-      started.resolve();
-      await new Promise((_, reject) =>
-        signal.addEventListener("abort", () => reject(new Error("aborted")), {
-          once: true,
-        }),
-      );
-      return { content: "unexpected", isError: false };
-    })
-    .catch((error: Error) => error);
-  await started.promise;
-  const operation = mock(async () => ({
-    content: "unexpected",
-    isError: false,
-  }));
-  const queued = f.lease.runBrowser(context(), operation);
-  await f.lease.takeControl();
-  expect(await running).toBeInstanceOf(Error);
-  expect((await queued).yieldToUser).toBe(true);
-  expect(operation).not.toHaveBeenCalled();
-  expect(f.lease.getStatus().state).toBe("human");
-  await f.lease.allowAssistant();
-  await f.lease.runBrowser(context(), operation);
-  expect(operation).toHaveBeenCalledTimes(1);
-});
-
 test("browser cleanup failure keeps its slot and still releases X11 input", async () => {
   const f = fixture();
   await observe(f.control);
@@ -377,13 +324,13 @@ test("browser cleanup failure keeps its slot and still releases X11 input", asyn
     isError: false,
   }));
   f.browserRelease.mockRejectedValueOnce(new Error("Chrome busy"));
-  await expect(f.lease.takeControl()).rejects.toThrow("Chrome busy");
+  await expect(
+    f.control.execute({ action: "done" }, context()),
+  ).rejects.toThrow("Chrome busy");
   expect(f.released).not.toHaveBeenCalled();
   expect(f.input.releaseInput).toHaveBeenCalledTimes(2);
-  expect(f.lease.getStatus().state).toBe("assistant");
-  await f.lease.takeControl();
+  await f.control.execute({ action: "done" }, context());
   expect(f.released).toHaveBeenCalledTimes(1);
-  expect(f.lease.getStatus().state).toBe("human");
 });
 
 test("desktop loss clears a failed cleanup lease so the next session can restart", async () => {
@@ -394,10 +341,11 @@ test("desktop loss clears a failed cleanup lease so the next session can restart
     isError: false,
   }));
   f.input.releaseInput.mockRejectedValueOnce(new Error("X server unavailable"));
-  await expect(f.lease.takeControl()).rejects.toThrow("X server unavailable");
+  await expect(
+    f.control.execute({ action: "done" }, context()),
+  ).rejects.toThrow("X server unavailable");
   f.lose();
-  await f.lease.allowAssistant();
-  expect(f.lease.getStatus().state).toBe("idle");
+  await Bun.sleep(0);
   await observe(f.control);
   expect(f.started).toHaveBeenCalledTimes(2);
 });
@@ -418,14 +366,11 @@ test.each(["browser", "desktop"] as const)(
     await run(first.signal);
     await run(second.signal);
     first.abort();
-    await f.lease.allowAssistant();
-    expect(f.lease.getStatus().state).toBe("assistant");
+    await Bun.sleep(0);
     expect(f.released).not.toHaveBeenCalled();
     second.abort();
-    await f.lease.allowAssistant();
-    expect(f.lease.getStatus().state).toBe("idle");
+    await Bun.sleep(0);
     expect(f.released).toHaveBeenCalledTimes(1);
-    expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
   },
 );
 
@@ -442,7 +387,6 @@ test("malformed actions release only the caller's lease without starting a deskt
       { ...context(), sourceActorPrincipalId: "user-456" },
     ),
   ).rejects.toThrow("Another conversation");
-  expect(f.lease.getStatus().state).toBe("assistant");
   await expect(
     f.control.execute(
       { action: "click", observation_id: id, x: 100 },
@@ -450,6 +394,4 @@ test("malformed actions release only the caller's lease without starting a deskt
     ),
   ).rejects.toThrow();
   expect(f.input.perform).not.toHaveBeenCalled();
-  expect(f.lease.getStatus().state).toBe("idle");
-  expect(f.input.setViewerInput.mock.calls.at(-1)).toEqual([true]);
 });

@@ -1,12 +1,9 @@
+import { execFile } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { z } from "zod";
 
-import {
-  DesktopViewerInput,
-  runDesktopCommand,
-} from "./desktop-viewer-input.js";
-export { runDesktopCommand } from "./desktop-viewer-input.js";
+import { DESKTOP_DISPLAY } from "./desktop-display.js";
 import { desktopScreenshot } from "./desktop-screenshot.js";
 
 const point = { x: z.number().int().min(0), y: z.number().int().min(0) };
@@ -59,17 +56,11 @@ export type DesktopObservation = { png: Buffer; width: number; height: number };
 export interface DesktopInput {
   observe(signal: AbortSignal): Promise<DesktopObservation>;
   perform(action: DesktopAction, signal: AbortSignal): Promise<void>;
-  setViewerInput(enabled: boolean): Promise<void>;
   releaseInput(): Promise<void>;
 }
 
-export class X11DesktopInput
-  extends DesktopViewerInput
-  implements DesktopInput
-{
-  constructor(runCommand = runDesktopCommand) {
-    super(runCommand);
-  }
+export class X11DesktopInput implements DesktopInput {
+  constructor(private readonly runCommand = runDesktopCommand) {}
 
   async observe(signal: AbortSignal): Promise<DesktopObservation> {
     return desktopScreenshot(
@@ -197,4 +188,34 @@ export class X11DesktopInput
       "3",
     ]);
   }
+}
+
+export function runDesktopCommand(
+  command: string,
+  args: string[],
+  signal?: AbortSignal,
+  input?: string,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      `/usr/bin/${command}`,
+      args,
+      {
+        env: {
+          PATH: "/usr/bin:/bin",
+          DISPLAY: DESKTOP_DISPLAY,
+          LANG: "C.UTF-8",
+        },
+        encoding: "buffer",
+        timeout: 15_000,
+        maxBuffer: 16 * 1024 * 1024,
+        killSignal: "SIGKILL",
+        windowsHide: true,
+        signal,
+      },
+      (err, stdout) => (err ? reject(err) : resolve(stdout)),
+    );
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
+  });
 }

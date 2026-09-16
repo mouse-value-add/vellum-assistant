@@ -123,7 +123,6 @@ r.mainloop()
   start(["python3", fixture, resultPath]);
   await waitFor(async () => (await state()).text === "");
   console.log("Form started");
-  await input.setViewerInput(false);
   const before = await input.observe(signal);
   assert.equal(before.width, 1440);
   assert.equal(before.height, 900);
@@ -168,7 +167,7 @@ r.mainloop()
   assert.notDeepEqual(before.png, after.png);
   await writeFile(join(tmpdir(), "desktop-control-smoke.png"), after.png);
 
-  // A real RFB viewer must be unable to type while automation owns input.
+  // Viewer input is available without a handoff.
   const viewer = createConnection({ host: "127.0.0.1", port: 5999 });
   let pending = Buffer.alloc(0);
   viewer.on("data", (chunk) => {
@@ -194,23 +193,12 @@ r.mainloop()
       4, 1, 0, 0, 0, 0, 0, 120, 4, 0, 0, 0, 0, 0, 0, 120,
     ]);
     viewer.write(key);
-    await Bun.sleep(100);
-    assert.equal((await state()).text, "replacement");
-    await input.setViewerInput(true);
-    viewer.write(key);
     await waitFor(async () => (await state()).text === "replacementx");
-    await input.setViewerInput(false);
-    viewer.write(key);
-    await Bun.sleep(100);
-    assert.equal((await state()).text, "replacementx");
-    await input.setViewerInput(true);
-    viewer.write(key);
-    await waitFor(async () => (await state()).text === "replacementxx");
   } finally {
     viewer.destroy();
   }
   console.log(
-    "PASS: real X11 screenshots, smooth pointer motion, Unicode typing, clicks, keyboard shortcuts, scrolling, dragging, and RFB input takeover",
+    "PASS: real X11 screenshots, smooth pointer motion, Unicode typing, clicks, keyboard shortcuts, scrolling, dragging, and direct RFB input",
   );
 } finally {
   for (const child of children.reverse()) {

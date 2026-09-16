@@ -3,7 +3,6 @@ import { lazy, Suspense } from "react";
 
 import { useTranslation } from "@/i18n";
 
-import { DesktopControlPanel } from "./desktop-control-panel";
 import { DesktopStatus } from "./desktop-status";
 import { useDesktopSetup } from "./use-desktop-setup";
 
@@ -30,24 +29,17 @@ export function DesktopPanel({ assistantId, viewOnly }: DesktopPanelProps) {
   const setup = query.data;
   if (setup?.state === "ready") {
     return (
-      <DesktopControlPanel assistantId={assistantId}>
-        {(assistantOwnsInput) => (
-          <Suspense
-            fallback={
-              <DesktopStatus
-                loading
-                message={t("assistantDesktop.connecting")}
-              />
-            }
-          >
-            <DesktopViewer
-              key={assistantId}
-              assistantId={assistantId}
-              viewOnly={viewOnly || assistantOwnsInput}
-            />
-          </Suspense>
-        )}
-      </DesktopControlPanel>
+      <Suspense
+        fallback={
+          <DesktopStatus loading message={t("assistantDesktop.connecting")} />
+        }
+      >
+        <DesktopViewer
+          key={assistantId}
+          assistantId={assistantId}
+          viewOnly={viewOnly}
+        />
+      </Suspense>
     );
   }
   const busy =

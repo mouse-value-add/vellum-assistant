@@ -14,8 +14,8 @@ import {
   createSkillToolsFromManifest,
 } from "../tools/skills/skill-tool-factory.js";
 import type { ToolContext } from "../tools/types.js";
+import { DesktopAutomationLease } from "./desktop-automation-lease.js";
 import { DesktopControl, desktopControl } from "./desktop-control.js";
-import { DesktopControlLease } from "./desktop-control-lease.js";
 import type { DesktopInput } from "./desktop-input.js";
 import type { DesktopSessionManager } from "./desktop-session-manager.js";
 
@@ -42,11 +42,11 @@ function fixture() {
     })),
     perform: mock<DesktopInput["perform"]>(async () => {}),
     releaseInput: mock(async () => {}),
-    setViewerInput: mock(async () => {}),
   };
   const started = mock(async () => {});
   const releaseBrowser = mock(async () => {});
-  const lease = new DesktopControlLease({
+  const released = mock(() => {});
+  const lease = new DesktopAutomationLease({
     enabled: () => enabled,
     ready: () => ready,
     ensureReady: async () => {
@@ -56,18 +56,16 @@ function fixture() {
       ({
         browser: { release: releaseBrowser },
         acquireAutomationSlot: () => ({ ok: true }),
-        releaseAutomationSlot: () => {},
+        releaseAutomationSlot: released,
         ensureDesktopRunning: started,
       }) as unknown as DesktopSessionManager,
-    input,
-    notify: async () => {},
   });
   const control = new DesktopControl(lease, input, releaseBrowser);
   const execute = spyOn(desktopControl, "execute").mockImplementation(
     (args, ctx) => control.execute(args, ctx),
   );
   cleanups.push(async () => {
-    await lease.takeControl();
+    await control.execute({ action: "done" }, context);
     execute.mockRestore();
   });
   const dir = join(getBundledSkillsDir(), "computer-use");
@@ -85,6 +83,7 @@ function fixture() {
     ctx = context,
   ) => tool(name).execute({ target: "assistant-desktop", ...args }, ctx);
   return {
+    released,
     input,
     started,
     releaseBrowser,
@@ -153,7 +152,7 @@ test("shared skill executes native actions without a host client and returns fre
     content: "Finished",
     isError: false,
   });
-  expect(f.lease.getStatus().state).toBe("idle");
+  expect(f.released).toHaveBeenCalled();
 });
 
 test("omitted and explicit host targets preserve client routing, click variants and window observations", async () => {
@@ -254,7 +253,7 @@ test("invalid targets and unsupported local capabilities never execute on either
   expect(proxy).not.toHaveBeenCalled();
 });
 
-test("shared calls enforce browser/native freshness, owner identity, takeover and cancelled teardown", async () => {
+test("shared calls enforce browser/native freshness, owner identity and cancelled teardown", async () => {
   const f = fixture();
   const observation = observationId(await f.local("observe"));
   expect(
@@ -266,7 +265,7 @@ test("shared calls enforce browser/native freshness, owner identity, takeover an
       )
     ).isError,
   ).toBe(true);
-  expect(f.lease.getStatus().state).toBe("assistant");
+  expect(f.released).not.toHaveBeenCalled();
   await f.lease.runBrowser(context, async () => ({
     content: "navigated",
     isError: false,
@@ -280,9 +279,6 @@ test("shared calls enforce browser/native freshness, owner identity, takeover an
   expect(stale.isError).toBe(true);
   expect(stale.content).toContain("Stale");
   expect(f.input.perform).not.toHaveBeenCalled();
-  await f.lease.takeControl();
-  expect((await f.local("observe")).yieldToUser).toBe(true);
-  await f.lease.allowAssistant();
   await f.local("observe");
   expect(
     (
@@ -293,7 +289,7 @@ test("shared calls enforce browser/native freshness, owner identity, takeover an
       )
     ).content,
   ).toBe("Stopped");
-  expect(f.lease.getStatus().state).toBe("idle");
+  expect(f.released).toHaveBeenCalled();
 });
 
 test("permission routing follows the trusted skill target and cannot downgrade unrelated tools", () => {
@@ -400,12 +396,12 @@ test.each([
       sourceActorPrincipalId: "user-456",
     });
     expect(other.isError).toBe(true);
-    expect(f.lease.getStatus().state).toBe("assistant");
+    expect(f.released).not.toHaveBeenCalled();
     const own = await f.local(name, args);
     expect(own.isError).toBe(true);
     expect(own.content).toContain("Invalid input");
     expect(f.input.perform).not.toHaveBeenCalled();
-    expect(f.lease.getStatus().state).toBe("idle");
+    expect(f.released).toHaveBeenCalled();
   },
 );
 
@@ -419,7 +415,7 @@ test("unsupported native observation features release the owner without touching
     { ...context, proxyToolResolver: proxy },
   );
   expect(result.isError).toBe(true);
-  expect(f.lease.getStatus().state).toBe("idle");
+  expect(f.released).toHaveBeenCalled();
   expect(proxy).not.toHaveBeenCalled();
 });
 

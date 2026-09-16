@@ -229,7 +229,7 @@ export class DesktopSessionManager {
   private readonly allocateDebugPort: () => Promise<number>;
   readonly browser = new DesktopBrowserClient(async (signal) => {
     if (!this.automation) {
-      throw new Error("Desktop browser requires the desktop control lease");
+      throw new Error("Desktop browser requires an automation slot");
     }
     const generation = this.generation;
     const owner = this.automation;

@@ -42,25 +42,6 @@ describe("RuntimeHttpServer /v1/desktop/stream upgrade", () => {
     setOverridesForTesting({});
   });
 
-  test("desktop control rejects unauthenticated and actor requests and hides the disabled feature", async () => {
-    for (const method of ["GET", "POST"]) {
-      const request = (token?: string) =>
-        fetch(`http://${baseUrl}/v1/desktop/control`, {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          ...(method === "POST"
-            ? { body: JSON.stringify({ action: "take" }) }
-            : {}),
-        });
-      expect((await request()).status).toBe(401);
-      expect((await request(mintActorToken())).status).toBe(403);
-      expect((await request(mintGatewayToken())).status).toBe(404);
-    }
-  });
-
   test("refuses a non-private origin with 403", async () => {
     const res = await fetch(
       `http://${baseUrl}/v1/desktop/stream?token=${mintGatewayToken()}`,
@@ -118,7 +99,7 @@ describe("RuntimeHttpServer /v1/desktop/stream upgrade", () => {
   }
 });
 
-test("self-hosted containers cannot stream or take control with the feature flag enabled", async () => {
+test("self-hosted containers cannot stream with the feature flag enabled", async () => {
   const originalPlatform = process.env.IS_PLATFORM;
   const originalContainerized = process.env.IS_CONTAINERIZED;
   const restoreAuth = requireHttpAuth();
@@ -133,19 +114,6 @@ test("self-hosted containers cannot stream or take control with the feature flag
       `ws://${baseUrl}/v1/desktop/stream?token=${encodeURIComponent(mintGatewayToken())}`,
     );
     expect((await waitForClose(ws)).code).toBe(4008);
-    for (const method of ["GET", "POST"]) {
-      const response = await fetch(`http://${baseUrl}/v1/desktop/control`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${mintGatewayToken()}`,
-          "Content-Type": "application/json",
-        },
-        ...(method === "POST"
-          ? { body: JSON.stringify({ action: "allow" }) }
-          : {}),
-      });
-      expect(response.status).toBe(404);
-    }
   } finally {
     await server.stop();
     restoreAuth();

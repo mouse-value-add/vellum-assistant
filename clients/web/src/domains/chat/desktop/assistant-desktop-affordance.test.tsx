@@ -217,16 +217,19 @@ describe("AssistantDesktopAffordance", () => {
 
   test("closing fullscreen restores the same preview session", async () => {
     await openDesktop();
+    expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
 
     fireEvent.click(
       screen.getByRole("button", { name: "Expand virtual desktop" }),
     );
     expect(screen.getByTestId("desktop-panel").dataset.viewOnly).toBe("false");
+    expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(panelUnmounts).toBe(0);
     expect(screen.getByTestId("desktop-panel").dataset.viewOnly).toBe("true");
+    expect(screen.queryByRole("button", { name: "Take control" })).toBeNull();
   });
 
   test("toggles the floating preview without opening fullscreen", async () => {

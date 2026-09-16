@@ -185,7 +185,7 @@ test("shared snapshot and click use desktop element IDs without personal browser
   ).toHaveLength(1);
 });
 
-test("takeover invalidates borrowed clients and releases uncertain input through a fresh connection", async () => {
+test("release invalidates borrowed clients and releases uncertain input through a fresh connection", async () => {
   const f = await session();
   f.fail(
     (method, params) =>
@@ -332,7 +332,7 @@ test("keyboard input restores an existing cursor without synthesizing mouse inpu
   expect(f.calls[1]?.params.expression).toContain("translate(50px, 60px)");
 });
 
-test("release suppresses pending cursor restoration and clears it before takeover", async () => {
+test("release suppresses pending cursor restoration and clears it before detaching", async () => {
   const f = await session();
   await f.cdp.send("Input.dispatchMouseEvent", {
     type: "mouseMoved",
@@ -351,7 +351,7 @@ test("release suppresses pending cursor restoration and clears it before takeove
   expect(expressions[0]?.params.expression).toContain("?.remove()");
 });
 
-test("takeover waits for an in-flight cursor restoration before removing it", async () => {
+test("release waits for an in-flight cursor restoration before removing it", async () => {
   const f = await session();
   await f.cdp.send("Input.dispatchMouseEvent", {
     type: "mouseMoved",

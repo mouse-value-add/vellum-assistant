@@ -11,13 +11,12 @@ import sharp from "sharp";
 import { executeBrowserOperation } from "../src/browser/operations.js";
 import type { BrowserOperation } from "../src/browser/types.js";
 import { registerBrowserCommand } from "../src/cli/commands/browser.js";
-import { DesktopControlLease } from "../src/desktop/desktop-control-lease.js";
+import { DesktopAutomationLease } from "../src/desktop/desktop-automation-lease.js";
 import {
   desktopChromePath,
   desktopDependencyInstaller,
 } from "../src/desktop/desktop-dependencies.js";
 import { DesktopSessionManager } from "../src/desktop/desktop-session-manager.js";
-import { DesktopViewerInput } from "../src/desktop/desktop-viewer-input.js";
 import { getAssistantSocketPath } from "../src/ipc/socket-path.js";
 
 if (
@@ -36,21 +35,18 @@ if (coldInstall) {
   assert.equal(Bun.which("Xtigervnc"), null);
 }
 const directory = await mkdtemp(join(tmpdir(), "desktop-browser-cli-"));
-const input = new DesktopViewerInput();
 const manager = new DesktopSessionManager({
   resolveChromePath: async () => executable,
   profileDir: join(directory, "profile"),
   panelConfigDir: join(directory, "panel"),
   renderWallpaper: async () => null,
 });
-const control = new DesktopControlLease({
+const control = new DesktopAutomationLease({
   enabled: () => true,
   ready: () =>
     !coldInstall || desktopDependencyInstaller.getStatus().state === "ready",
   ensureReady: (signal) => desktopDependencyInstaller.ensureReady(signal),
   manager: () => manager,
-  input,
-  notify: async () => {},
 });
 const context = {
   workingDir: directory,
@@ -269,14 +265,13 @@ try {
   );
   await assertCursorPainted(true);
   await cli("detach");
-  assert.equal(control.getStatus().state, "idle");
   await assertCursorPainted(false);
-  await control.takeControl();
+  await cli("detach");
   console.log(
-    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, cursor pixels above dialogs and after navigation, detach cleanup and takeover",
+    "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, cursor pixels above dialogs and after navigation, detach cleanup",
   );
 } finally {
-  await control.takeControl();
+  await cli("detach");
   await manager.destroy();
   await new Promise<void>((resolve) => ipc.close(() => resolve()));
   page.stop(true);

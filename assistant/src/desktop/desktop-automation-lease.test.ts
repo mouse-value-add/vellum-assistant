@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 
-import { DesktopControlLease } from "./desktop-control-lease.js";
+import { DesktopAutomationLease } from "./desktop-automation-lease.js";
 import { DesktopDependencyInstaller } from "./desktop-dependencies.js";
 import type { DesktopSessionManager } from "./desktop-session-manager.js";
 
@@ -10,9 +10,13 @@ const context = {
   trustClass: "guardian" as const,
   workingDir: "/tmp",
 };
-const cleanups: DesktopControlLease[] = [];
+const cleanups: DesktopAutomationLease[] = [];
 afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map((lease) => lease.takeControl()));
+  await Promise.all(
+    cleanups
+      .splice(0)
+      .map((lease) => lease.runBrowser(context, operation, true)),
+  );
 });
 function fixture() {
   let enabled = true;
@@ -31,8 +35,7 @@ function fixture() {
   const started = mock(async () => {});
   const released = mock(() => {});
   const releaseBrowser = mock(async () => {});
-  const setViewerInput = mock(async (_enabled: boolean) => {});
-  const lease = new DesktopControlLease({
+  const lease = new DesktopAutomationLease({
     enabled: () => enabled,
     ready: () => ready,
     ensureReady,
@@ -43,8 +46,6 @@ function fixture() {
         releaseAutomationSlot: released,
         ensureDesktopRunning: started,
       }) as unknown as DesktopSessionManager,
-    input: { setViewerInput },
-    notify: async () => {},
   });
   cleanups.push(lease);
   return {
@@ -59,7 +60,6 @@ function fixture() {
     started,
     released,
     releaseBrowser,
-    setViewerInput,
     disable: () => {
       enabled = false;
     },
@@ -70,7 +70,7 @@ function fixture() {
 }
 const operation = async () => ({ content: "ok", isError: false });
 
-test("browser-only ownership needs no native input or screenshot implementation", async () => {
+test("browser session reuses one automation slot and isolates conversations", async () => {
   const f = fixture();
   await f.lease.runBrowser(context, operation);
   await f.lease.runBrowser(context, operation);
@@ -81,7 +81,6 @@ test("browser-only ownership needs no native input or screenshot implementation"
   expect(f.released).not.toHaveBeenCalled();
   await f.lease.runBrowser(context, operation, true);
   expect(f.released).toHaveBeenCalledTimes(1);
-  expect(f.setViewerInput.mock.calls).toEqual([[false], [true]]);
 });
 
 for (const lose of ["disable", "uninstall"] as const) {
@@ -110,11 +109,12 @@ for (const lose of ["disable", "uninstall"] as const) {
   });
 }
 
-test("takeover cancels running and queued browser commands", async () => {
+test("cancellation stops running and queued browser commands without blocking a new session", async () => {
   const f = fixture();
   const started = Promise.withResolvers<void>();
+  const abort = new AbortController();
   const running = f.lease
-    .runBrowser(context, async (signal) => {
+    .runBrowser({ ...context, signal: abort.signal }, async (signal) => {
       started.resolve();
       await new Promise<void>((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(new Error("aborted")), {
@@ -127,11 +127,10 @@ test("takeover cancels running and queued browser commands", async () => {
   await started.promise;
   const callback = mock(operation);
   const queued = f.lease.runBrowser(context, callback);
-  await f.lease.takeControl();
+  abort.abort();
   expect(await running).toBeInstanceOf(Error);
-  expect((await queued).yieldToUser).toBe(true);
+  expect((await queued).isError).toBe(true);
   expect(callback).not.toHaveBeenCalled();
-  await f.lease.allowAssistant();
   await f.lease.runBrowser(context, callback);
   expect(callback).toHaveBeenCalledTimes(1);
 });
@@ -140,12 +139,12 @@ test("failed browser cleanup retains ownership until release succeeds", async ()
   const f = fixture();
   await f.lease.runBrowser(context, operation);
   f.releaseBrowser.mockRejectedValueOnce(new Error("Chrome busy"));
-  await expect(f.lease.takeControl()).rejects.toThrow("Chrome busy");
+  await expect(f.lease.runBrowser(context, operation, true)).rejects.toThrow(
+    "Chrome busy",
+  );
   expect(f.released).not.toHaveBeenCalled();
-  expect(f.lease.getStatus().state).toBe("assistant");
-  await f.lease.takeControl();
+  await f.lease.runBrowser(context, operation, true);
   expect(f.released).toHaveBeenCalledTimes(1);
-  expect(f.lease.getStatus().state).toBe("human");
 });
 
 test("first browser call waits for one shared install then executes exactly once", async () => {
@@ -165,7 +164,7 @@ test("first browser call waits for one shared install then executes exactly once
   expect(f.started).toHaveBeenCalledTimes(1);
 });
 
-for (const interrupt of ["cancel", "takeover", "disable", "failure"] as const) {
+for (const interrupt of ["cancel", "disable", "failure"] as const) {
   test(`${interrupt} during setup prevents a delayed browser action`, async () => {
     const f = fixture();
     f.uninstall();
@@ -177,8 +176,6 @@ for (const interrupt of ["cancel", "takeover", "disable", "failure"] as const) {
     await Bun.sleep(0);
     if (interrupt === "cancel") {
       abort.abort();
-    } else if (interrupt === "takeover") {
-      await f.lease.takeControl();
     } else if (interrupt === "disable") {
       f.disable();
     } else {
@@ -205,8 +202,6 @@ test("disabled, unidentified, cancelled and released browser calls cannot instal
     await expect(f.lease.runBrowser(caller, operation)).rejects.toThrow();
   }
   await f.lease.runBrowser(context, operation, true);
-  await f.lease.takeControl();
-  await expect(f.lease.runBrowser(context, operation)).rejects.toThrow();
   f.disable();
   await expect(f.lease.runBrowser(context, operation)).rejects.toThrow();
   expect(f.ensureReady).not.toHaveBeenCalled();

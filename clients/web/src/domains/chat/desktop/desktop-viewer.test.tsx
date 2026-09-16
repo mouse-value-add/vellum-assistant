@@ -401,7 +401,7 @@ afterAll(() => {
   globalThis.WebSocket = originalWebSocket;
 });
 
-test("assistant control disables viewer input and resumes it without reconnecting", async () => {
+test("expanding the view-only preview enables input without reconnecting", async () => {
   const { rerender } = render(
     <DesktopViewer assistantId="assistant-123" viewOnly />,
   );
