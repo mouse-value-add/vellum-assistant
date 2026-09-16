@@ -833,17 +833,42 @@ function buildPassThroughDecision(params: {
   return decision;
 }
 
-function selectDefaultChannelsByUrgency(
-  urgency: NotificationSignal["attentionHints"]["urgency"],
-  availableChannels: NotificationChannel[],
-): NotificationChannel[] {
-  const isUrgent = urgency === "critical" || urgency === "high";
-  if (isUrgent) {
-    return [...availableChannels];
+function pinSchedulerRequestedCopy(
+  decision: NotificationDecision,
+  signal: NotificationSignal,
+): NotificationDecision {
+  if (
+    signal.sourceChannel !== "scheduler" ||
+    nonEmpty(readPayloadString(signal.contextPayload, "requestedBySource")) !==
+      "scheduler"
+  ) {
+    return decision;
   }
-  return availableChannels.includes("vellum")
-    ? ["vellum" as NotificationChannel]
-    : [];
+  const body = nonEmpty(
+    readPayloadString(signal.contextPayload, "requestedMessage"),
+  );
+  if (!body) {
+    return decision;
+  }
+
+  const title = resolveTitle(
+    readPayloadString(signal.contextPayload, "requestedTitle"),
+    body,
+  );
+  const nextCopy: Partial<Record<NotificationChannel, RenderedChannelCopy>> = {
+    ...decision.renderedCopy,
+  };
+  for (const channel of decision.selectedChannels) {
+    nextCopy[channel] = {
+      ...nextCopy[channel],
+      title,
+      body,
+      deliveryText: body,
+      conversationSeedMessage: body,
+    };
+  }
+
+  return { ...decision, renderedCopy: nextCopy, verbatimCopy: true };
 }
 
 /**
@@ -854,6 +879,7 @@ function applyDecisionGuards(
   decision: NotificationDecision,
   signal: NotificationSignal,
 ): NotificationDecision {
+  decision = pinSchedulerRequestedCopy(decision, signal);
   decision = pinQuestionDeliveryCopy(decision, signal);
   decision = stripReplyMechanics(decision, signal);
   decision = enforceToolApprovalSeedBlocks(decision, signal);
@@ -883,10 +909,14 @@ export async function evaluateSignal(
   );
   if (signal.sourceChannel === "assistant_tool" && requestedBody) {
     const payload = signal.contextPayload as Record<string, unknown>;
-    const defaultChannels = selectDefaultChannelsByUrgency(
-      signal.attentionHints.urgency,
-      availableChannels,
-    );
+    const isUrgent =
+      signal.attentionHints.urgency === "critical" ||
+      signal.attentionHints.urgency === "high";
+    const defaultChannels: NotificationChannel[] = isUrgent
+      ? [...availableChannels]
+      : availableChannels.includes("vellum")
+        ? ["vellum" as NotificationChannel]
+        : [];
     // Honor `--preferred-channels` as ADDITIVE push targets on top of
     // the default channel set. The notification center (vellum) is the
     // always-on canonical inbox; preferred channels add push surfaces
@@ -932,32 +962,6 @@ export async function evaluateSignal(
       ),
       body: requestedBody,
       reasoningSummary: "assistant_reply pass-through",
-    });
-  }
-
-  // Scheduler-owned requested copy: the scheduler already authored the
-  // complete message. Ownership requires both the signal source and the
-  // payload marker so schedule.result (requestedMessage, no
-  // requestedBySource) and notify-mode (message, no requestedBySource)
-  // stay on their existing paths. Urgency still chooses channels; every
-  // selected channel keeps the producer body.
-  const requestedBySource = nonEmpty(
-    readPayloadString(signal.contextPayload, "requestedBySource"),
-  );
-  if (
-    signal.sourceChannel === "scheduler" &&
-    requestedBySource === "scheduler" &&
-    requestedBody
-  ) {
-    return buildPassThroughDecision({
-      signal,
-      availableChannels,
-      selectedChannels: selectDefaultChannelsByUrgency(
-        signal.attentionHints.urgency,
-        availableChannels,
-      ),
-      body: requestedBody,
-      reasoningSummary: "scheduler requested-message pass-through",
     });
   }
 
