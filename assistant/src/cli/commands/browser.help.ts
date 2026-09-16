@@ -127,31 +127,38 @@ export const browserHelp: CliCommandHelp = {
   ],
   helpText: `
 Browser operations are executed through the running assistant.
-Virtual desktop requires platform hosting, the assistant-desktop flag and an
-identified guardian. It is the web client's default even with the viewer closed.
-Native apps keep their existing browser selection. Existing sessions and explicit
-backend/client choices take priority; --virtual-desktop selects streamed Chrome.
---desktop is an alias. --browser-mode local (alias playwright) selects the
-assistant's Playwright browser, not the user's Chrome.
-
-Run navigate --url <url> directly, with bash timeout_seconds: 600 for first use.
-It installs missing components, starts Chrome and completes the action. Opening
-the Virtual desktop panel starts the same installation and shows progress.
-After restarts, packages are restored and the browser profile is preserved.
-Use this CLI over saved manual setup notes. Do not launch Chrome, modify the
-desktop stack, install packages or use raw CDP, xdotool or XWD scripts yourself.
-Report setup errors; switch browsers only when the user requests it.
-
-Screenshot produces a color page JPEG over CDP; use --output and file_read.
-Use snapshot for element IDs and tabs list for tab IDs. Refresh the snapshot after
-navigation, tab changes or stale-element errors. A failed action may have happened;
-inspect its result before retrying. The purple pointer shows page mouse movement.
-Toolbar controls, native dialogs, other apps and download waiting are unsupported.
-Do not combine --virtual-desktop with personal targets, other modes or --use-active-tab.
-Stop on Take control. Resume with a fresh snapshot only after Allow assistant and
-the user's request to continue. Run detach when finished or blocked, including
-before asking a question. Closing the viewer does not release control; detach
-leaves Chrome running.
+Virtual desktop is available only for platform-hosted assistants.
+In the web client, automatic selection prefers virtual desktop Chrome when
+its feature is enabled and the conversation has an
+identified guardian. The macOS and Windows apps keep their existing browser
+selection and fallback behavior; use --virtual-desktop to select it there.
+Existing sessions and explicit backend/client choices take priority.
+--browser-mode local (alias playwright) means the assistant's Playwright browser,
+not the user's Chrome. --desktop remains an alias for --virtual-desktop.
+Use --virtual-desktop for Chrome in the Virtual desktop panel. It respects
+Take control in that panel. Run navigate --url <url> directly to open a page.
+The assistant-desktop feature flag and completed installation are required.
+The first browser command installs missing components, starts Chrome, and completes
+the requested action in one call. Allow up to 600 seconds for this command when
+using bash (timeout_seconds: 600). Opening the Virtual desktop panel also starts
+the same installation and shows progress. No separate setup command is needed.
+Report other availability errors without switching to a personal computer.
+The assistant manages Chrome startup. Do not launch a separate desktop stack,
+install desktop packages, or drive webpages with shell-level xdotool.
+With --virtual-desktop, screenshot captures the page directly from Chrome over CDP
+as a color JPEG. Use --output to save it and file_read to view it. Do not use
+shell-level xwd or custom screenshot conversion scripts.
+Use snapshot for current element IDs and tabs list for current tab IDs.
+Refresh the snapshot after navigation, tab changes or stale-element errors.
+Inspect the result before retrying a failed action; it may have happened.
+A purple page pointer shows CDP mouse movement in the stream. Browser toolbar
+controls, native dialogs and other apps are outside this CLI's page controls.
+Do not combine --virtual-desktop with personal browser targets, other browser modes
+or --use-active-tab. Download waiting is unavailable on this target.
+If the user selects Take control, stop. After they select Allow assistant
+and ask you to continue, take a fresh snapshot. Closing the viewer does not
+release control. Run assistant browser --virtual-desktop detach when finished or
+blocked, including before asking a question. Chrome stays running.
 Each subcommand maps to a browser operation and communicates
 with the assistant process.
 

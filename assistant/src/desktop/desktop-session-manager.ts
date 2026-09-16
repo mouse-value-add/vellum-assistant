@@ -25,10 +25,7 @@ import {
   findDesktopBrowserPid,
 } from "./desktop-browser-endpoint.js";
 import { writeDesktopChromePolicy } from "./desktop-chrome-policy.js";
-import {
-  configureDesktopChromeFrame,
-  removeStaleDesktopChromeLocks,
-} from "./desktop-chrome-session.js";
+import { configureDesktopChromeFrame } from "./desktop-chrome-session.js";
 import {
   desktopChromePath,
   resolveDesktopBinaries,
@@ -589,7 +586,6 @@ export class DesktopSessionManager {
       } catch (err) {
         log.warn({ err }, "Desktop Chrome frame could not be configured");
       }
-      removeStaleDesktopChromeLocks(this.profileDir);
       this.startPanel(executable, env);
       this.launch(
         "browser",

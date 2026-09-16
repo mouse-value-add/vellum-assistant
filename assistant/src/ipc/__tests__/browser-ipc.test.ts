@@ -41,7 +41,6 @@ let mockOperationCalls: Array<{
 /** When set, findConversation returns a fake conversation object. */
 let mockConversation: {
   trustContext?: { trustClass: string };
-  currentTurnTrustContext?: { trustClass: string };
   transportInterface?: string;
   currentTurnClientOs?: string;
   clientOs?: string;
@@ -77,14 +76,7 @@ mock.module("../../browser/operations.js", () => ({
 mock.module("../../daemon/conversation-registry.js", () => ({
   findConversation: (conversationId: string) => {
     mockFindConversationCalls.push(conversationId);
-    return mockConversation
-      ? {
-          ...mockConversation,
-          getTurnOrRestingTrust: () =>
-            mockConversation!.currentTurnTrustContext ??
-            mockConversation!.trustContext,
-        }
-      : undefined;
+    return mockConversation ?? undefined;
   },
 }));
 
@@ -658,25 +650,3 @@ test("first web browser use routes to virtual desktop setup before installation"
   expect(desktopContext?.clientOs).toBe("web");
   expect(mockOperationCalls).toHaveLength(0);
 });
-
-test.each(["guardian", "unknown"])(
-  "browser routing uses active %s trust even when the stored conversation trust differs",
-  async (trustClass) => {
-    webConversation();
-    mockConversation!.currentTurnTrustContext = { trustClass };
-    mockConversation!.trustContext = {
-      trustClass: trustClass === "guardian" ? "unknown" : "guardian",
-    };
-    await callHandler({
-      operation: "snapshot",
-      conversationId: "conv-default-browser",
-    });
-    if (trustClass === "guardian") {
-      expect(desktopContext?.trustClass).toBe("guardian");
-      expect(mockOperationCalls).toHaveLength(0);
-    } else {
-      expect(desktopContext).toBeUndefined();
-      expect(mockOperationCalls[0]?.trustClass).toBe("unknown");
-    }
-  },
-);

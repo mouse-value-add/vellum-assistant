@@ -28,7 +28,7 @@ export async function resolveBrowserContext(
     conversationId: conversation
       ? conversationId!
       : browserCliConversationKey(sessionId),
-    trustClass: conversation?.getTurnOrRestingTrust()?.trustClass ?? "unknown",
+    trustClass: conversation?.trustContext?.trustClass ?? "unknown",
     transportInterface: conversation?.transportInterface,
     clientOs: conversation
       ? resolveTurnClientOs(conversation).clientOs

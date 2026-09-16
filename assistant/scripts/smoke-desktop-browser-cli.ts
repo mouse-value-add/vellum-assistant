@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
 
 import { IpcFrameReader, writeMessage } from "@vellumai/ipc-server-utils";
 import { Command } from "commander";
@@ -28,16 +26,10 @@ if (
   !process.env.ASSISTANT_IPC_SOCKET_DIR
 ) {
   throw new Error(
-    "Run in disposable Linux with desktop packages, a temporary ASSISTANT_IPC_SOCKET_DIR and a Chrome executable argument or --install for a cold install. Optionally pass a persistent profile path followed by --expect-session to verify recovery in a replacement container.",
+    "Run in disposable Linux with desktop packages, a temporary ASSISTANT_IPC_SOCKET_DIR and a Chrome executable argument or --install for a cold install.",
   );
 }
 const coldInstall = process.argv[2] === "--install";
-const persistedProfile = process.argv[3];
-const expectSession = process.argv[4] === "--expect-session";
-if (expectSession) {
-  assert(persistedProfile && existsSync(persistedProfile));
-  assert(existsSync(desktopChromePath() + ".ready"));
-}
 const executable = coldInstall ? desktopChromePath() : process.argv[2];
 if (coldInstall) {
   assert.equal(desktopDependencyInstaller.getStatus().state, "required");
@@ -47,7 +39,7 @@ const directory = await mkdtemp(join(tmpdir(), "desktop-browser-cli-"));
 const input = new DesktopViewerInput();
 const manager = new DesktopSessionManager({
   resolveChromePath: async () => executable,
-  profileDir: persistedProfile ?? join(directory, "profile"),
+  profileDir: join(directory, "profile"),
   panelConfigDir: join(directory, "panel"),
   renderWallpaper: async () => null,
 });
@@ -68,7 +60,6 @@ const context = {
 };
 let submissions = 0;
 let navigations = 0;
-let firstNavigationCookie: string | null = null;
 const page = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -79,7 +70,6 @@ const page = Bun.serve({
     }
     if (new URL(request.url).pathname === "/") {
       navigations++;
-      firstNavigationCookie ??= request.headers.get("cookie");
     }
     return new Response(
       `<!doctype html><html><head><title>Desktop browser CLI</title><style>body{font:24px sans-serif;padding:70px;background:#f3f4f8}input,button{font:inherit;padding:12px;margin:16px}#result{color:#5140bd}#colors{position:fixed;left:0;top:0;display:flex}#colors span{width:100px;height:50px}</style></head><body><div id="colors"><span style="background:#ff0000"></span><span style="background:#00ff00"></span><span style="background:#0000ff"></span></div><h1>Streamed desktop browser</h1><label>Example text<input id="text"></label><button id="save" onclick="fetch('/save');document.getElementById('result').textContent='Saved '+document.getElementById('text').value">Save</button><p id="result"></p><button id="open-dialog" onclick="document.querySelector('dialog').showModal()">Open dialog</button><dialog style="background:white"><button id="inside" onclick="this.textContent='Modal clicked'">Inside dialog</button></dialog></body></html>`,
@@ -202,28 +192,9 @@ try {
       "Installation progress must reach the viewer",
     );
     console.error(
-      "PASS: one CLI navigate installed missing desktop components, then loaded the requested page once",
+      "PASS: one CLI navigate installed desktop and Chrome from scratch, then loaded the requested page once",
     );
   }
-  if (expectSession) {
-    assert.match(
-      firstNavigationCookie ?? "",
-      /desktop_smoke_session=example-session/,
-    );
-    console.error(
-      "PASS: missing system packages were restored and the first browser request retained the existing session cookie",
-    );
-  }
-  await control.runBrowser(context, async (signal) => {
-    const cdp = await manager.browser.client(context.conversationId, signal);
-    await cdp.send("Network.setCookie", {
-      name: "desktop_smoke_session",
-      value: "example-session",
-      url: `http://127.0.0.1:${page.port}`,
-      expires: Math.floor(Date.now() / 1000) + 86400,
-    });
-    return { content: "session seeded", isError: false };
-  });
   const snapshot = await cli("snapshot");
   await cli(
     "type",
@@ -300,27 +271,6 @@ try {
   await cli("detach");
   assert.equal(control.getStatus().state, "idle");
   await assertCursorPainted(false);
-  if (persistedProfile) {
-    const cookies = new Database(join(persistedProfile, "Default", "Cookies"), {
-      readonly: true,
-    });
-    try {
-      const deadline = Date.now() + 40_000;
-      while (
-        !cookies
-          .query("SELECT 1 FROM cookies WHERE name = ?")
-          .get("desktop_smoke_session")
-      ) {
-        assert(
-          Date.now() < deadline,
-          "Chrome did not persist the test session cookie",
-        );
-        await Bun.sleep(250);
-      }
-    } finally {
-      cookies.close();
-    }
-  }
   await control.takeControl();
   console.log(
     "PASS: real browser CLI over IPC, shared AX snapshot, Unicode typing, one click submission, RGB page screenshot, cursor pixels above dialogs and after navigation, detach cleanup and takeover",
