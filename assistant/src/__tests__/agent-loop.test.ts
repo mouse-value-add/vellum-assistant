@@ -6,6 +6,7 @@ import type {
   CheckpointInfo,
 } from "../agent/loop.js";
 import { AgentLoop } from "../agent/loop.js";
+import { RiskLevel } from "../permissions/types.js";
 import type { PostToolUseContext, StopContext } from "../plugin-api/types.js";
 import { REFUSAL_FALLBACK_TEXT } from "../plugins/defaults/empty-response/hooks/post-model-call.js";
 import { resetPluginRegistryAndRegisterDefaults } from "../plugins/defaults/index.js";
@@ -22,6 +23,7 @@ import {
   CANCELLED_TOOL_RESULT,
   CANCELLED_UNSETTLED_TOOL_RESULT,
 } from "../tools/execution-timeout.js";
+import { registerTool } from "../tools/registry.js";
 import {
   declareDaemonActivityField,
   injectActivityField,
@@ -1138,6 +1140,56 @@ describe("AgentLoop", () => {
       mcp__calendar__create_event: false,
       not_advertised: undefined,
     });
+  });
+
+  test("reads activity ownership from the registered tool when the advertised copy is replayed", async () => {
+    // A retrospective fork replays the source's recorded tools array, which is
+    // deserialized: its injected copy has an `activity` property but not the
+    // daemon's declaration, so only the registered schema can say whose it is.
+    const registered = {
+      name: "replayed_lookup",
+      description: "Look something up",
+      category: "test",
+      defaultRiskLevel: RiskLevel.Low,
+      executionTarget: "sandbox" as const,
+      input_schema: {
+        type: "object",
+        properties: { key: { type: "string" } },
+      },
+      execute: async () => ({ content: "ok", isError: false }),
+    };
+    registerTool(registered);
+    const [injected] = injectActivityField([registered]);
+    const replayed = JSON.parse(JSON.stringify(injected)) as ToolDefinition;
+
+    const { provider } = createMockProvider([
+      toolUseResponse("t1", "replayed_lookup", {
+        key: "a",
+        activity: "Looking up the key",
+      }),
+      textResponse("Done"),
+    ]);
+    const loop = new AgentLoop({
+      provider,
+      systemPrompt: "system",
+      conversationId: "test-conversation",
+      tools: [replayed],
+      toolExecutor: async () => ({ content: "ok", isError: false }),
+    });
+
+    const events: AgentEvent[] = [];
+    await loop.run({
+      requestId: "test-request",
+      messages: [userMessage],
+      onEvent: collectEvents(events),
+      trust: { sourceChannel: "vellum", trustClass: "unknown" },
+    });
+
+    const toolUse = events.find(
+      (e): e is Extract<AgentEvent, { type: "tool_use" }> =>
+        e.type === "tool_use",
+    );
+    expect(toolUse?.activityIsStatus).toBe(true);
   });
 
   test("emits tool_use and tool_result events during tool execution", async () => {

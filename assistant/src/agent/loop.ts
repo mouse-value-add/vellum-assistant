@@ -2755,11 +2755,15 @@ export class AgentLoop {
             id: toolUse.id,
             name: toolUse.name,
             input: toolUse.input,
-            // The shared rule answers the same for every copy the conversation
-            // may advertise: raw, injected, or stripped of the field on the
-            // send_user_message surface.
+            // The shared rule answers the same for the raw, injected and
+            // stripped copies of a tool. It reads the registered schema first:
+            // a replayed wire surface (a retrospective fork's) is deserialized,
+            // so its copies no longer carry the daemon's declaration.
             activityIsStatus: advertised
-              ? activityIsStatus(toolUse.name, advertised.input_schema)
+              ? activityIsStatus(
+                  toolUse.name,
+                  (getTool(toolUse.name) ?? advertised).input_schema,
+                )
               : undefined,
           });
         }
