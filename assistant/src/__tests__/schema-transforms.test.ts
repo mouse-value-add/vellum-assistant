@@ -360,7 +360,7 @@ describe("activityIsStatus", () => {
   });
 
   test("is true for a schema that declares the daemon's own activity field", () => {
-    expect(activityIsStatus("delete_memory_page", declaresIt)).toBe(true);
+    expect(activityIsStatus("declared_tool", declaresIt)).toBe(true);
   });
 
   test("is false for a schema that owns an activity parameter", () => {
@@ -380,7 +380,7 @@ describe("activityIsStatus", () => {
     // raw one. The two answers must never differ for the same tool.
     for (const [name, schema] of [
       ["file_read", leavesItToInjection],
-      ["delete_memory_page", declaresIt],
+      ["declared_tool", declaresIt],
       ["mcp__calendar__create_event", ownsIt],
     ] as const) {
       const [advertised] = injectActivityField([makeDef(name, schema)]);

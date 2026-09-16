@@ -13,7 +13,6 @@ import { getConfig, getConfigReadOnly } from "../../../config/loader.js";
 import { usesConceptPageMemory } from "../../../config/memory-v3-gate.js";
 import { RiskLevel } from "../../../permissions/types.js";
 import { resolveCapabilities } from "../../../runtime/capabilities.js";
-import { declareDaemonActivityField } from "../../../tools/schema-transforms.js";
 import type {
   ToolContext,
   ToolDefinition,
@@ -132,7 +131,7 @@ export const deleteMemoryPageTool = {
   category: "memory",
   executionTarget: "sandbox",
   defaultRiskLevel: RiskLevel.Low,
-  input_schema: declareDaemonActivityField({
+  input_schema: {
     type: "object",
     properties: {
       slug: {
@@ -140,14 +139,9 @@ export const deleteMemoryPageTool = {
         description:
           "Slug of the concept page to delete — its path under `memory/concepts/` without the `.md` extension (e.g. `people/alice`).",
       },
-      activity: {
-        type: "string",
-        description:
-          "Brief non-technical explanation of what you are doing and why, shown as a status update.",
-      },
     },
-    required: ["slug", "activity"],
-  }),
+    required: ["slug"],
+  },
 
   async execute(
     input: Record<string, unknown>,
