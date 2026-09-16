@@ -30,8 +30,10 @@ let queryClient: QueryClient;
 let state: "idle" | "assistant" | "human";
 let status: number;
 const requests: string[] = [];
+const header = document.createElement("header");
 
 beforeEach(() => {
+  document.body.append(header);
   state = "assistant";
   status = 200;
   requests.length = 0;
@@ -52,16 +54,20 @@ beforeEach(() => {
 afterEach(() => {
   focusManager.setFocused(undefined);
   cleanup();
+  header.remove();
   queryClient.clear();
   client.get = originalGet;
   client.post = originalPost;
   listeners.clear();
   useAssistantFeatureFlagStore.getState().resetForAssistantSwitch();
 });
-function mount() {
+function mount(controlsContainer: HTMLElement | null = header) {
   render(
     <QueryClientProvider client={queryClient}>
-      <DesktopControlPanel assistantId="assistant-123">
+      <DesktopControlPanel
+        assistantId="assistant-123"
+        controlsContainer={controlsContainer}
+      >
         {(viewOnly) => (
           <div data-testid="viewer" data-readonly={String(viewOnly)} />
         )}
@@ -75,7 +81,11 @@ function readOnly() {
 
 test("takes control, allows the assistant, and observes subsequent ownership through sync", async () => {
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Take control" }));
+  const takeControl = await screen.findByRole("button", {
+    name: "Take control",
+  });
+  expect(header.contains(takeControl)).toBe(true);
+  fireEvent.click(takeControl);
   await screen.findByRole("button", { name: "Allow assistant" });
   await waitFor(() => expect(readOnly()).toBe("false"));
   expect(requests).toEqual(["take"]);
@@ -91,6 +101,15 @@ test("takes control, allows the assistant, and observes subsequent ownership thr
   await screen.findByRole("button", { name: "Take control" });
   expect(readOnly()).toBe("true");
 }, 10_000);
+
+test("preview hides control UI while preserving the input lock", async () => {
+  mount(null);
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+  expect(client.get).toHaveBeenCalled();
+  expect(readOnly()).toBe("true");
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+});
 
 test("disabled control makes no API requests and preserves interactive viewing", () => {
   useAssistantFeatureFlagStore.getState().setFlags({ assistantDesktop: false });

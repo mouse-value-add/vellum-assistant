@@ -23,6 +23,8 @@ export function DesktopPreviewContent({
 }: DesktopPreviewContentProps) {
   const { t } = useTranslation("chat");
   const previewRef = useRef<HTMLDivElement>(null);
+  const [controlsContainer, setControlsContainer] =
+    useState<HTMLDivElement | null>(null);
   // A stable portal host keeps the live session mounted across both surfaces.
   const [host] = useState(() => {
     const element = document.createElement("div");
@@ -77,7 +79,11 @@ export function DesktopPreviewContent({
         />
       </div>
       {createPortal(
-        <DesktopPanel assistantId={assistantId} viewOnly={!fullscreen} />,
+        <DesktopPanel
+          assistantId={assistantId}
+          viewOnly={!fullscreen}
+          controlsContainer={fullscreen ? controlsContainer : null}
+        />,
         host,
       )}
       <Modal.Root open={fullscreen} onOpenChange={setFullscreen}>
@@ -90,7 +96,11 @@ export function DesktopPreviewContent({
           onEscapeKeyDown={(event) => event.preventDefault()}
           onInteractOutside={(event) => {
             // The stable portal is outside the dialog's React ancestry.
-            if (event.target instanceof Node && host.contains(event.target)) {
+            if (
+              event.target instanceof Node &&
+              (host.contains(event.target) ||
+                controlsContainer?.contains(event.target))
+            ) {
               event.preventDefault();
             }
           }}
@@ -114,6 +124,7 @@ export function DesktopPreviewContent({
           </Modal.Title>
           <PreviewModalHeader
             title={t("assistantDesktop.title")}
+            actions={<div ref={setControlsContainer} />}
             onClose={() => setFullscreen(false)}
           />
           <div

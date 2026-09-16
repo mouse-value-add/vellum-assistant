@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@vellumai/design-library";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import {
   desktopControlGetOptions,
@@ -16,6 +17,7 @@ import { toApiError } from "@/utils/api-errors";
 
 type Props = {
   assistantId: string;
+  controlsContainer?: HTMLElement | null;
   children: (viewOnly: boolean) => ReactNode;
 };
 
@@ -28,7 +30,11 @@ export function DesktopControlPanel(props: Props) {
   );
 }
 
-function EnabledDesktopControlPanel({ assistantId, children }: Props) {
+function EnabledDesktopControlPanel({
+  assistantId,
+  controlsContainer,
+  children,
+}: Props) {
   const { t } = useTranslation("chat");
   const client = useQueryClient();
   const orgReady = useIsOrgReady();
@@ -75,51 +81,60 @@ function EnabledDesktopControlPanel({ assistantId, children }: Props) {
   const viewOnly =
     query.isPending || failed || update.isPending || state === "assistant";
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {state === "idle" && !failed ? null : (
-        <div
-          className="flex items-center justify-between gap-3 p-2"
-          role="status"
-          aria-live="polite"
-        >
-          <span className="text-body-small-lighter">
-            {failed
-              ? t("assistantDesktop.controlFailed")
-              : state === "assistant"
-                ? t("assistantDesktop.assistantControlling")
-                : state === "human"
-                  ? t("assistantDesktop.userControlling")
-                  : t("assistantDesktop.controlReady")}
-          </span>
-          {failed ? (
-            <Button
-              variant="outlined"
-              onClick={() => {
-                update.reset();
-                void query.refetch();
-              }}
-            >
-              {t("assistantDesktop.reconnectButton")}
-            </Button>
-          ) : state === "assistant" || state === "human" ? (
-            <Button
-              variant="outlined"
-              disabled={update.isPending}
-              onClick={() =>
-                update.mutate({
-                  path: { assistant_id: assistantId },
-                  body: { action: state === "assistant" ? "take" : "allow" },
-                })
-              }
-            >
-              {state === "assistant"
-                ? t("assistantDesktop.takeControl")
-                : t("assistantDesktop.allowAssistant")}
-            </Button>
-          ) : null}
-        </div>
-      )}
-      <div className="min-h-0 flex-1">{children(viewOnly)}</div>
-    </div>
+    <>
+      {controlsContainer &&
+        (state !== "idle" || failed) &&
+        createPortal(
+          <div
+            className="flex items-center gap-3"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="max-w-[20vw] truncate text-body-small-lighter text-white/90 sm:max-w-xs">
+              {failed
+                ? t("assistantDesktop.controlFailed")
+                : state === "assistant"
+                  ? t("assistantDesktop.assistantControlling")
+                  : state === "human"
+                    ? t("assistantDesktop.userControlling")
+                    : t("assistantDesktop.controlReady")}
+            </span>
+            {failed ? (
+              <Button
+                variant="outlined"
+                expandOnMobile={false}
+                className="h-11 shrink-0 border-white/20 text-white/90"
+                tintColor="currentColor"
+                onClick={() => {
+                  update.reset();
+                  void query.refetch();
+                }}
+              >
+                {t("assistantDesktop.reconnectButton")}
+              </Button>
+            ) : state === "assistant" || state === "human" ? (
+              <Button
+                variant="outlined"
+                expandOnMobile={false}
+                className="h-11 shrink-0 border-white/20 text-white/90"
+                tintColor="currentColor"
+                disabled={update.isPending}
+                onClick={() =>
+                  update.mutate({
+                    path: { assistant_id: assistantId },
+                    body: { action: state === "assistant" ? "take" : "allow" },
+                  })
+                }
+              >
+                {state === "assistant"
+                  ? t("assistantDesktop.takeControl")
+                  : t("assistantDesktop.allowAssistant")}
+              </Button>
+            ) : null}
+          </div>,
+          controlsContainer,
+        )}
+      {children(viewOnly)}
+    </>
   );
 }

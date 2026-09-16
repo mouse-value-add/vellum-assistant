@@ -16,6 +16,7 @@ const DesktopViewer = lazy(() =>
 interface DesktopPanelProps {
   assistantId: string;
   viewOnly?: boolean;
+  controlsContainer?: HTMLElement | null;
 }
 
 const SETUP_STAGE_KEY = {
@@ -24,13 +25,20 @@ const SETUP_STAGE_KEY = {
   checking: "assistantDesktop.checkingInstall",
 } as const;
 
-export function DesktopPanel({ assistantId, viewOnly }: DesktopPanelProps) {
+export function DesktopPanel({
+  assistantId,
+  viewOnly,
+  controlsContainer,
+}: DesktopPanelProps) {
   const { t } = useTranslation("chat");
   const { query, install } = useDesktopSetup(assistantId);
   const setup = query.data;
   if (setup?.state === "ready") {
     return (
-      <DesktopControlPanel assistantId={assistantId}>
+      <DesktopControlPanel
+        assistantId={assistantId}
+        controlsContainer={controlsContainer}
+      >
         {(assistantOwnsInput) => (
           <Suspense
             fallback={
