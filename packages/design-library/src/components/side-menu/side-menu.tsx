@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -287,8 +286,12 @@ function rootChromeClasses(
   collapsed: boolean,
   resizable: boolean,
 ): string {
-  if (variant === "overlay") return ROOT_OVERLAY_CLASSES;
-  if (collapsed) return cn(ROOT_RAIL_COLLAPSED_CLASSES, ROOT_RAIL_TRANSITION);
+  if (variant === "overlay") {
+    return ROOT_OVERLAY_CLASSES;
+  }
+  if (collapsed) {
+    return cn(ROOT_RAIL_COLLAPSED_CLASSES, ROOT_RAIL_TRANSITION);
+  }
   const rail = resizable
     ? ROOT_RAIL_RESIZABLE_CLASSES
     : ROOT_RAIL_EXPANDED_CLASSES;
@@ -318,7 +321,9 @@ function SideMenuRoot({
     setContentCollapsed(false);
   }
   useEffect(() => {
-    if (!effectiveCollapsed) return;
+    if (!effectiveCollapsed) {
+      return;
+    }
     const id = setTimeout(() => setContentCollapsed(true), RAIL_TRANSITION_MS);
     return () => clearTimeout(id);
   }, [effectiveCollapsed]);
@@ -339,7 +344,8 @@ function SideMenuRoot({
     onSizeCommit: onWidthChange,
   });
 
-  const geometryVars = variant === "overlay" ? OVERLAY_VARS : RAIL_GEOMETRY_VARS;
+  const geometryVars =
+    variant === "overlay" ? OVERLAY_VARS : RAIL_GEOMETRY_VARS;
   const widthStyle =
     resizable && !effectiveCollapsed && width != null
       ? { ...geometryVars, ...style, width }
@@ -352,8 +358,11 @@ function SideMenuRoot({
       <nav
         ref={(node) => {
           navRef.current = node;
-          if (typeof ref === "function") ref(node);
-          else if (ref) ref.current = node;
+          if (typeof ref === "function") {
+            ref(node);
+          } else if (ref) {
+            ref.current = node;
+          }
         }}
         data-slot="side-menu"
         role="navigation"
@@ -484,7 +493,8 @@ interface SideMenuSectionHeaderSlotProps extends Omit<
 }
 
 export type SideMenuSectionHeaderProps =
-  SideMenuSectionHeaderOwnProps | SideMenuSectionHeaderSlotProps;
+  | SideMenuSectionHeaderOwnProps
+  | SideMenuSectionHeaderSlotProps;
 
 /**
  * The title row of a group in the rail. It is a top-level row like a pill or a
@@ -596,7 +606,9 @@ function SideMenuSubList({
   ...rest
 }: ComponentProps<"ul"> & { ref?: Ref<HTMLUListElement> }) {
   const ctx = useSideMenuContext();
-  if (isCollapsedRail(ctx)) return null;
+  if (isCollapsedRail(ctx)) {
+    return null;
+  }
   return (
     <ul
       ref={ref}
@@ -719,7 +731,9 @@ function ItemLeadingIcon({
       <span aria-hidden className="inline-block h-[14px] w-[14px] shrink-0" />
     );
   }
-  if (!icon) return null;
+  if (!icon) {
+    return null;
+  }
   // String icons (emoji) render in a fixed-size span sized to match the 14px
   // Lucide icons so layout stays uniform whether the row is a Lucide-backed
   // nav entry or an app row pulling an emoji from its manifest.

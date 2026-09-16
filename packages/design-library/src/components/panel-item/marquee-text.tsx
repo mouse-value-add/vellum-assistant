@@ -49,7 +49,9 @@ function MarqueeText({ children, className }: MarqueeTextProps) {
   useEffect(() => {
     const container = containerRef.current;
     const inner = innerRef.current;
-    if (!container || !inner) return;
+    if (!container || !inner) {
+      return;
+    }
 
     const measure = () => {
       const overflow = inner.scrollWidth - container.clientWidth;

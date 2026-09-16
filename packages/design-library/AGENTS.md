@@ -138,6 +138,7 @@ When reviewing PRs that add or modify design library components, verify:
 ## Commands
 
 ```bash
+cd packages/design-library && bun run lint        # ESLint
 cd packages/design-library && bun run typecheck   # Type-check
 ```
 

@@ -28,7 +28,6 @@ export function reportUnmergeableSlotChild(
   if (!isValidElement(child) || child.type !== Fragment) {
     return;
   }
-  // eslint-disable-next-line no-console
   console.error(
     `${componentName}: an \`asChild\` child must be a single element that ` +
       `renders a DOM node. A fragment takes neither the merged props nor the ` +

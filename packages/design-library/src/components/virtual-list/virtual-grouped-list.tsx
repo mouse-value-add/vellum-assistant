@@ -83,7 +83,9 @@ export function isGroupCollapsed<T>(
   group: VirtualListGroup<T>,
   overrides: Record<string, boolean>,
 ): boolean {
-  if (!group.collapsible) return false;
+  if (!group.collapsible) {
+    return false;
+  }
   return overrides[group.key] ?? Boolean(group.defaultCollapsed);
 }
 
@@ -290,7 +292,9 @@ export function VirtualGroupedList<T>({
     (groupKey: string) => {
       setOverrides((prev) => {
         const group = groups.find((g) => g.key === groupKey);
-        if (!group?.collapsible) return prev;
+        if (!group?.collapsible) {
+          return prev;
+        }
         return { ...prev, [groupKey]: !isGroupCollapsed(group, prev) };
       });
     },
@@ -318,8 +322,14 @@ export function VirtualGroupedList<T>({
 
   const renderItem = useCallback(
     (index: number) => {
-      if (index < 0 || index >= model.flatItems.length) return null;
-      return itemContent(index, model.flatItems[index], model.flatGroupKeys[index]);
+      if (index < 0 || index >= model.flatItems.length) {
+        return null;
+      }
+      return itemContent(
+        index,
+        model.flatItems[index],
+        model.flatGroupKeys[index],
+      );
     },
     [model, itemContent],
   );
@@ -327,19 +337,29 @@ export function VirtualGroupedList<T>({
   const renderGroup = useCallback(
     (groupIndex: number) => {
       const group = groups[groupIndex];
-      if (!group) return null;
+      if (!group) {
+        return null;
+      }
       const collapsed = isGroupCollapsed(group, overrides);
       const toggle = () => toggleGroup(group.key);
-      if (groupHeader) return groupHeader(group, collapsed, toggle);
+      if (groupHeader) {
+        return groupHeader(group, collapsed, toggle);
+      }
       return (
-        <DefaultGroupHeader group={group} collapsed={collapsed} toggle={toggle} />
+        <DefaultGroupHeader
+          group={group}
+          collapsed={collapsed}
+          toggle={toggle}
+        />
       );
     },
     [groups, overrides, groupHeader, toggleGroup],
   );
 
   const resolvedComputeItemKey = useMemo(() => {
-    if (!computeItemKey) return undefined;
+    if (!computeItemKey) {
+      return undefined;
+    }
     // `GroupedVirtuoso` calls computeItemKey with the combined row index (group
     // headers counted) and also calls it for header rows, unlike itemContent's
     // item-only index — `resolveGroupedItemKey` maps that back to the right item
@@ -354,7 +374,9 @@ export function VirtualGroupedList<T>({
   // only reads this on mount, so later selection changes are the caller's job
   // (via the handle) and never cause a surprise scroll.
   const initialTopMostItemIndex = useMemo(() => {
-    if (selectedItemKey === undefined || !computeItemKey) return undefined;
+    if (selectedItemKey === undefined || !computeItemKey) {
+      return undefined;
+    }
     const index = model.flatItems.findIndex(
       (item, i) => computeItemKey(i, item) === selectedItemKey,
     );

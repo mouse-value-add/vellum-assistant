@@ -8,6 +8,7 @@ on:
       - 'bun.lock'
       - 'patches/**'
       - 'packages/design-library/**'
+      - 'clients/web/eslint-rules/no-em-dash.mjs'
       - '.github/workflows/pr-design-library.yaml'
 
 concurrency:
@@ -36,6 +37,9 @@ jobs:
 
       - name: Install Playwright browsers
         run: bunx playwright install chromium --with-deps
+
+      - name: Lint
+        run: bun run lint
 
       - name: Type check
         run: bun run typecheck

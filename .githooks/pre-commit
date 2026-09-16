@@ -1083,11 +1083,11 @@ else
     echo -e "${YELLOW}⚠️  bun not found — skipping generic-examples check${NC}"
 fi
 
-# --- Prettier & Lint checks for assistant, cli, gateway, and web ---
+# --- Prettier & Lint checks for assistant, cli, gateway, docs, web, and design library ---
 # When files in these directories are staged, run prettier --check and eslint
 # on the staged files to catch formatting and lint issues before commit.
 DIRS_WITH_PRETTIER=("assistant" "cli" "gateway")
-DIRS_TO_CHECK=("${DIRS_WITH_PRETTIER[@]}" "clients/docs" "clients/web")
+DIRS_TO_CHECK=("${DIRS_WITH_PRETTIER[@]}" "clients/docs" "clients/web" "packages/design-library")
 
 # Detect bun location (reused by message contract check below)
 BUN="${BUN:-$(command -v bun 2>/dev/null || echo "$HOME/.bun/bin/bun")}"

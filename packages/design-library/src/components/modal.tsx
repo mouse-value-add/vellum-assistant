@@ -1,6 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, type LucideIcon } from "lucide-react";
-import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 import { cn } from "../utils/cn";
 import { usePortalContainer } from "../utils/portal-container";
@@ -44,10 +49,7 @@ const SIZE_CLASSES: Record<ModalSize, string> = {
   xl: "max-w-[1100px]",
 };
 
-function Root({
-  onOpenChange,
-  ...props
-}: ComponentProps<typeof Dialog.Root>) {
+function Root({ onOpenChange, ...props }: ComponentProps<typeof Dialog.Root>) {
   return (
     <ModalContext value={{ onOpenChange }}>
       <Dialog.Root onOpenChange={onOpenChange} {...props} />
@@ -93,8 +95,12 @@ function Content({
           overlayClassName,
         )}
         onClick={(e) => {
-          if (!dismissOnOverlayClick) return;
-          if (e.target === e.currentTarget) onOpenChange?.(false);
+          if (!dismissOnOverlayClick) {
+            return;
+          }
+          if (e.target === e.currentTarget) {
+            onOpenChange?.(false);
+          }
         }}
       >
         <Dialog.Content
@@ -129,12 +135,7 @@ function Content({
 
 type ModalTitleProps = ComponentProps<typeof Dialog.Title>;
 
-function Title({
-  className,
-  children,
-  ref,
-  ...props
-}: ModalTitleProps) {
+function Title({ className, children, ref, ...props }: ModalTitleProps) {
   return (
     <Dialog.Title
       ref={ref}
@@ -221,11 +222,7 @@ function Header({
   );
 }
 
-function Body({
-  className,
-  children,
-  ...props
-}: ComponentProps<"div">) {
+function Body({ className, children, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="modal-body"
@@ -240,11 +237,7 @@ function Body({
   );
 }
 
-function Footer({
-  className,
-  children,
-  ...props
-}: ComponentProps<"div">) {
+function Footer({ className, children, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="modal-footer"

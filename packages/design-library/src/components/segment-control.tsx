@@ -40,9 +40,15 @@ export function resolveSegmentSelection<T extends string>(
   clickedValue: T,
 ): T | null {
   const item = items.find((candidate) => candidate.value === clickedValue);
-  if (!item) return null;
-  if (item.disabled) return null;
-  if (item.value === currentValue) return null;
+  if (!item) {
+    return null;
+  }
+  if (item.disabled) {
+    return null;
+  }
+  if (item.value === currentValue) {
+    return null;
+  }
   return item.value;
 }
 
@@ -108,15 +114,16 @@ export function SegmentControl<T extends string>({
 
       event.preventDefault();
       const nextItem = items[nextIndex];
-      if (!nextItem || nextItem.disabled) return;
+      if (!nextItem || nextItem.disabled) {
+        return;
+      }
 
       if (nextItem.value !== value) {
         onChange(nextItem.value);
       }
 
-      const buttons = groupRef.current?.querySelectorAll<HTMLButtonElement>(
-        '[role="radio"]',
-      );
+      const buttons =
+        groupRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
       buttons?.[nextIndex]?.focus();
     },
     [items, value, onChange],

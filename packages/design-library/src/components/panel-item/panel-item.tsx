@@ -2,7 +2,6 @@ import { Slot } from "@radix-ui/react-slot";
 import type { LucideIcon } from "lucide-react";
 import {
   type ComponentProps,
-  type CSSProperties,
   type HTMLAttributes,
   type KeyboardEvent,
   type MouseEvent,
@@ -103,7 +102,8 @@ interface PanelItemFrameProps {
 
 /** PanelItem renders the row's contents from these props. */
 interface PanelItemContentProps
-  extends PanelItemFrameProps,
+  extends
+    PanelItemFrameProps,
     Omit<ComponentProps<"div">, "children" | "className" | "aria-label"> {
   asChild?: false;
   /** Ignored: this variant builds its own children from the props below. */
@@ -186,7 +186,8 @@ interface PanelItemContentProps
  * silently dropped at runtime.
  */
 interface PanelItemSlotProps
-  extends PanelItemFrameProps,
+  extends
+    PanelItemFrameProps,
     Omit<HTMLAttributes<HTMLElement>, "children" | "className" | "aria-label"> {
   asChild: true;
   /**
@@ -318,7 +319,6 @@ const ACTIVE_DEFAULT_CLASSES = [
 const ACTIVE_BRANDED_CLASSES = [
   "aria-[current=page]:bg-[color-mix(in_oklab,var(--primary-base)_10%,transparent)]",
   "aria-[current=page]:text-[var(--primary-base)]",
-  // eslint-disable-next-line no-restricted-syntax
   "aria-[current=page]:font-medium",
 ].join(" ");
 
@@ -393,13 +393,11 @@ const TRAILING_ACTION_CLASSES = "flex items-center shrink-0";
 /** The row shell: geometry, active treatment, and whether it answers a pointer. */
 function rowClasses({
   shape,
-  active,
   activeVariant,
   interactive,
   className,
 }: {
   shape: "row" | "pill";
-  active: boolean;
   activeVariant: "default" | "branded";
   interactive: boolean;
   className: string | undefined;
@@ -447,7 +445,6 @@ function PanelItemSlotRow({
       ref={ref}
       className={rowClasses({
         shape,
-        active,
         activeVariant,
         interactive: true,
         className,
@@ -573,7 +570,6 @@ function PanelItemContentRow({
   const interactive = onSelect != null || trigger;
   const classes = rowClasses({
     shape,
-    active,
     activeVariant,
     interactive,
     className,

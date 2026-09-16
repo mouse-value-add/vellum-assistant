@@ -43,7 +43,9 @@ export function handleToggleClick(
   disabled: boolean,
   onChange: (next: boolean) => void,
 ): void {
-  if (disabled) return;
+  if (disabled) {
+    return;
+  }
   onChange(!checked);
 }
 
@@ -119,10 +121,7 @@ export function Toggle({
   return (
     <div
       data-slot="toggle"
-      className={cn(
-        "flex items-center gap-2.5",
-        className,
-      )}
+      className={cn("flex items-center gap-2.5", className)}
     >
       {toggleButton}
       <div className="flex min-w-0 flex-col gap-0.5">

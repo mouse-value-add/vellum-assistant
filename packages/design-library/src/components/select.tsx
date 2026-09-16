@@ -207,7 +207,6 @@ export function Select<T extends string>({
       return true;
     }
     if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
       console.error(
         `Select: ignoring the option labelled "${option.label}" because an ` +
           `empty-string value is reserved. Use the \`placeholder\` prop for a ` +
@@ -263,7 +262,6 @@ export function Select<T extends string>({
           // unreachable in practice. Staying silent rather than forwarding an
           // unvalidated string keeps the callback's contract honest.
           if (process.env.NODE_ENV !== "production") {
-            // eslint-disable-next-line no-console
             console.error(
               `Select: ignoring a change to "${next}", which matches no option.`,
             );
@@ -319,7 +317,9 @@ export function Select<T extends string>({
                   // neighbours and nothing shifts when the ring appears.
                   "border-0 outline outline-1 -outline-offset-1 outline-transparent hover:outline-[var(--field-border)] focus-visible:outline-[var(--field-border)] data-[state=open]:outline-[var(--border-active)]"
                 : "border-[var(--field-border)] data-[state=open]:border-[var(--border-active)]",
-            ghost ? GHOST_TRIGGER_SIZE_CLASSES[size] : TRIGGER_SIZE_CLASSES[size],
+            ghost
+              ? GHOST_TRIGGER_SIZE_CLASSES[size]
+              : TRIGGER_SIZE_CLASSES[size],
           )}
           style={{
             color: selectedOption

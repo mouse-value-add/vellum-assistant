@@ -160,7 +160,9 @@ function CodeBlockWrapper({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
     };
   }, []);
 
@@ -185,7 +187,9 @@ function CodeBlockWrapper({ children }: { children: ReactNode }) {
       .writeText(text)
       .then(() => {
         setShowCopied(true);
-        if (timerRef.current) clearTimeout(timerRef.current);
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
         timerRef.current = setTimeout(() => {
           setShowCopied(false);
           timerRef.current = null;
@@ -271,8 +275,12 @@ const VS16 = "️"; // variation selector forcing emoji presentation
 const VS15 = "︎"; // variation selector forcing text presentation
 
 function graphemeRendersAsEmoji(grapheme: string): boolean {
-  if (grapheme.includes(VS16)) return true;
-  if (grapheme.includes(VS15)) return false;
+  if (grapheme.includes(VS16)) {
+    return true;
+  }
+  if (grapheme.includes(VS15)) {
+    return false;
+  }
   return EMOJI_PRESENTATION.test(grapheme);
 }
 
@@ -292,15 +300,21 @@ const graphemeSegmenter =
 function splitEmojiRuns(text: string): ReactNode {
   // Bail fast when there is no emoji-ish codepoint. The VS16 check catches
   // sequences whose base char isn't Extended_Pictographic (e.g. keycaps `1️⃣`).
-  if (!PICTOGRAPHIC.test(text) && !text.includes(VS16)) return text;
-  if (!graphemeSegmenter) return text;
+  if (!PICTOGRAPHIC.test(text) && !text.includes(VS16)) {
+    return text;
+  }
+  if (!graphemeSegmenter) {
+    return text;
+  }
 
   const runs: ReactNode[] = [];
   let buffer = "";
   let bufferIsEmoji = false;
   let key = 0;
   const flush = () => {
-    if (!buffer) return;
+    if (!buffer) {
+      return;
+    }
     runs.push(
       bufferIsEmoji ? (
         <span key={key++} style={{ fontStyle: "normal" }}>
@@ -314,7 +328,9 @@ function splitEmojiRuns(text: string): ReactNode {
   };
   for (const { segment } of graphemeSegmenter.segment(text)) {
     const isEmoji = graphemeRendersAsEmoji(segment);
-    if (buffer && isEmoji !== bufferIsEmoji) flush();
+    if (buffer && isEmoji !== bufferIsEmoji) {
+      flush();
+    }
     bufferIsEmoji = isEmoji;
     buffer += segment;
   }
@@ -326,7 +342,9 @@ function splitEmojiRuns(text: string): ReactNode {
 
 /** Apply emoji-upright wrapping to `<em>` children (a string, or mixed array). */
 function renderUprightEmoji(children: ReactNode): ReactNode {
-  if (typeof children === "string") return splitEmojiRuns(children);
+  if (typeof children === "string") {
+    return splitEmojiRuns(children);
+  }
   return Children.map(children, (child) =>
     typeof child === "string" ? splitEmojiRuns(child) : child,
   );
@@ -607,7 +625,9 @@ function rewriteTextSlices(
   let result = "";
   let cursor = 0;
   for (const [start, end] of ranges) {
-    if (start < cursor) continue; // defensive: never reprocess overlapping spans
+    if (start < cursor) {
+      continue;
+    } // defensive: never reprocess overlapping spans
     result += content.slice(cursor, start); // verbatim gap (code, links, …)
     result += rewrite(content.slice(start, end), start);
     cursor = end;
@@ -618,14 +638,20 @@ function rewriteTextSlices(
 
 function escapeCurrencyDollars(content: string): string {
   // Fast path: nothing that looks like `$<digit>` means no work to do.
-  if (!/\$\d/.test(content)) return content;
+  if (!/\$\d/.test(content)) {
+    return content;
+  }
   const ranges = collectTextRanges(content);
-  if (ranges.length === 0) return content;
+  if (ranges.length === 0) {
+    return content;
+  }
   return rewriteTextSlices(content, ranges, (slice, start) =>
     slice.replace(CURRENCY_AMOUNT, (match, amount: string, offset: number) => {
       const prev =
         offset > 0 ? slice[offset - 1] : start > 0 ? content[start - 1] : "";
-      if (prev === "$" || prev === "\\") return match;
+      if (prev === "$" || prev === "\\") {
+        return match;
+      }
       return `\\$${amount}`;
     }),
   );
@@ -645,9 +671,13 @@ function escapeCurrencyDollars(content: string): string {
  * safe to harden.
  */
 function hardBreakNewlines(content: string): string {
-  if (!content.includes("\n")) return content;
+  if (!content.includes("\n")) {
+    return content;
+  }
   const ranges = collectTextRanges(content);
-  if (ranges.length === 0) return content;
+  if (ranges.length === 0) {
+    return content;
+  }
   return rewriteTextSlices(content, ranges, (slice) =>
     slice.replace(/\n/g, "  \n"),
   );
@@ -959,7 +989,9 @@ function remarkPreserveOrderedListNumbers() {
             const marker = ORDERED_MARKER.exec(
               source.slice(offset, offset + 16),
             );
-            if (marker) literal = Number(marker[1]);
+            if (marker) {
+              literal = Number(marker[1]);
+            }
           }
           if (literal !== counter) {
             item.data ??= {};

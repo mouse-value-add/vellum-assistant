@@ -124,7 +124,9 @@ export function resolveFollowOutput(
 export function resolveInitialTopMostItemIndex(
   initialTopMostItemIndex: VirtualListProps<unknown>["initialTopMostItemIndex"],
 ): IndexLocationWithAlign | number | undefined {
-  if (initialTopMostItemIndex === undefined) return undefined;
+  if (initialTopMostItemIndex === undefined) {
+    return undefined;
+  }
   if (initialTopMostItemIndex === "LAST") {
     return { index: "LAST", align: "end" };
   }

@@ -49,10 +49,14 @@ const COARSE_STEP_MULTIPLIER = 4;
  * in strict-privacy contexts, on quota errors, and during SSR.
  */
 function readStoredSize(storageKey: string | undefined): number | null {
-  if (!storageKey || typeof window === "undefined") return null;
+  if (!storageKey || typeof window === "undefined") {
+    return null;
+  }
   try {
     const stored = localStorage.getItem(storageKey);
-    if (stored == null) return null;
+    if (stored == null) {
+      return null;
+    }
     const parsed = Number(stored);
     return Number.isFinite(parsed) ? parsed : null;
   } catch {
@@ -76,7 +80,9 @@ function storedOrDefaultSize(
 }
 
 function writeStoredSize(storageKey: string | undefined, size: number): void {
-  if (!storageKey) return;
+  if (!storageKey) {
+    return;
+  }
   try {
     localStorage.setItem(storageKey, String(size));
   } catch {
@@ -167,7 +173,9 @@ export function migrateLegacySize({
   reserveForRest: number;
 }): number | null {
   const converted = Math.round(convert(stored, containerSize));
-  if (!Number.isFinite(converted)) return null;
+  if (!Number.isFinite(converted)) {
+    return null;
+  }
   return clampSize(
     converted,
     minSize,
@@ -340,7 +348,9 @@ export function useResizablePane({
   // the handle misreport how far it can still travel.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
     setContainerSize(container.offsetWidth);
     const observer = new ResizeObserver(() => {
       setContainerSize(container.offsetWidth);
@@ -388,12 +398,20 @@ export function useResizablePane({
   const legacyKey = legacySize?.key;
   useIsomorphicLayoutEffect(() => {
     const legacy = legacySizeRef.current;
-    if (!legacy || !storageKey) return;
-    if (readStoredSize(storageKey) != null) return;
+    if (!legacy || !storageKey) {
+      return;
+    }
+    if (readStoredSize(storageKey) != null) {
+      return;
+    }
     const stored = readStoredSize(legacy.key);
-    if (stored == null) return;
+    if (stored == null) {
+      return;
+    }
     const containerWidth = containerRef.current?.offsetWidth || containerSize;
-    if (containerWidth <= 0) return;
+    if (containerWidth <= 0) {
+      return;
+    }
     // Bounds come from the width just measured rather than from `clamp`, whose
     // `containerSize` is still 0 on the synchronous first pass.
     const converted = migrateLegacySize({
@@ -404,7 +422,9 @@ export function useResizablePane({
       maxSize,
       reserveForRest,
     });
-    if (converted == null) return;
+    if (converted == null) {
+      return;
+    }
     setSize(converted);
     writeStoredSize(storageKey, converted);
     try {
@@ -419,7 +439,9 @@ export function useResizablePane({
   // of the state updater, which React is free to call more than once.
   useEffect(() => {
     const clamped = clamp(size);
-    if (clamped === size) return;
+    if (clamped === size) {
+      return;
+    }
     setSize(clamped);
     if (paneRef?.current) {
       paneRef.current.style.width = `${clamped}px`;
@@ -455,7 +477,9 @@ export function useResizablePane({
   // flicker back to a text caret whenever the pointer crosses content while
   // the handle still has capture.
   const setBodyDragStyles = useCallback((active: boolean) => {
-    if (typeof document === "undefined") return;
+    if (typeof document === "undefined") {
+      return;
+    }
     document.body.style.cursor = active ? "col-resize" : "";
     document.body.style.userSelect = active ? "none" : "";
   }, []);
@@ -478,7 +502,9 @@ export function useResizablePane({
   const onPointerMove = useCallback(
     (e: PointerEvent<HTMLElement>) => {
       const drag = dragRef.current;
-      if (!drag) return;
+      if (!drag) {
+        return;
+      }
       applyLive(
         clamp(drag.startSize + paneDelta(e.clientX - drag.startX, side)),
       );
@@ -489,7 +515,9 @@ export function useResizablePane({
   const endDrag = useCallback(
     (e: PointerEvent<HTMLElement>) => {
       const drag = dragRef.current;
-      if (!drag) return;
+      if (!drag) {
+        return;
+      }
       e.currentTarget.releasePointerCapture(e.pointerId);
       dragRef.current = null;
       setIsResizing(false);
@@ -508,7 +536,9 @@ export function useResizablePane({
         minSize,
         maxSize: boundedMax,
       });
-      if (next == null) return;
+      if (next == null) {
+        return;
+      }
       // Claim the key before the browser scrolls the pane behind the handle.
       e.preventDefault();
       // No `applyLive` here: a key press has no per-frame budget problem, so

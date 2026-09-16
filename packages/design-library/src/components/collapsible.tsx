@@ -2,7 +2,6 @@ import * as Accordion from "@radix-ui/react-accordion";
 import {
   type ComponentPropsWithoutRef,
   type ElementRef,
-  type ReactNode,
   type Ref,
 } from "react";
 
