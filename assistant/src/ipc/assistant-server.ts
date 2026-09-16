@@ -409,7 +409,11 @@ export class AssistantIpcServer {
     if (req.cancelOnDisconnect === true) {
       socket.once("close", onDisconnect);
     }
-    const removeDisconnectListener = () => socket.off("close", onDisconnect);
+    const removeDisconnectListener = () => {
+      if (req.cancelOnDisconnect === true) {
+        socket.off("close", onDisconnect);
+      }
+    };
 
     try {
       const handlerArgs = {
