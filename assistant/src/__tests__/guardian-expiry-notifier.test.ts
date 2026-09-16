@@ -98,6 +98,7 @@ function makeRequest(
     sourceType: "channel",
     sourceChannel: "telegram",
     sourceConversationId: "conv-1",
+    sourceTurnId: null,
     requesterExternalUserId: "req-user",
     requesterChatId: "req-chat",
     requestTrigger: null,

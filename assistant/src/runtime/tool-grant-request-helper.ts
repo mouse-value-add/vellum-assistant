@@ -52,6 +52,11 @@ export interface ToolGrantRequestParams {
   sourceMessageId?: string;
   /** Channel-native thread id of that message, when threaded. */
   sourceThreadId?: string;
+  /**
+   * The turn (its per-turn request id) whose tool call is escalating, so the
+   * row records the unit of work the guardian is being asked about.
+   */
+  sourceTurnId?: string;
 }
 
 export type ToolGrantRequestResult =
@@ -85,6 +90,7 @@ export async function createOrReuseToolGrantRequest(
     questionText,
     sourceMessageId,
     sourceThreadId,
+    sourceTurnId,
   } = params;
 
   if (!requesterExternalUserId) {
@@ -162,6 +168,7 @@ export async function createOrReuseToolGrantRequest(
     kind: "tool_grant_request",
     sourceChannel,
     sourceConversationId: conversationId,
+    sourceTurnId,
     requesterExternalUserId,
     requesterChatId: requesterChatId ?? undefined,
     guardianExternalUserId: binding.guardianExternalUserId,

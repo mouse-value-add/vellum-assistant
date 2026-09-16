@@ -210,6 +210,7 @@ describe("guardian_requests_create", () => {
       id: "access-req-self-telegram-alice-123",
       sourceChannel: "telegram",
       sourceConversationId: "conv-1",
+      sourceTurnId: "turn-1",
       requesterExternalUserId: "tg-user-1",
       questionText: "Can Alice reach you?",
     });
@@ -218,10 +219,12 @@ describe("guardian_requests_create", () => {
     expect(created.status).toBe("pending");
     expect(created.requestCode).toMatch(/^[0-9A-F]{6}$/);
     expect(created.sourceType).toBe("channel");
+    expect(created.sourceTurnId).toBe("turn-1");
 
     const row = getRequestRow(created.id);
     expect(row?.kind).toBe("access_request");
     expect(row?.sourceConversationId).toBe("conv-1");
+    expect(row?.sourceTurnId).toBe("turn-1");
     expect(row?.guardianPrincipalId).toBe("principal-1");
     expect(row?.requestCode).toBe(created.requestCode);
   });

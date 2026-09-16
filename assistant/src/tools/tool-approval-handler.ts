@@ -1067,6 +1067,7 @@ export class ToolApprovalHandler {
           assistantId: context.assistantId,
           sourceChannel: context.executionChannel as ChannelId,
           conversationId: context.conversationId,
+          sourceTurnId: context.requestId,
           requesterExternalUserId: context.requesterExternalUserId,
           requesterChatId: context.requesterChatId,
           sourceMessageId: context.sourceMessageId,

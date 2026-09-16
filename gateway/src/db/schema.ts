@@ -556,6 +556,9 @@ export const guardianRequests = sqliteTable(
     kind: text("kind").notNull(),
     sourceChannel: text("source_channel"),
     sourceConversationId: text("source_conversation_id"),
+    // The daemon turn whose tool call raised the request; null before the
+    // column existed and for kinds no turn raises.
+    sourceTurnId: text("source_turn_id"),
     requesterExternalUserId: text("requester_external_user_id"),
     requesterChatId: text("requester_chat_id"),
     guardianExternalUserId: text("guardian_external_user_id"),

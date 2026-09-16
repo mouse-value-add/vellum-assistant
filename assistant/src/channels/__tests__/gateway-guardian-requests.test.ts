@@ -72,6 +72,7 @@ function makeWireRequest(
     sourceType: "channel",
     sourceChannel: "telegram",
     sourceConversationId: "conv-1",
+    sourceTurnId: null,
     requesterExternalUserId: "user-123",
     requesterChatId: "chat-456",
     guardianExternalUserId: "guardian-789",

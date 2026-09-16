@@ -36,6 +36,7 @@ function makeRequest(
     sourceType: "channel",
     sourceChannel: "telegram",
     sourceConversationId: "conv-1",
+    sourceTurnId: null,
     requesterExternalUserId: "tg-guardian",
     requesterChatId: "chat-1",
     guardianExternalUserId: "tg-guardian",

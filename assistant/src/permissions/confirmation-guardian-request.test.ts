@@ -24,6 +24,7 @@ mock.module("../daemon/conversation-registry.js", () => ({
   findConversation: () =>
     asConversation({
       assistantId: "self",
+      currentRequestId: "turn-1",
       trustContext: {
         trustClass: "trusted_contact",
         sourceChannel: "telegram",
@@ -95,6 +96,24 @@ describe("createGuardianRequestForConfirmation", () => {
     });
     expect(expireCalls).toHaveLength(0);
     expect(bridgeCalls).toHaveLength(1);
+  });
+
+  test("a turn-emitted confirmation records the conversation's live turn", async () => {
+    await createGuardianRequestForConfirmation(MSG, "conv-1", {
+      preferTurnSnapshot: true,
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0].sourceTurnId).toBe("turn-1");
+  });
+
+  test("a route-generated confirmation records no turn", async () => {
+    // ACP spawn/steer confirmations are not raised by the running turn, so
+    // stamping whatever turn is in flight would misattribute them.
+    await createGuardianRequestForConfirmation(MSG, "conv-1");
+
+    expect(createCalls).toHaveLength(1);
+    expect(createCalls[0].sourceTurnId).toBeUndefined();
   });
 
   test("takes the row deadline from the approval-window resolver", async () => {

@@ -34,6 +34,7 @@ export interface SimGuardianRequest {
   sourceType: "voice" | "desktop" | "channel";
   sourceChannel: string | null;
   sourceConversationId: string | null;
+  sourceTurnId: string | null;
   requesterExternalUserId: string | null;
   requesterChatId: string | null;
   guardianExternalUserId: string | null;
@@ -140,6 +141,7 @@ export function createGuardianGatewaySim() {
         params.sourceType ??
         deriveGuardianRequestSourceType(params.sourceChannel ?? null),
       sourceConversationId: params.sourceConversationId ?? null,
+      sourceTurnId: params.sourceTurnId ?? null,
       requesterExternalUserId: params.requesterExternalUserId ?? null,
       requesterChatId: params.requesterChatId ?? null,
       guardianExternalUserId: params.guardianExternalUserId ?? null,

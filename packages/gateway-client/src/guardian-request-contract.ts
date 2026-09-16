@@ -113,6 +113,13 @@ export const GuardianRequestSchema = z.object({
   sourceType: GuardianRequestSourceTypeSchema,
   sourceChannel: z.string().nullable(),
   sourceConversationId: z.string().nullable(),
+  /**
+   * The daemon turn (its per-turn request id) whose tool call raised the
+   * request. Null for rows created before the column existed and for kinds
+   * that no turn raises. Lets a decision be tied to the unit of work it was
+   * asked about rather than only to the conversation.
+   */
+  sourceTurnId: z.string().nullable(),
   requesterExternalUserId: z.string().nullable(),
   requesterChatId: z.string().nullable(),
   guardianExternalUserId: z.string().nullable(),
@@ -269,6 +276,7 @@ export const CreateGuardianRequestIpcParamsSchema = z.object({
   kind: GuardianRequestKindSchema,
   sourceChannel: z.string().optional(),
   sourceConversationId: z.string().optional(),
+  sourceTurnId: z.string().optional(),
   requesterExternalUserId: z.string().optional(),
   requesterChatId: z.string().optional(),
   guardianExternalUserId: z.string().optional(),

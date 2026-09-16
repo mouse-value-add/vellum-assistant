@@ -90,6 +90,12 @@ export async function createGuardianRequestForConfirmation(
       kind: "tool_approval",
       sourceChannel,
       sourceConversationId: conversationId,
+      // Only a turn-emitted confirmation belongs to the conversation's live
+      // turn; a route-generated one (ACP spawn/steer) does not, and stamping
+      // whatever turn happens to be running would misattribute it.
+      sourceTurnId: opts?.preferTurnSnapshot
+        ? conversation?.currentRequestId
+        : undefined,
       requesterExternalUserId: trustContext?.requesterExternalUserId,
       requesterChatId: trustContext?.requesterChatId,
       guardianExternalUserId: trustContext?.guardianExternalUserId,

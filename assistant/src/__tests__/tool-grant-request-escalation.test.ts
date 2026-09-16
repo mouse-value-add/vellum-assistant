@@ -251,6 +251,26 @@ describe("ToolApprovalHandler / grant-miss escalation", () => {
     expect(result.result.content).not.toMatch(/not the guardian/i);
   });
 
+  test("the escalation row records the turn whose call escalated", async () => {
+    const context = makeContext({
+      trustClass: "trusted_contact",
+      requestId: "turn-abc",
+    });
+    await handler.checkPreExecutionGates(
+      "bash",
+      { command: "ls -la" },
+      context,
+      "high",
+      Date.now(),
+    );
+
+    const requests = await sim.module.listGuardianRequestsOrEmpty({
+      kind: "tool_grant_request",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].sourceTurnId).toBe("turn-abc");
+  });
+
   test("unverified_channel does NOT create escalation request", async () => {
     const toolName = "bash";
     const input = { command: "ls" };

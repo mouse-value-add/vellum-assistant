@@ -122,6 +122,7 @@ function rowToRequest(
     kind: row.kind,
     sourceChannel: row.sourceChannel,
     sourceConversationId: row.sourceConversationId,
+    sourceTurnId: row.sourceTurnId,
     requesterExternalUserId: row.requesterExternalUserId,
     requesterChatId: row.requesterChatId,
     guardianExternalUserId: row.guardianExternalUserId,
@@ -179,6 +180,7 @@ export interface CreateGuardianRequestParams {
   kind: string;
   sourceChannel?: string;
   sourceConversationId?: string;
+  sourceTurnId?: string;
   requesterExternalUserId?: string;
   requesterChatId?: string;
   guardianExternalUserId?: string;
@@ -234,6 +236,7 @@ export function createGuardianRequest(
     kind: params.kind,
     sourceChannel: params.sourceChannel ?? null,
     sourceConversationId: params.sourceConversationId ?? null,
+    sourceTurnId: params.sourceTurnId ?? null,
     requesterExternalUserId: params.requesterExternalUserId ?? null,
     requesterChatId: params.requesterChatId ?? null,
     guardianExternalUserId: params.guardianExternalUserId ?? null,

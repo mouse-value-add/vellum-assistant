@@ -77,6 +77,7 @@ describe("createGuardianRequest", () => {
       kind: "pending_question",
       sourceChannel: "phone",
       sourceConversationId: "conv-1",
+      sourceTurnId: "turn-1",
       requesterExternalUserId: "user-1",
       requesterChatId: "+15555550100",
       guardianExternalUserId: "guardian-1",
@@ -103,6 +104,7 @@ describe("createGuardianRequest", () => {
     const fetched = getGuardianRequest(req.id);
     expect(fetched).toEqual(req);
     expect(fetched?.sourceConversationId).toBe("conv-1");
+    expect(fetched?.sourceTurnId).toBe("turn-1");
     expect(fetched?.requestTrigger).toBe("admitted");
     expect(fetched?.commandPreview).toBe("rm -rf /tmp/test");
     expect(fetched?.expiresAt).toBe(expiresAt);
