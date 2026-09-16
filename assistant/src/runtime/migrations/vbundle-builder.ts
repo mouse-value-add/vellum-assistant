@@ -30,6 +30,7 @@ import { createGzip, gzipSync } from "node:zlib";
 import { sanitizeConfigForTransfer } from "../../config/sanitize-for-transfer.js";
 import { getLogger } from "../../util/logger.js";
 import type { VBundleOriginMode } from "./origin-mode.js";
+import { WORKSPACE_RUNTIME_STATE_DIRS } from "./vbundle-import-policy.js";
 import type {
   ManifestFileEntryType,
   ManifestType,
@@ -462,13 +463,47 @@ export function buildVBundle(options: BuildVBundleOptions): BuildVBundleResult {
 // Directory walker — recursively collects files for archive inclusion
 // ---------------------------------------------------------------------------
 
+/**
+ * Workspace subtrees a bundle never carries: regenerable caches
+ * (embedding models, the vector index) and per-process runtime state
+ * (daemon logs, resource-monitor samples). Restoring runtime state into a
+ * live assistant swaps files out from under its open handles (the logger
+ * keeps writing into the discarded pre-import copy) and describes a process
+ * that only ever existed on the source host.
+ */
+const WORKSPACE_SKIP_DIRS: readonly string[] = [
+  "embedding-models",
+  "data/qdrant",
+  "signals",
+  "deprecated",
+  ...WORKSPACE_RUNTIME_STATE_DIRS,
+];
+
+const WORKSPACE_SKIP_FILES: readonly string[] = [".backup.key"];
+
+/**
+ * Per-process files that must never be archived regardless of directory:
+ * SQLite auxiliary files (ephemeral and race-prone with the live
+ * connection; the WAL is checkpointed before the walk so the main `.db`
+ * holds every committed row) and pid files (a restored pid names a process
+ * on the source host, so the CLI would probe or kill the wrong daemon).
+ */
+function isEphemeralWorkspaceFile(basename: string): boolean {
+  return (
+    basename.endsWith(".db-wal") ||
+    basename.endsWith(".db-shm") ||
+    basename.endsWith(".db-journal") ||
+    basename.endsWith(".pid")
+  );
+}
+
 interface WalkDirectoryOptions {
   /** Include binary files (files containing null bytes). Default: false. */
   includeBinary?: boolean;
   /** Directory names to skip (matched against relative path from walk root). */
-  skipDirs?: string[];
+  skipDirs?: readonly string[];
   /** File names to skip (matched against the entry basename). */
-  skipFiles?: string[];
+  skipFiles?: readonly string[];
 }
 
 /**
@@ -616,14 +651,7 @@ export function walkDirectory(
           continue;
         }
 
-        // Skip SQLite auxiliary files — these are ephemeral and race-prone
-        // with the live DB connection. The WAL is checkpointed before the
-        // walk, so the main .db file has all committed rows.
-        if (
-          entry.name.endsWith(".db-wal") ||
-          entry.name.endsWith(".db-shm") ||
-          entry.name.endsWith(".db-journal")
-        ) {
+        if (isEphemeralWorkspaceFile(entry.name)) {
           continue;
         }
 
@@ -745,8 +773,8 @@ export function buildExportVBundle(
       "workspace",
       {
         includeBinary: true,
-        skipDirs: ["embedding-models", "data/qdrant", "signals", "deprecated"],
-        skipFiles: [".backup.key"],
+        skipDirs: WORKSPACE_SKIP_DIRS,
+        skipFiles: WORKSPACE_SKIP_FILES,
       },
     );
     files.push(...walkedFiles);
@@ -846,12 +874,7 @@ export function walkDirectoryForMetadata(
           continue;
         }
 
-        // Skip SQLite auxiliary files — these are ephemeral and race-prone
-        if (
-          entry.name.endsWith(".db-wal") ||
-          entry.name.endsWith(".db-shm") ||
-          entry.name.endsWith(".db-journal")
-        ) {
+        if (isEphemeralWorkspaceFile(entry.name)) {
           continue;
         }
 
@@ -1200,8 +1223,8 @@ export async function streamExportVBundle(
       droppedSymlinks,
     } = walkDirectoryForMetadata(workspaceDir, "workspace", {
       includeBinary: true,
-      skipDirs: ["embedding-models", "data/qdrant", "signals", "deprecated"],
-      skipFiles: [".backup.key"],
+      skipDirs: WORKSPACE_SKIP_DIRS,
+      skipFiles: WORKSPACE_SKIP_FILES,
     });
     allFileMetadata.push(...walkedFiles);
     symlinkEntries.push(...walkedSymlinks);

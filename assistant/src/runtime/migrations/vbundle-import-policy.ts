@@ -19,11 +19,41 @@ export const CONFIG_ARCHIVE_PATHS: ReadonlySet<string> = new Set([
 export const CREDENTIAL_METADATA_ARCHIVE_PATH =
   "workspace/data/credentials/metadata.json";
 
+/**
+ * Pid files the daemon and its workers write at the workspace root. The
+ * basenames match the path helpers in `util/platform.ts`; they are spelled
+ * here so this module stays free of filesystem imports.
+ */
+export const WORKSPACE_PID_FILES: readonly string[] = [
+  "vellum.pid",
+  "embed-worker.pid",
+  "memory-worker.pid",
+  "schedule-worker.pid",
+];
+
+/**
+ * Workspace subtrees holding per-process runtime state: daemon logs and
+ * resource-monitor samples, snapshots, heartbeat, and pid.
+ */
+export const WORKSPACE_RUNTIME_STATE_DIRS: readonly string[] = [
+  "data/logs",
+  "data/monitoring",
+];
+
+/**
+ * Live workspace paths an import never wipes. The regenerable caches and
+ * the database are carried over whenever the bundle omits them; runtime
+ * state (logs, monitor data, pid files) is always carried over because a
+ * bundle never legitimately carries it (see `isEphemeralArchivePath`), and
+ * the daemon holds open handles on it.
+ */
 export const WORKSPACE_PRESERVE_PATHS: readonly string[] = [
   "embedding-models",
   "deprecated",
   "data/db",
   "data/qdrant",
+  ...WORKSPACE_RUNTIME_STATE_DIRS,
+  ...WORKSPACE_PID_FILES,
 ];
 
 export function isWorkspaceNamespacedArchivePath(archivePath: string): boolean {
@@ -53,8 +83,35 @@ export const RETIRED_ARCHIVE_PATHS: ReadonlySet<string> = new Set([
   "workspace/UPDATES.md",
 ]);
 
+/**
+ * Archive paths that describe the exporting process rather than the
+ * assistant: pid files, daemon logs, and resource-monitor state under
+ * `workspace/`. Current exporters omit them; bundles written before that
+ * still carry them, and writing them into a live workspace swaps files out
+ * from under open handles (the logger keeps writing into the discarded
+ * pre-import copy) and points the CLI at pids from the source host.
+ */
+export function isEphemeralArchivePath(archivePath: string): boolean {
+  if (!isWorkspaceNamespacedArchivePath(archivePath)) {
+    return false;
+  }
+  const rel = archivePath.slice("workspace/".length);
+  return (
+    rel.endsWith(".pid") ||
+    WORKSPACE_RUNTIME_STATE_DIRS.some((dir) => rel.startsWith(dir + "/"))
+  );
+}
+
+/**
+ * Entries preflight and both importers silently skip: retired features and
+ * per-process runtime state. Neither is a conflict or a warning, and neither
+ * is ever written back to the workspace.
+ */
 export function isRetiredArchivePath(archivePath: string): boolean {
-  return RETIRED_ARCHIVE_PATHS.has(archivePath);
+  return (
+    RETIRED_ARCHIVE_PATHS.has(archivePath) ||
+    isEphemeralArchivePath(archivePath)
+  );
 }
 
 export function isConfigArchivePath(archivePath: string): boolean {

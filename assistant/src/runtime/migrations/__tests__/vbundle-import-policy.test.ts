@@ -14,8 +14,10 @@ import {
   evaluateRuntimeCompatibility,
   isConfigArchivePath,
   isCredentialMetadataArchivePath,
+  isEphemeralArchivePath,
   isLegacyPersonaArchivePath,
   isLocalDevRuntimeVersion,
+  isRetiredArchivePath,
   isWorkspaceNamespacedArchivePath,
   LEGACY_USER_MD_ARCHIVE_PATH,
   partitionWorkspacePreserveSkipDirs,
@@ -45,13 +47,26 @@ describe("CREDENTIAL_METADATA_ARCHIVE_PATH", () => {
 });
 
 describe("WORKSPACE_PRESERVE_PATHS", () => {
-  test("matches the literal 4-element ordered list", () => {
+  test("lists the regenerable caches, the database, and per-process runtime state", () => {
     expect(WORKSPACE_PRESERVE_PATHS).toEqual([
       "embedding-models",
       "deprecated",
       "data/db",
       "data/qdrant",
+      "data/logs",
+      "data/monitoring",
+      "vellum.pid",
+      "embed-worker.pid",
+      "memory-worker.pid",
+      "schedule-worker.pid",
     ]);
+  });
+
+  test("every runtime-state path is also an ephemeral archive path", () => {
+    for (const rel of WORKSPACE_PRESERVE_PATHS.slice(4)) {
+      const probe = rel.endsWith(".pid") ? rel : `${rel}/entry`;
+      expect(isEphemeralArchivePath(`workspace/${probe}`)).toBe(true);
+    }
   });
 });
 
@@ -113,18 +128,55 @@ describe("isCredentialMetadataArchivePath", () => {
   });
 });
 
+describe("isEphemeralArchivePath", () => {
+  test.each([
+    "workspace/vellum.pid",
+    "workspace/embed-worker.pid",
+    "workspace/data/monitoring/monitoring.pid",
+    "workspace/data/logs/assistant-2026-09-16.log",
+    "workspace/data/monitoring/samples.jsonl",
+    "workspace/data/monitoring/snapshots/baseline-1.json",
+  ])("%s is per-process runtime state", (archivePath) => {
+    expect(isEphemeralArchivePath(archivePath)).toBe(true);
+    expect(isRetiredArchivePath(archivePath)).toBe(true);
+  });
+
+  test.each([
+    "workspace/config.json",
+    "workspace/data/db/assistant.db",
+    "workspace/data/monitoring-notes.md",
+    "workspace/skills/pid-tools/SKILL.md",
+    "data/logs/assistant.log",
+    "prompts/IDENTITY.md",
+  ])("%s is durable assistant data", (archivePath) => {
+    expect(isEphemeralArchivePath(archivePath)).toBe(false);
+  });
+
+  test("retired-feature paths stay retired", () => {
+    expect(isRetiredArchivePath("workspace/UPDATES.md")).toBe(true);
+    expect(isRetiredArchivePath("prompts/UPDATES.md")).toBe(true);
+    expect(isRetiredArchivePath("workspace/IDENTITY.md")).toBe(false);
+  });
+});
+
 describe("partitionWorkspacePreserveSkipDirs", () => {
   test("splits preserve-paths into top-level vs data-subdir skip sets", () => {
     const { topLevelSkipDirs, dataSubdirSkipDirs } =
       partitionWorkspacePreserveSkipDirs();
 
-    expect(topLevelSkipDirs.size).toBe(2);
+    expect(topLevelSkipDirs.size).toBe(6);
     expect(topLevelSkipDirs.has("embedding-models")).toBe(true);
     expect(topLevelSkipDirs.has("deprecated")).toBe(true);
+    expect(topLevelSkipDirs.has("vellum.pid")).toBe(true);
+    expect(topLevelSkipDirs.has("embed-worker.pid")).toBe(true);
+    expect(topLevelSkipDirs.has("memory-worker.pid")).toBe(true);
+    expect(topLevelSkipDirs.has("schedule-worker.pid")).toBe(true);
 
-    expect(dataSubdirSkipDirs.size).toBe(2);
+    expect(dataSubdirSkipDirs.size).toBe(4);
     expect(dataSubdirSkipDirs.has("db")).toBe(true);
     expect(dataSubdirSkipDirs.has("qdrant")).toBe(true);
+    expect(dataSubdirSkipDirs.has("logs")).toBe(true);
+    expect(dataSubdirSkipDirs.has("monitoring")).toBe(true);
   });
 });
 

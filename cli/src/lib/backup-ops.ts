@@ -15,7 +15,7 @@ import {
   stageBundleForRestore,
   type RestoreStagingTarget,
 } from "./bundle-staging.js";
-import { loadGuardianToken, refreshGuardianToken } from "./guardian-token.js";
+import { resolveGuardianAccessToken } from "./guardian-access-token.js";
 import { loopbackSafeFetch } from "./loopback-fetch.js";
 
 /** Default backup directory following XDG convention */
@@ -33,24 +33,21 @@ export function formatSize(bytes: number): string {
 }
 
 /**
- * Obtain a valid guardian access token.
- *
- * Resolution order:
- *  1. Cached token that is not yet expired — use as-is.
- *  2. Cached token with a valid refresh token — call /v1/guardian/refresh.
- *  3. No usable token — return null so callers can skip the backup gracefully
- *     rather than hitting /v1/guardian/init (which 403s on bootstrapped instances).
+ * Obtain a valid guardian access token, or null when none can be had.
+ * Never leases a fresh token via `guardian/init`: these helpers run inside
+ * upgrade/teleport flows on already-paired instances, where the single-use
+ * bootstrap secret is spent and a lease would 403 (or revoke other devices).
  */
 async function getGuardianAccessToken(
   runtimeUrl: string,
   assistantId: string,
+  options?: { forceRefresh?: boolean },
 ): Promise<string | null> {
-  const tokenData = loadGuardianToken(assistantId);
-  if (tokenData && new Date(tokenData.accessTokenExpiresAt) > new Date()) {
-    return tokenData.accessToken;
+  try {
+    return await resolveGuardianAccessToken(runtimeUrl, assistantId, options);
+  } catch {
+    return null;
   }
-  const refreshed = await refreshGuardianToken(runtimeUrl, assistantId);
-  return refreshed?.accessToken ?? null;
 }
 
 /**
@@ -73,33 +70,8 @@ export async function createBackup(
       return null;
     }
 
-    let response = await loopbackSafeFetch(
-      `${runtimeUrl}/v1/migrations/export`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          description: options?.description ?? "CLI backup",
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      },
-    );
-
-    // Retry once with a refreshed token on 401 — the cached token may be
-    // stale after a container restart that regenerated the gateway signing key.
-    if (response.status === 401) {
-      const refreshed = await refreshGuardianToken(runtimeUrl, assistantId);
-      if (!refreshed) {
-        console.warn(
-          `Warning: backup export failed (401) and token refresh failed`,
-        );
-        return null;
-      }
-      accessToken = refreshed.accessToken;
-      response = await loopbackSafeFetch(`${runtimeUrl}/v1/migrations/export`, {
+    const postExport = () =>
+      loopbackSafeFetch(`${runtimeUrl}/v1/migrations/export`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -110,6 +82,23 @@ export async function createBackup(
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
+
+    let response = await fetchThroughStartingGate(postExport);
+
+    // Retry once with a refreshed token on 401 — the cached token may be
+    // stale after a container restart that regenerated the gateway signing key.
+    if (response.status === 401) {
+      const refreshed = await getGuardianAccessToken(runtimeUrl, assistantId, {
+        forceRefresh: true,
+      });
+      if (!refreshed) {
+        console.warn(
+          `Warning: backup export failed (401) and token refresh failed`,
+        );
+        return null;
+      }
+      accessToken = refreshed;
+      response = await fetchThroughStartingGate(postExport);
     }
 
     if (!response.ok) {
@@ -141,50 +130,73 @@ export async function createBackup(
   }
 }
 
+/** How long a request waits for a freshly started gateway to open its traffic gate. */
+const STARTING_GATE_WAIT_MS = 15_000;
+
+/**
+ * A freshly (re)started gateway answers 503 `{status:"starting"}` for a few
+ * seconds until its own assistant poll observes the migration state and
+ * opens the traffic gate. The daemon's running-migrations 503 carries a
+ * `reason` field and is excluded: an import must not race an in-flight
+ * migration.
+ */
+async function isGatewayStartingGate(response: Response): Promise<boolean> {
+  if (response.status !== 503) {
+    return false;
+  }
+  try {
+    const parsed = (await response.clone().json()) as {
+      status?: string;
+      reason?: string;
+    };
+    return parsed.status === "starting" && parsed.reason === undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send a gateway request, retrying through the post-start traffic gate for
+ * up to {@link STARTING_GATE_WAIT_MS}. `vellum wake` returns as soon as the
+ * daemon is ready, so a backup or restore issued right after it lands on
+ * the gate. Returns the last response, ok or not, with its body unread.
+ */
+export async function fetchThroughStartingGate(
+  send: () => Promise<Response>,
+): Promise<Response> {
+  const deadline = Date.now() + STARTING_GATE_WAIT_MS;
+  let response = await send();
+  while (Date.now() < deadline && (await isGatewayStartingGate(response))) {
+    await new Promise((r) => setTimeout(r, 1_000));
+    response = await send();
+  }
+  return response;
+}
+
 async function postRestoreWithRetries(
   postImport: () => Promise<Response>,
   runtimeUrl: string,
   assistantId: string,
   onTokenRefresh: (token: string) => void,
 ): Promise<Response | null> {
-  let response = await postImport();
+  let response = await fetchThroughStartingGate(postImport);
 
   // Retry once with a refreshed token on 401 — the cached token may be
   // stale after a container restart that regenerated the gateway signing key.
   if (response.status === 401) {
-    const refreshed = await refreshGuardianToken(runtimeUrl, assistantId);
+    const refreshed = await getGuardianAccessToken(runtimeUrl, assistantId, {
+      forceRefresh: true,
+    });
     if (!refreshed) {
       console.warn(`Warning: restore failed (401) and token refresh failed`);
       return null;
     }
-    onTokenRefresh(refreshed.accessToken);
-    response = await postImport();
+    onTokenRefresh(refreshed);
+    response = await fetchThroughStartingGate(postImport);
   }
 
-  // A freshly-(re)started gateway 503s {status:"starting"} for a couple of
-  // seconds until its own assistant poll observes the migration state and
-  // opens the traffic gate — retry through that window rather than failing
-  // the recovery. The daemon's running-migrations 503 carries a `reason`
-  // field and is excluded: the import must not race an in-flight migration.
-  const startingGateDeadline = Date.now() + 15_000;
-  while (!response.ok) {
+  if (!response.ok) {
     const body = await response.text();
-    let gatewayStarting = false;
-    try {
-      const parsed = JSON.parse(body) as {
-        status?: string;
-        reason?: string;
-      };
-      gatewayStarting =
-        parsed.status === "starting" && parsed.reason === undefined;
-    } catch {
-      // Non-JSON error body — not the starting gate.
-    }
-    if (gatewayStarting && Date.now() < startingGateDeadline) {
-      await new Promise((r) => setTimeout(r, 1_000));
-      response = await postImport();
-      continue;
-    }
     console.warn(`Warning: restore failed (${response.status}): ${body}`);
     return null;
   }

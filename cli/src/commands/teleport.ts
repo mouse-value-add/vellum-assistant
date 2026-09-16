@@ -8,11 +8,8 @@ import {
   setActiveAssistant,
   type AssistantEntry,
 } from "../lib/assistant-config.js";
-import {
-  loadGuardianToken,
-  leaseGuardianToken,
-  computeDeviceId,
-} from "../lib/guardian-token.js";
+import { computeDeviceId } from "../lib/guardian-token.js";
+import { resolveGuardianAccessTokenOrExit } from "../lib/guardian-access-token.js";
 import {
   readPlatformToken,
   getPlatformUrl,
@@ -245,7 +242,7 @@ export function parseArgs(argv: string[]): {
 }
 
 // ---------------------------------------------------------------------------
-// Auth helper — same pattern as restore.ts
+// Auth helper
 // ---------------------------------------------------------------------------
 
 async function getAccessToken(
@@ -254,35 +251,12 @@ async function getAccessToken(
   displayName: string,
   options?: { forceRefresh?: boolean; bootstrapSecret?: string },
 ): Promise<string> {
-  // When forceRefresh is set (e.g. after a runtime 401 on the cached token)
-  // we skip the cache and lease a brand-new token from the gateway, so a
-  // stale-but-unexpired token can't keep failing on every retry.
-  if (!options?.forceRefresh) {
-    const tokenData = loadGuardianToken(assistantId);
-
-    if (tokenData && new Date(tokenData.accessTokenExpiresAt) > new Date()) {
-      return tokenData.accessToken;
-    }
-  }
-
-  try {
-    const freshToken = await leaseGuardianToken(
-      runtimeUrl,
-      assistantId,
-      options?.bootstrapSecret,
-    );
-    return freshToken.accessToken;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-      console.error(
-        `Error: Could not connect to assistant '${displayName}'. Is it running?`,
-      );
-      console.error(`Try: vellum wake ${displayName}`);
-      process.exit(1);
-    }
-    throw err;
-  }
+  return resolveGuardianAccessTokenOrExit(
+    runtimeUrl,
+    assistantId,
+    displayName,
+    options,
+  );
 }
 
 /**

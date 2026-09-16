@@ -91,6 +91,16 @@ const leaseGuardianTokenMock = mock<typeof guardianToken.leaseGuardianToken>(
     >,
 );
 
+const refreshGuardianTokenResultMock = mock<
+  typeof guardianToken.refreshGuardianTokenResult
+>(async () => ({
+  ok: true,
+  token: {
+    accessToken: "refreshed-token",
+    accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  } as unknown as guardianToken.GuardianTokenData,
+}));
+
 const computeDeviceIdMock = mock<typeof guardianToken.computeDeviceId>(
   () => "device-id-123",
 );
@@ -99,6 +109,7 @@ mock.module("../lib/guardian-token.js", () => ({
   ...realGuardianToken,
   loadGuardianToken: loadGuardianTokenMock,
   leaseGuardianToken: leaseGuardianTokenMock,
+  refreshGuardianTokenResult: refreshGuardianTokenResultMock,
   computeDeviceId: computeDeviceIdMock,
 }));
 
@@ -460,6 +471,7 @@ beforeEach(() => {
     accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
   } as unknown as ReturnType<typeof guardianToken.loadGuardianToken>);
   leaseGuardianTokenMock.mockReset();
+  refreshGuardianTokenResultMock.mockReset();
 
   readPlatformTokenMock.mockReset();
   readPlatformTokenMock.mockReturnValue("platform-token");
@@ -2641,12 +2653,13 @@ describe("auth + transient-error resilience", () => {
     }));
 
     // Ensure the refresh path returns a distinguishable token.
-    leaseGuardianTokenMock.mockResolvedValueOnce({
-      accessToken: "refreshed-token",
-      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    } as unknown as Awaited<
-      ReturnType<typeof guardianToken.leaseGuardianToken>
-    >);
+    refreshGuardianTokenResultMock.mockResolvedValueOnce({
+      ok: true,
+      token: {
+        accessToken: "refreshed-token",
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      } as unknown as guardianToken.GuardianTokenData,
+    });
 
     const restoreFetch = installTrackingFetch();
     try {
@@ -2656,7 +2669,7 @@ describe("auth + transient-error resilience", () => {
     }
 
     // Kickoff was attempted twice: once with the cached token, once after
-    // a forced refresh lease.
+    // a forced refresh.
     expect(localRuntimeExportToGcsMock).toHaveBeenCalledTimes(2);
 
     const firstTokenArg = localRuntimeExportToGcsMock.mock.calls[0][1];
@@ -2664,8 +2677,10 @@ describe("auth + transient-error resilience", () => {
     expect(firstTokenArg).toBe("local-token");
     expect(secondTokenArg).toBe("refreshed-token");
 
-    // A fresh lease was requested exactly once (the forceRefresh path).
-    expect(leaseGuardianTokenMock).toHaveBeenCalledTimes(1);
+    // The token was rotated through guardian/refresh exactly once; a
+    // re-lease would spend the single-use bootstrap secret.
+    expect(refreshGuardianTokenResultMock).toHaveBeenCalledTimes(1);
+    expect(leaseGuardianTokenMock).not.toHaveBeenCalled();
   });
 
   test("runtime 401 on import kickoff triggers token refresh and retry", async () => {
@@ -2699,12 +2714,13 @@ describe("auth + transient-error resilience", () => {
       jobId: "local-import-after-refresh",
     }));
 
-    leaseGuardianTokenMock.mockResolvedValueOnce({
-      accessToken: "refreshed-import-token",
-      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    } as unknown as Awaited<
-      ReturnType<typeof guardianToken.leaseGuardianToken>
-    >);
+    refreshGuardianTokenResultMock.mockResolvedValueOnce({
+      ok: true,
+      token: {
+        accessToken: "refreshed-import-token",
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      } as unknown as guardianToken.GuardianTokenData,
+    });
 
     const restoreFetch = installTrackingFetch();
     try {
@@ -2744,7 +2760,7 @@ describe("auth + transient-error resilience", () => {
     expect(leaseGuardianTokenMock).not.toHaveBeenCalled();
   });
 
-  test("runtime poll 401 mid-migration triggers forceRefresh lease and completes", async () => {
+  test("runtime poll 401 mid-migration triggers forceRefresh and completes", async () => {
     setArgv("--from", "my-local", "--platform");
 
     const localEntry = makeEntry("my-local", { cloud: "local" });
@@ -2772,12 +2788,13 @@ describe("auth + transient-error resilience", () => {
       },
     );
 
-    leaseGuardianTokenMock.mockResolvedValueOnce({
-      accessToken: "poll-refreshed-token",
-      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    } as unknown as Awaited<
-      ReturnType<typeof guardianToken.leaseGuardianToken>
-    >);
+    refreshGuardianTokenResultMock.mockResolvedValueOnce({
+      ok: true,
+      token: {
+        accessToken: "poll-refreshed-token",
+        accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      } as unknown as guardianToken.GuardianTokenData,
+    });
 
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const restoreFetch = installTrackingFetch();
@@ -2785,13 +2802,14 @@ describe("auth + transient-error resilience", () => {
       await teleport();
 
       // The first poll used the cached token; the second (post-refresh) poll
-      // used the freshly leased one.
+      // used the freshly rotated one.
       expect(tokensSeenByPoll.length).toBeGreaterThanOrEqual(2);
       expect(tokensSeenByPoll[0]).toBe("local-token");
       expect(tokensSeenByPoll[1]).toBe("poll-refreshed-token");
 
-      // leaseGuardianToken was invoked for the forceRefresh path.
-      expect(leaseGuardianTokenMock).toHaveBeenCalledTimes(1);
+      // The forceRefresh path rotates through guardian/refresh, never init.
+      expect(refreshGuardianTokenResultMock).toHaveBeenCalledTimes(1);
+      expect(leaseGuardianTokenMock).not.toHaveBeenCalled();
 
       // The 401 branch emits its own warning — distinct from the generic
       // transient-error warning — so this asserts the refresh path fired.

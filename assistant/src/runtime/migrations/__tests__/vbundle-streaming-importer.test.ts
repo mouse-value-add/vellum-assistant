@@ -28,6 +28,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1370,6 +1371,75 @@ describe("streamCommitImport — preserves live workspace paths when bundle omit
     );
     expect(existsSync(postSegPath)).toBe(true);
     expect(readFileSync(postSegPath)).toEqual(segmentBytes);
+  });
+
+  test("keeps the live pid files and logs, which a bundle never carries", async () => {
+    // The daemon writes its pid file and holds the day's log open. A
+    // restore that wiped either would leave the CLI unable to find the
+    // daemon and the logger writing into the discarded pre-import tree.
+    mkdirSync(join(workspaceDir, "data", "logs"), { recursive: true });
+    writeFileSync(join(workspaceDir, "vellum.pid"), "4242");
+    writeFileSync(
+      join(workspaceDir, "data", "logs", "assistant-2026-09-16.log"),
+      "live log line\n",
+    );
+    mkdirSync(join(workspaceDir, "data", "monitoring"), { recursive: true });
+    writeFileSync(
+      join(workspaceDir, "data", "monitoring", "daemon-heartbeat"),
+      "42",
+    );
+    const liveLogInode = statSync(
+      join(workspaceDir, "data", "logs", "assistant-2026-09-16.log"),
+    ).ino;
+
+    const { archive } = buildVBundle({
+      files: [
+        {
+          path: "data/db/assistant.db",
+          data: new Uint8Array(),
+        },
+        {
+          path: "workspace/config.json",
+          data: new TextEncoder().encode("{}"),
+        },
+        // A pre-fix bundle still carries the source host's pid file; it
+        // must neither land on disk nor displace the live one.
+        {
+          path: "workspace/vellum.pid",
+          data: new TextEncoder().encode("9999"),
+        },
+      ],
+      ...defaultV1Options(),
+    });
+
+    const result = await streamCommitImport({
+      source: readableFrom(archive),
+      pathResolver: new DefaultPathResolver(workspaceDir),
+      workspaceDir,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("unreachable");
+    }
+
+    expect(readFileSync(join(workspaceDir, "vellum.pid"), "utf-8")).toBe(
+      "4242",
+    );
+    const logPath = join(
+      workspaceDir,
+      "data",
+      "logs",
+      "assistant-2026-09-16.log",
+    );
+    expect(readFileSync(logPath, "utf-8")).toBe("live log line\n");
+    expect(statSync(logPath).ino).toBe(liveLogInode);
+    expect(
+      readFileSync(
+        join(workspaceDir, "data", "monitoring", "daemon-heartbeat"),
+        "utf-8",
+      ),
+    ).toBe("42");
   });
 
   test("lets the bundle overwrite data/db when it does carry an assistant.db entry", async () => {

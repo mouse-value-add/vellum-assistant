@@ -3,8 +3,12 @@ import { dirname, join } from "path";
 
 import type { AssistantEntry } from "../lib/assistant-config.js";
 import { findAssistantByName } from "../lib/assistant-config.js";
-import { getBackupsDir, formatSize } from "../lib/backup-ops.js";
-import { loadGuardianToken, leaseGuardianToken } from "../lib/guardian-token";
+import {
+  fetchThroughStartingGate,
+  formatSize,
+  getBackupsDir,
+} from "../lib/backup-ops.js";
+import { resolveGuardianAccessTokenOrExit } from "../lib/guardian-access-token.js";
 import { pollJobUntilDone } from "../lib/job-polling.js";
 import {
   MigrationInProgressError,
@@ -105,77 +109,38 @@ export async function backup(): Promise<void> {
     return;
   }
 
-  // Obtain an auth token
-  let accessToken: string;
-  const tokenData = loadGuardianToken(entry.assistantId);
-  if (tokenData && new Date(tokenData.accessTokenExpiresAt) > new Date()) {
-    accessToken = tokenData.accessToken;
-  } else {
-    try {
-      const freshToken = await leaseGuardianToken(
-        entry.runtimeUrl,
-        entry.assistantId,
-        entry.guardianBootstrapSecret,
-      );
-      accessToken = freshToken.accessToken;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-        console.error(
-          `Error: Could not connect to assistant '${name}'. Is it running?`,
-        );
-        console.error(`Try: vellum wake ${name}`);
-        process.exit(1);
-      }
-      throw err;
-    }
-  }
+  let accessToken = await resolveGuardianAccessTokenOrExit(
+    entry.runtimeUrl,
+    entry.assistantId,
+    name,
+    { bootstrapSecret: entry.guardianBootstrapSecret },
+  );
 
-  // Call the export endpoint
+  const postExport = (token: string) =>
+    loopbackSafeFetch(`${entry.runtimeUrl}/v1/migrations/export`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ description: "CLI backup" }),
+      signal: AbortSignal.timeout(exportTimeoutMs),
+    });
+
   let response: Response;
   try {
-    response = await loopbackSafeFetch(
-      `${entry.runtimeUrl}/v1/migrations/export`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ description: "CLI backup" }),
-        signal: AbortSignal.timeout(exportTimeoutMs),
-      },
-    );
+    response = await fetchThroughStartingGate(() => postExport(accessToken));
 
-    // Retry once with a fresh token on 401 — the cached token may be stale
+    // Retry once with a rotated token on 401: the cached token may be stale
     // after a container restart that generated a new gateway signing key.
     if (response.status === 401) {
-      let refreshedToken: string | null = null;
-      try {
-        const freshToken = await leaseGuardianToken(
-          entry.runtimeUrl,
-          entry.assistantId,
-          entry.guardianBootstrapSecret,
-        );
-        refreshedToken = freshToken.accessToken;
-      } catch {
-        // If token refresh fails, fall through to the !response.ok handler below
-      }
-      if (refreshedToken) {
-        accessToken = refreshedToken;
-        response = await loopbackSafeFetch(
-          `${entry.runtimeUrl}/v1/migrations/export`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ description: "CLI backup" }),
-            signal: AbortSignal.timeout(exportTimeoutMs),
-          },
-        );
-      }
+      accessToken = await resolveGuardianAccessTokenOrExit(
+        entry.runtimeUrl,
+        entry.assistantId,
+        name,
+        { forceRefresh: true },
+      );
+      response = await fetchThroughStartingGate(() => postExport(accessToken));
     }
   } catch (err) {
     if (err instanceof Error && err.name === "TimeoutError") {
