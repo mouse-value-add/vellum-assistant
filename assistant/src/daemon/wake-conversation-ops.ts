@@ -22,7 +22,7 @@ import {
 import { syncMessageToDisk } from "../persistence/conversation-disk-view.js";
 import { backfillMessageIdOnLogs } from "../persistence/llm-request-log-store.js";
 import { resolveMediaSourceData } from "../providers/media-resolve.js";
-import type { Message } from "../providers/types.js";
+import type { Message, ToolUseContent } from "../providers/types.js";
 import { broadcastMessage } from "../runtime/assistant-event-hub.js";
 import { publishConversationMessagesChanged } from "../runtime/sync/resource-sync-events.js";
 import type { CompletedBackgroundTool } from "../tools/background-tool-registry.js";
@@ -216,10 +216,17 @@ export function broadcastWakeSurface(
  * metadata, persists via the canonical `addMessage` path, syncs the row to
  * the disk view, and backfills the message id onto this turn's LLM request
  * logs so wake-produced messages match the user-turn persistence path.
+ *
+ * `activityOwnership` maps tool_use ids to the `activityIsStatus` their live
+ * `tool_use_start` carried, stamped as the same `_activityIsStatus` rider the
+ * user-turn path writes so a reopened wake reads its calls the same way. The
+ * rider goes on the persisted row only, not the in-memory message the model
+ * sees again.
  */
 export async function persistWakeTailMessage(
   conversation: Conversation,
   message: Message,
+  activityOwnership?: ReadonlyMap<string, boolean>,
 ): Promise<void> {
   const turnChannelCtx = conversation.getTurnChannelContext();
   const turnInterfaceCtx = conversation.getTurnInterfaceContext();
@@ -232,10 +239,20 @@ export async function persistWakeTailMessage(
     assistantMessageInterface:
       turnInterfaceCtx?.assistantMessageInterface ?? "web",
   };
+  const content: Array<
+    | Message["content"][number]
+    | (ToolUseContent & { _activityIsStatus: boolean })
+  > = message.content.map((block) => {
+    const ownership =
+      block.type === "tool_use" ? activityOwnership?.get(block.id) : undefined;
+    return block.type === "tool_use" && ownership !== undefined
+      ? { ...block, _activityIsStatus: ownership }
+      : block;
+  });
   const persisted = await addMessage(
     conversation.conversationId,
     message.role,
-    JSON.stringify(message.content),
+    JSON.stringify(content),
     { metadata },
   );
   if (message.role === "assistant") {

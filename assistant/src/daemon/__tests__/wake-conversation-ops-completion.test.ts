@@ -18,7 +18,10 @@ import { initializeDb } from "../../persistence/db-init.js";
 import type { Message } from "../../providers/types.js";
 import type { CompletedBackgroundTool } from "../../tools/background-tool-registry.js";
 import type { Conversation } from "../conversation.js";
-import { persistWakeTriggerMessage } from "../wake-conversation-ops.js";
+import {
+  persistWakeTailMessage,
+  persistWakeTriggerMessage,
+} from "../wake-conversation-ops.js";
 
 await initializeDb();
 
@@ -127,5 +130,41 @@ describe("persistWakeTriggerMessage backgroundToolCompletion", () => {
     const metadata = readMetadata(conversationId);
     expect(metadata.backgroundEventSource).toBe("schedule");
     expect(metadata.backgroundEventInteractive).toBe(false);
+  });
+});
+
+describe("persistWakeTailMessage activity ownership", () => {
+  test("stamps the live ownership onto the persisted tool_use block, not the message", async () => {
+    const conversationId = createConversation("wake-activity-test").id;
+    const message: Message = {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "tu-mcp",
+          name: "mcp__calendar__create_event",
+          input: { activity: "planning" },
+        },
+        {
+          type: "tool_use",
+          id: "tu-native",
+          name: "web_search",
+          input: { query: "weather" },
+        },
+      ],
+    };
+
+    await persistWakeTailMessage(
+      makeConversationStub(conversationId),
+      message,
+      new Map([["tu-mcp", false]]),
+    );
+
+    const [row] = getMessages(conversationId);
+    expect(row.content[0]).toMatchObject({ _activityIsStatus: false });
+    // A call the live event said nothing about stays unstamped.
+    expect(row.content[1]).not.toHaveProperty("_activityIsStatus");
+    // The in-memory message the model sees again carries no rider.
+    expect(message.content[0]).not.toHaveProperty("_activityIsStatus");
   });
 });

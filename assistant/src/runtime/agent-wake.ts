@@ -1113,7 +1113,13 @@ export async function wakeAgentForOpportunity(
         );
       }
     };
+    // tool_use id → the `activityIsStatus` its live event carried, so the
+    // persisted tail records it the way the user-turn path does.
+    const activityOwnership = new Map<string, boolean>();
     const safeEmit = (event: AgentEvent): void => {
+      if (event.type === "tool_use" && event.activityIsStatus !== undefined) {
+        activityOwnership.set(event.id, event.activityIsStatus);
+      }
       try {
         emitWakeAgentEvent(conversation, event);
       } catch (err) {
@@ -1342,7 +1348,7 @@ export async function wakeAgentForOpportunity(
       }
       for (const msg of newMessages) {
         try {
-          await persistWakeTailMessage(conversation, msg);
+          await persistWakeTailMessage(conversation, msg, activityOwnership);
         } catch (err) {
           log.warn(
             { conversationId, source, err, role: msg.role },
