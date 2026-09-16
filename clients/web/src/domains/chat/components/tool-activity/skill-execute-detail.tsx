@@ -15,6 +15,7 @@ import { Typography } from "@vellumai/design-library";
 import { CodeBlock, SectionLabel } from "@/components/detail-primitives";
 import { DetailDisclosure } from "@/domains/chat/components/tool-activity/detail-disclosure";
 import { friendlyName } from "@/domains/chat/components/tool-call-chip/utils";
+import { deriveStepLabel } from "@/domains/chat/components/tool-progress-card/derive-step-label";
 import { parseSkillExecuteActivity } from "@/domains/chat/utils/skill-activity";
 import type { SkillExecuteParam } from "@/domains/chat/utils/skill-activity";
 import type { ToolActivityRendererProps } from "@/domains/chat/components/tool-activity/types";
@@ -76,11 +77,11 @@ export function SkillExecuteDetail({
 }: ToolActivityRendererProps) {
   const { t } = useTranslation("chat");
   const { innerToolName, activity, params } = parseSkillExecuteActivity(
-    detail.input,
+    detail.call.input,
   );
 
   const heading = innerToolName ? friendlyName(innerToolName) : "Skill tool";
-  const subtitle = activity || detail.activity;
+  const subtitle = activity || deriveStepLabel(detail.call).activity;
 
   return (
     <div className="flex flex-col gap-5">
@@ -132,7 +133,7 @@ export function SkillExecuteDetail({
       )}
 
       <DetailDisclosure label={t("skillExecuteDetail.rawInput")}>
-        <CodeBlock text={JSON.stringify(detail.input, null, 2)} />
+        <CodeBlock text={JSON.stringify(detail.call.input, null, 2)} />
       </DetailDisclosure>
     </div>
   );

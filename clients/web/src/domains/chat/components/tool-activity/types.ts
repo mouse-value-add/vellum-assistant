@@ -12,11 +12,11 @@
 
 import type { ReactNode } from "react";
 
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { CallDetailPayload } from "@/stores/viewer-store";
 
 export interface ToolActivityRendererProps {
-  /** The payload the drawer was opened with (snapshot at open time). */
-  detail: ToolDetailPayload;
+  /** The payload the drawer was opened with; `detail.call` is the open-time snapshot. */
+  detail: CallDetailPayload;
   /**
    * Live result, preferring the streaming store over the open-time snapshot.
    * `undefined` until the call lands.

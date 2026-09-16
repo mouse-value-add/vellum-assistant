@@ -34,7 +34,8 @@ import {
   parseWebFetchResult,
   WebFetchDetailView,
 } from "@/domains/chat/components/web-fetch/web-fetch-detail-view";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
+import type { ToolCallDetailPayload } from "@/stores/viewer-store";
 
 afterEach(() => {
   cleanup();
@@ -58,17 +59,21 @@ Content:
 Michelob Ultra has overtaken Modelo Especial as the best-selling beer in the United States.
 </external_content>`;
 
-function payload(overrides: Partial<ToolDetailPayload>): ToolDetailPayload {
+function payload(
+  overrides: Partial<Pick<ToolCallDetailPayload, "status">> &
+    Partial<Pick<ChatMessageToolCall, "result">>,
+): ToolCallDetailPayload {
+  const { status = "completed", ...call } = overrides;
   return {
-    toolCallId: "tu-wf",
-    toolName: "web_fetch",
-    title: "Fetching",
-    activity: "",
-    input: { url: "https://www.cnbc.com/2025/09/22/michelob.html" },
-    status: "completed",
     kind: "tool",
-    result: CNBC_RESULT,
-    ...overrides,
+    call: {
+      id: "tu-wf",
+      name: "web_fetch",
+      input: { url: "https://www.cnbc.com/2025/09/22/michelob.html" },
+      result: CNBC_RESULT,
+      ...call,
+    },
+    status,
   };
 }
 
@@ -124,7 +129,7 @@ function renderView(detail: ReturnType<typeof payload>) {
   return render(
     <WebFetchDetailView
       detail={detail}
-      result={detail.result}
+      result={detail.call.result}
       streamedOutput={undefined}
       isRunning={detail.status === "running"}
       isError={detail.status === "error"}
@@ -207,7 +212,7 @@ describe("WebFetchDetailView", () => {
     const { getByText, getByTestId } = render(
       <WebFetchDetailView
         detail={payload({ status: "running", result: undefined })}
-        result={payload({}).result}
+        result={payload({}).call.result}
         streamedOutput={undefined}
         isRunning={false}
         isError={false}

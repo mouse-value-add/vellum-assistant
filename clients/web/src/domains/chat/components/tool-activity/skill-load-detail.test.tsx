@@ -35,7 +35,7 @@ mock.module("@/generated/daemon/sdk.gen", () => sdkMock);
 const { SkillLoadDetail } =
   await import("@/domains/chat/components/tool-activity/skill-load-detail");
 const { useViewerStore } = await import("@/stores/viewer-store");
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { ToolCallDetailPayload } from "@/stores/viewer-store";
 
 const LONG_PARAGRAPH = "Detailed guidance about the skill. ".repeat(40);
 
@@ -67,16 +67,17 @@ function wrapper({ children }: { children: ReactNode }) {
 const render = (ui: Parameters<typeof rtlRender>[0]) =>
   rtlRender(ui, { wrapper });
 
-function makeDetail(): ToolDetailPayload {
+function makeDetail(): ToolCallDetailPayload {
   return {
-    toolCallId: "tc-skill-load",
-    toolName: "skill_load",
-    title: "Using a skill",
-    activity: "Loading the app-builder skill",
-    input: { skill: "app-builder" },
-    result: loadResult,
+    kind: "tool",
+    call: {
+      id: "tc-skill-load",
+      name: "skill_load",
+      input: { skill: "app-builder" },
+      result: loadResult,
+      riskLevel: "low",
+    },
     status: "completed",
-    riskLevel: "low",
   };
 }
 

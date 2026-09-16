@@ -9,21 +9,22 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
 import { WebSearchDetailView } from "@/domains/chat/components/web-search/web-search-detail-view";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { WebSearchDetailPayload } from "@/stores/viewer-store";
 
 afterEach(() => {
   cleanup();
 });
 
-function payload(overrides: Partial<ToolDetailPayload>): ToolDetailPayload {
+function payload(
+  overrides: Partial<
+    Pick<WebSearchDetailPayload, "searchQuery" | "searchResults">
+  >,
+): WebSearchDetailPayload {
   return {
-    toolCallId: "tu-ws",
-    toolName: "web_search",
-    title: "Searched the web",
-    activity: "",
-    input: {},
-    status: "completed",
     kind: "web_search",
+    call: { id: "tu-ws", name: "web_search", input: {} },
+    status: "completed",
+    searchResults: [],
     ...overrides,
   };
 }

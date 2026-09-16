@@ -20,6 +20,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { WebSearchResultItem } from "@/assistant/web-activity-types";
 import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
 import type { ToolCallCardStep } from "@/domains/chat/utils/tool-call-card-utils";
+import type { ThinkingDetailPayload } from "@/stores/viewer-store";
 
 // The viewer store imports the generated daemon SDK, which isn't built in
 // CI/worktree checkouts. Stub every endpoint it references so the module
@@ -53,6 +54,15 @@ function makeToolCall(
   };
 }
 
+/** The drawer's open payload, which these cases expect to be reasoning. */
+function activeThinkingDetail(): ThinkingDetailPayload {
+  const detail = useViewerStore.getState().activeToolDetail;
+  if (detail?.kind !== "thinking") {
+    throw new Error(`expected a thinking detail, got ${detail?.kind}`);
+  }
+  return detail;
+}
+
 afterEach(() => {
   cleanup();
   // The click writes to the real viewer store — reset the drawer state between
@@ -79,10 +89,9 @@ describe("SingleActivity — thinking variant", () => {
 
     fireEvent.click(getByLabelText("View thinking"));
 
-    const detail = useViewerStore.getState().activeToolDetail;
-    expect(detail?.kind).toBe("thinking");
-    expect(detail?.title).toBe("Thought process");
-    expect(detail?.thinkingText).toBe(CONTENT);
+    const detail = activeThinkingDetail();
+    expect(detail.title).toBe("Thought process");
+    expect(detail.thinkingText).toBe(CONTENT);
     expect(useViewerStore.getState().mainView).toBe("tool-detail");
   });
 
@@ -121,9 +130,8 @@ describe("SingleActivity — thinking variant", () => {
 
     fireEvent.click(getByLabelText("View thinking"));
 
-    const detail = useViewerStore.getState().activeToolDetail;
-    expect(detail?.kind).toBe("thinking");
-    expect(detail?.thinkingText).toBe(CONTENT);
+    const detail = activeThinkingDetail();
+    expect(detail.thinkingText).toBe(CONTENT);
     expect(useViewerStore.getState().mainView).toBe("tool-detail");
   });
 
@@ -148,12 +156,7 @@ describe("SingleActivity — thinking variant", () => {
       mainView: "tool-detail",
       activeToolDetail: {
         kind: "thinking",
-        toolCallId: "",
-        toolName: "",
         title: "Thought process",
-        activity: "",
-        input: {},
-        status: "completed",
         thinkingText: CONTENT,
       },
     });
@@ -178,12 +181,12 @@ describe("SingleActivity — thinking variant", () => {
 
     fireEvent.click(getByLabelText("View thinking"));
 
-    const detail = useViewerStore.getState().activeToolDetail;
-    expect(detail?.messageId).toBe("m1");
-    expect(detail?.thinkingGroupIndex).toBe(2);
+    const detail = activeThinkingDetail();
+    expect(detail.messageId).toBe("m1");
+    expect(detail.thinkingGroupIndex).toBe(2);
     // The bare panel shows the whole group's reasoning, so it carries no segment
     // index — that drives `useLiveThinkingText` to return the combined text.
-    expect(detail?.thinkingItemIndex).toBeUndefined();
+    expect(detail.thinkingItemIndex).toBeUndefined();
   });
 
   test("stays active by identity while the reasoning streams past the snapshot", () => {
@@ -194,12 +197,7 @@ describe("SingleActivity — thinking variant", () => {
       mainView: "tool-detail",
       activeToolDetail: {
         kind: "thinking",
-        toolCallId: "",
-        toolName: "",
         title: "Thought process",
-        activity: "",
-        input: {},
-        status: "completed",
         thinkingText: "earlier shorter snapshot",
         messageId: "m1",
         thinkingGroupIndex: 0,

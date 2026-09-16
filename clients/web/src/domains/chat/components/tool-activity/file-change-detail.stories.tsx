@@ -43,11 +43,15 @@ const base = {
   isDenied: false,
   assistantId: "assistant-1",
 };
-const edit = { ...base, detail: fileEditDetail, result: fileEditDetail.result };
+const edit = {
+  ...base,
+  detail: fileEditDetail,
+  result: fileEditDetail.call.result,
+};
 const write = {
   ...base,
   detail: fileWriteDetail,
-  result: fileWriteDetail.result,
+  result: fileWriteDetail.call.result,
 };
 
 /** An edit that landed: both sides are known, so it renders as a diff. */
@@ -89,9 +93,12 @@ export const PathAsFilePath: Story = {
     ...write,
     detail: {
       ...fileWriteDetail,
-      input: {
-        file_path: "clients/web/docs/CONVENTIONS.md",
-        content: "# Conventions\n\nA story is a public document.\n",
+      call: {
+        ...fileWriteDetail.call,
+        input: {
+          file_path: "clients/web/docs/CONVENTIONS.md",
+          content: "# Conventions\n\nA story is a public document.\n",
+        },
       },
     },
   },
@@ -103,7 +110,10 @@ export const WriteEmptyFile: Story = {
     ...write,
     detail: {
       ...fileWriteDetail,
-      input: { path: "clients/web/src/domains/chat/.keep", content: "" },
+      call: {
+        ...fileWriteDetail.call,
+        input: { path: "clients/web/src/domains/chat/.keep", content: "" },
+      },
     },
   },
 };
@@ -114,11 +124,14 @@ export const EditCreatesFile: Story = {
     ...edit,
     detail: {
       ...fileEditDetail,
-      input: {
-        path: "clients/web/src/domains/chat/utils/tool-input.ts",
-        old_string: "",
-        new_string:
-          'export const COMMAND_KEYS = ["command", "cmd"] as const;\n',
+      call: {
+        ...fileEditDetail.call,
+        input: {
+          path: "clients/web/src/domains/chat/utils/tool-input.ts",
+          old_string: "",
+          new_string:
+            'export const COMMAND_KEYS = ["command", "cmd"] as const;\n',
+        },
       },
     },
   },
@@ -134,11 +147,14 @@ export const WriteWithStrayEditKeys: Story = {
     ...write,
     detail: {
       ...fileWriteDetail,
-      input: {
-        path: "clients/web/src/domains/chat/utils/tool-input.ts",
-        content: 'export const FILE_PATH_KEYS = ["path"] as const;\n',
-        old_string: "",
-        new_string: "",
+      call: {
+        ...fileWriteDetail.call,
+        input: {
+          path: "clients/web/src/domains/chat/utils/tool-input.ts",
+          content: 'export const FILE_PATH_KEYS = ["path"] as const;\n',
+          old_string: "",
+          new_string: "",
+        },
       },
     },
   },
@@ -153,10 +169,13 @@ export const BothPathSpellings: Story = {
     ...write,
     detail: {
       ...fileWriteDetail,
-      input: {
-        path: "clients/web/src/executed.ts",
-        file_path: "clients/web/src/ignored.ts",
-        content: "const a = 1;\n",
+      call: {
+        ...fileWriteDetail.call,
+        input: {
+          path: "clients/web/src/executed.ts",
+          file_path: "clients/web/src/ignored.ts",
+          content: "const a = 1;\n",
+        },
       },
     },
   },

@@ -18,10 +18,10 @@
 
 import { ChatMarkdownMessage } from "@/domains/chat/components/chat-markdown-message";
 import { useLiveThinkingText } from "@/domains/chat/hooks/use-live-thinking-text";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { ThinkingDetailPayload } from "@/stores/viewer-store";
 
 export interface ThinkingDetailMarkdownProps {
-  detail: ToolDetailPayload;
+  detail: ThinkingDetailPayload;
   /**
    * Assistant that owns the conversation the step belongs to. Threaded to the
    * markdown so a workspace file the model named resolves against the right
@@ -41,7 +41,7 @@ export function ThinkingDetailMarkdown({
   );
   return (
     <ChatMarkdownMessage
-      content={live ?? detail.thinkingText ?? ""}
+      content={live ?? detail.thinkingText}
       hardLineBreaks
       incremental
       assistantId={assistantId}

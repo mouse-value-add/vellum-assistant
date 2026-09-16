@@ -24,6 +24,9 @@ import {
   coalesceText as coalesceTextShared,
   createMakeEvent,
   generateStream as generateStreamShared,
+  thinkingDetailOf,
+  toolCallDetailOf,
+  webSearchDetailOf,
   type Mutation,
 } from "@/domains/chat/subagent-projection-test-fixtures";
 import type { SubagentTimelineEvent } from "@/domains/chat/subagent-store";
@@ -108,10 +111,9 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     const textEv = makeEvent({ type: "text", content: "deep reasoning here" });
     const events = [textEv];
     const map = p.project(events);
-    const payload = map.get(textEv.id);
-    expect(payload?.kind).toBe("thinking");
-    expect(payload?.toolCallId).toBe(textEv.id);
-    expect(payload?.thinkingText).toBe("deep reasoning here");
+    const payload = thinkingDetailOf(map.get(textEv.id));
+    expect(payload.detailKey).toBe(textEv.id);
+    expect(payload.thinkingText).toBe("deep reasoning here");
   });
 
   test("append-1 text: new thinking payload keyed by event id", () => {
@@ -124,7 +126,7 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     events = appendEvent(events, second);
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    expect(map.get(second.id)?.thinkingText).toBe("second");
+    expect(thinkingDetailOf(map.get(second.id)).thinkingText).toBe("second");
   });
 
   test("append-1 tool_call: new in-flight tool payload keyed by toolUseId", () => {
@@ -144,7 +146,7 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     );
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    expect(map.get("tu-1")?.status).toBe("running");
+    expect(toolCallDetailOf(map.get("tu-1")).status).toBe("running");
   });
 
   test("append-1 tool_result closes an earlier in-flight tool (full untruncated result)", () => {
@@ -172,8 +174,9 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     );
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    expect(map.get("tu-1")?.status).toBe("completed");
-    expect(map.get("tu-1")?.result).toBe("file-a\nfile-b");
+    const closed = toolCallDetailOf(map.get("tu-1"));
+    expect(closed.status).toBe("completed");
+    expect(closed.call.result).toBe("file-a\nfile-b");
   });
 
   test("append-1 error closes in-flight tool as error", () => {
@@ -202,7 +205,7 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     );
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    expect(map.get("tu-1")?.status).toBe("error");
+    expect(toolCallDetailOf(map.get("tu-1")).status).toBe("error");
   });
 
   test("mutate-last thinking payload grows with the full untruncated content", () => {
@@ -212,14 +215,14 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     ];
     const first = p.project(events);
     const id = events[0]!.id;
-    expect(first.get(id)?.thinkingText).toBe("short");
+    expect(thinkingDetailOf(first.get(id)).thinkingText).toBe("short");
     // Grow past 160 chars — unlike steps, the thinking payload carries the FULL
     // content, so it keeps changing every delta (no clamp shortcut).
     const tail = "x".repeat(300);
     events = coalesceText(events, tail, events[0]!.timestamp);
     const second = p.project(events);
     expectMapsEqual(second, buildSubagentStepDetails(events));
-    expect(second.get(id)?.thinkingText).toBe("short" + tail);
+    expect(thinkingDetailOf(second.get(id)).thinkingText).toBe("short" + tail);
   });
 
   test("full-replace (history hydration) falls back to a full rebuild", () => {
@@ -296,10 +299,9 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     );
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    const failed = map.get("ws-1");
-    expect(failed?.kind).toBe("web_search");
-    expect(failed?.status).toBe("error");
-    expect(failed?.result).toBe("upstream 503 backend overloaded");
+    const failed = webSearchDetailOf(map.get("ws-1"));
+    expect(failed.status).toBe("error");
+    expect(failed.call.result).toBe("upstream 503 backend overloaded");
   });
 
   test("successful web_search payload flips to completed with parsed sources", () => {
@@ -326,9 +328,9 @@ describe("createIncrementalDetailProjection — per-diff-class", () => {
     );
     const map = p.project(events);
     expectMapsEqual(map, buildSubagentStepDetails(events));
-    const search = map.get("ws-2");
-    expect(search?.status).toBe("completed");
-    expect(search?.searchResults?.length).toBeGreaterThan(0);
+    const search = webSearchDetailOf(map.get("ws-2"));
+    expect(search.status).toBe("completed");
+    expect(search.searchResults.length).toBeGreaterThan(0);
   });
 
   test("cross-subagent id collision (detail-1 reused) is NOT misclassified as mutate-last", () => {

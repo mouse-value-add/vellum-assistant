@@ -74,7 +74,7 @@ export function SkillLoadDetail({
     instructions,
     tools,
     errorMessage,
-  } = parseSkillLoadActivity({ input: detail.input, result, isError });
+  } = parseSkillLoadActivity({ input: detail.call.input, result, isError });
 
   // The card's second line is the skill's description once the body lands, and
   // the load's own state until then: the description is the more useful thing

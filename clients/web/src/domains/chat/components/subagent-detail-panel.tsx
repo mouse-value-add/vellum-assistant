@@ -36,7 +36,7 @@ import { ChatMarkdownMessage } from "@/domains/chat/components/chat-markdown-mes
 import { DetailPanelStopButton } from "@/components/detail-panel-stop-button";
 import { SubagentPhaseTimeline } from "@/domains/chat/components/subagent-phase-timeline";
 import {
-  deriveStepLabelFromName,
+  deriveStepLabel,
   type IconName,
 } from "@/domains/chat/components/tool-progress-card/derive-step-label";
 import { ICON_MAP } from "@/domains/chat/components/tool-progress-card/phase-grouped-step-list";
@@ -64,7 +64,7 @@ function iconNameForDetail(detail: ToolDetailPayload): IconName {
   if (detail.kind === "thinking") {
     return "brain";
   }
-  return deriveStepLabelFromName(detail.toolName, detail.input).iconName;
+  return deriveStepLabel(detail.call).iconName;
 }
 
 /**
@@ -73,7 +73,7 @@ function iconNameForDetail(detail: ToolDetailPayload): IconName {
  * icon (matching the pill that opened it).
  */
 function NestedHeaderGlyph({ detail }: { detail: ToolDetailPayload }) {
-  if (detail.status === "running") {
+  if (detail.kind !== "thinking" && detail.status === "running") {
     return (
       <ThreeDotIndicator
         className="shrink-0"
@@ -138,7 +138,7 @@ export function SubagentDetailPanel({
   // directly, so it needs only the projected `steps`.
   const { steps } = useSubagentSteps(entry.events);
 
-  // `toolCallId`-keyed map of nested tool-detail payloads, used to swap the
+  // `subagentDetailKey`-keyed map of nested detail payloads, used to swap the
   // panel body to a tool's input/output when its timeline pill is clicked —
   // without ever touching the global viewer-store / main view.
   //
@@ -272,9 +272,8 @@ export function SubagentDetailPanel({
   // A drilled-into tool step gets the shared tool-detail header so it is headed
   // the same way as in the main panel; thinking steps and the timeline keep the
   // plain string title.
-  const showToolHeader = Boolean(
-    activeDetail && activeDetail.kind !== "thinking",
-  );
+  const toolHeaderDetail =
+    activeDetail && activeDetail.kind !== "thinking" ? activeDetail : undefined;
 
   return (
     <DetailShell
@@ -346,10 +345,10 @@ export function SubagentDetailPanel({
           )}
         </>
       }
-      title={showToolHeader ? undefined : headerTitle}
+      title={toolHeaderDetail ? undefined : headerTitle}
       titleNode={
-        showToolHeader && activeDetail ? (
-          <ToolDetailHeaderTitle detail={activeDetail} />
+        toolHeaderDetail ? (
+          <ToolDetailHeaderTitle detail={toolHeaderDetail} />
         ) : undefined
       }
       headerTrailing={<StatusBadge status={entry.status} />}
@@ -385,7 +384,7 @@ export function SubagentDetailPanel({
               through `ToolDetailBody`, which picks its renderer. */}
               {activeDetail.kind === "thinking" ? (
                 <ChatMarkdownMessage
-                  content={activeDetail.thinkingText ?? ""}
+                  content={activeDetail.thinkingText}
                   hardLineBreaks
                   assistantId={assistantId}
                 />

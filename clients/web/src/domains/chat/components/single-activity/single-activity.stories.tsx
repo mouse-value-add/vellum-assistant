@@ -87,12 +87,7 @@ export const ThinkingActive: Story = {
     (StoryFn) => {
       useViewerStore.getState().openToolDetail({
         kind: "thinking",
-        toolCallId: "",
-        toolName: "",
         title: "Thought process",
-        activity: "",
-        input: {},
-        status: "completed",
         thinkingText: REASONING,
       });
       return <StoryFn />;
@@ -115,6 +110,9 @@ export const ToolBash: Story = {
   },
 };
 
+/** The call the `ToolActive` chip renders and its primed drawer payload opens. */
+const activeToolCall = makeToolCall({ id: "tc-active", riskLevel: "low" });
+
 export const ToolSkill: Story = {
   args: {
     variant: "tool",
@@ -135,16 +133,13 @@ export const ToolSkill: Story = {
 export const ToolActive: Story = {
   args: {
     variant: "tool",
-    toolCall: makeToolCall({ id: "tc-active", riskLevel: "low" }),
+    toolCall: activeToolCall,
   },
   decorators: [
     (StoryFn) => {
       useViewerStore.getState().openToolDetail({
-        toolCallId: "tc-active",
-        toolName: "bash",
-        title: "Working",
-        activity: "Checking the current time",
-        input: {},
+        kind: "tool",
+        call: activeToolCall,
         status: "completed",
       });
       return <StoryFn />;

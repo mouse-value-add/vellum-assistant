@@ -43,7 +43,10 @@
 
 import { useRef } from "react";
 
-import { applyDetailEvent } from "@/domains/chat/hooks/use-subagent-card-data";
+import {
+  applyDetailEvent,
+  subagentDetailKey,
+} from "@/domains/chat/hooks/use-subagent-card-data";
 import { classifyEventsDiff } from "@/domains/chat/subagent-projection-diff";
 import type { SubagentTimelineEvent } from "@/domains/chat/subagent-store";
 import type { ToolDetailPayload } from "@/stores/viewer-store";
@@ -62,12 +65,14 @@ type DetailReducer = (
 function payloadsToMap(
   payloads: ToolDetailPayload[],
 ): Map<string, ToolDetailPayload> {
-  return new Map(payloads.map((payload) => [payload.toolCallId, payload]));
+  return new Map(
+    payloads.map((payload) => [subagentDetailKey(payload), payload]),
+  );
 }
 
 /**
  * Create a stateful incremental detail projector. `project(events)` returns the
- * `toolCallId`-keyed `Map<string, ToolDetailPayload>` for `events`, replaying
+ * `subagentDetailKey`-keyed `Map<string, ToolDetailPayload>` for `events`, replaying
  * only the diff vs the previous call through `applyDetailEvent`. The payload
  * array, parallel meta array, and resulting `Map` are cached; identical inputs
  * return the cached `Map` by reference.
@@ -157,7 +162,7 @@ export function createIncrementalDetailProjection(
         if (
           tail &&
           tail.kind === "thinking" &&
-          tail.toolCallId === events[len - 1]!.id
+          tail.detailKey === events[len - 1]!.id
         ) {
           payloadsClone.pop();
           metaClone.pop();
@@ -185,7 +190,7 @@ export function createIncrementalDetailProjection(
  * Hook wrapper: holds an incremental detail projector per component instance (in
  * a `useRef`, tied to the component's lifecycle — never a module-global cache,
  * so independent panels don't share/thrash one slot). Returns the projected
- * `toolCallId`-keyed `Map`.
+ * `subagentDetailKey`-keyed `Map`.
  */
 export function useSubagentStepDetails(
   events: SubagentTimelineEvent[],

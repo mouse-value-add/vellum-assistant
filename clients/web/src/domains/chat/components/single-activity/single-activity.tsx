@@ -1,4 +1,3 @@
-
 import { useTranslation } from "@/i18n";
 /**
  * Inline single-activity link — the lone affordance for ONE step of agent work,
@@ -241,7 +240,7 @@ export function SingleActivity(props: SingleActivityProps) {
       label: "Thinking",
       shimmerLabel: isStreaming,
       tone: "default",
-      // Thinking payloads carry an empty `toolCallId`; the bare panel addresses
+      // Thinking payloads carry no tool call; the bare panel addresses
       // the whole group (no segment index), so match on its (message, group)
       // identity — `sameThinkingTarget` holds the highlight while the reasoning
       // streams, and falls back to text for identity-less callers.
@@ -255,12 +254,7 @@ export function SingleActivity(props: SingleActivityProps) {
       onClick: () =>
         toggleToolDetail({
           kind: "thinking",
-          toolCallId: "",
-          toolName: "",
           title: "Thought process",
-          activity: "",
-          input: {},
-          status: "completed",
           thinkingText: content,
           messageId,
           thinkingGroupIndex: groupIndex,
@@ -284,7 +278,7 @@ export function SingleActivity(props: SingleActivityProps) {
       active:
         activeDetail != null &&
         activeDetail.kind !== "thinking" &&
-        activeDetail.toolCallId === toolCall.id,
+        activeDetail.call.id === toolCall.id,
       onClick: () => toggleToolDetail(toolDetailPayloadFromToolCall(toolCall)),
     };
   }

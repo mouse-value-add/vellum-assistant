@@ -12,9 +12,19 @@
  * `toolName` / `toolUseId` / `isError` / `result` metadata (so the failed-tool
  * payload is keyed and carries the error), while the step suite emits a bare
  * error row. Pass `errorEventsCarryToolMeta` to `generateStream` to select.
+ *
+ * Also holds the detail-payload narrowing helpers the detail suites
+ * (`subagent-detail-projection.test.ts`, `use-subagent-card-data.test.ts`) read
+ * projected payloads through.
  */
 
 import type { SubagentTimelineEvent } from "@/domains/chat/subagent-store";
+import type {
+  ThinkingDetailPayload,
+  ToolCallDetailPayload,
+  ToolDetailPayload,
+  WebSearchDetailPayload,
+} from "@/stores/viewer-store";
 
 export const NOW = 1700000000000;
 
@@ -263,4 +273,42 @@ export function applyMutation(
   return m.kind === "append"
     ? appendEvent(events, m.event)
     : coalesceText(events, m.delta, NOW, makeEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Detail payload narrowing
+//
+// A projected detail map holds every variant. Each helper fails the test when
+// the payload is missing or of another kind, and otherwise hands it back typed
+// as the variant the case expects, so assertions read its fields directly.
+// ---------------------------------------------------------------------------
+
+/** `payload` as a generic tool-call detail. */
+export function toolCallDetailOf(
+  payload: ToolDetailPayload | undefined,
+): ToolCallDetailPayload {
+  if (payload?.kind !== "tool") {
+    throw new Error(`expected a tool detail, got ${payload?.kind}`);
+  }
+  return payload;
+}
+
+/** `payload` as a web search detail. */
+export function webSearchDetailOf(
+  payload: ToolDetailPayload | undefined,
+): WebSearchDetailPayload {
+  if (payload?.kind !== "web_search") {
+    throw new Error(`expected a web_search detail, got ${payload?.kind}`);
+  }
+  return payload;
+}
+
+/** `payload` as a thinking detail. */
+export function thinkingDetailOf(
+  payload: ToolDetailPayload | undefined,
+): ThinkingDetailPayload {
+  if (payload?.kind !== "thinking") {
+    throw new Error(`expected a thinking detail, got ${payload?.kind}`);
+  }
+  return payload;
 }

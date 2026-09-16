@@ -11,7 +11,7 @@
  * the tool call payload; outputs are deterministic strings + icon name.
  */
 
-import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
+import type { ConversationMessageToolCall } from "@vellumai/assistant-api";
 import {
   ACTIVITY_KEYS,
   COMMAND_KEYS,
@@ -99,9 +99,9 @@ function parseMcpToolName(
 
 /**
  * Tool input bag understood by `deriveStepLabelFromName`. The full
- * `ChatMessageToolCall` carries additional fields (status, completedAt,
+ * `ConversationMessageToolCall` carries additional fields (status, completedAt,
  * etc.) that this helper does not need — accepting just `(toolName, input)`
- * lets non-`ChatMessageToolCall` callers (the subagent inline card, which
+ * lets non-tool-call callers (the subagent inline card, which
  * operates on `SubagentTimelineEvent`) share the same labeling table.
  */
 export function deriveStepLabelFromName(
@@ -286,6 +286,8 @@ export function deriveStepLabelFromName(
  * `text_editor`, `computer`, MCP-prefixed tools, skills, subagent spawns) that
  * the unified card needs to label.
  */
-export function deriveStepLabel(toolCall: ChatMessageToolCall): StepLabel {
+export function deriveStepLabel(
+  toolCall: ConversationMessageToolCall,
+): StepLabel {
   return deriveStepLabelFromName(toolCall.name, toolCall.input);
 }

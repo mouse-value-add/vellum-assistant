@@ -46,7 +46,7 @@ const base = {
 
 /** A command that ran and printed something. */
 export const Completed: Story = {
-  args: { ...base, detail: bashDetail, result: bashDetail.result },
+  args: { ...base, detail: bashDetail, result: bashDetail.call.result },
 };
 
 /** Still running, with the live stdout tail standing in for the result. */
@@ -55,7 +55,7 @@ export const Streaming: Story = {
     ...base,
     detail: bashStreamingDetail,
     result: undefined,
-    streamedOutput: bashStreamingDetail.streamedOutput,
+    streamedOutput: bashStreamingDetail.call.streamedOutput,
     isRunning: true,
   },
 };
@@ -65,7 +65,7 @@ export const Errored: Story = {
   args: {
     ...base,
     detail: bashErrorDetail,
-    result: bashErrorDetail.result,
+    result: bashErrorDetail.call.result,
     isError: true,
   },
 };
@@ -96,7 +96,10 @@ export const EmptyOutput: Story = {
 export const LegacyCommandKey: Story = {
   args: {
     ...base,
-    detail: { ...bashDetail, input: { cmd: "git status --short" } },
+    detail: {
+      ...bashDetail,
+      call: { ...bashDetail.call, input: { cmd: "git status --short" } },
+    },
     result: "M clients/web/src/domains/chat/components/tool-detail-panel.tsx",
   },
 };

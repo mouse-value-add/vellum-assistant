@@ -24,6 +24,11 @@ import type {
   SubagentEntry,
   SubagentTimelineEvent,
 } from "@/domains/chat/subagent-store";
+import {
+  thinkingDetailOf,
+  toolCallDetailOf,
+  webSearchDetailOf,
+} from "@/domains/chat/subagent-projection-test-fixtures";
 
 const NOW = 1700000000000;
 
@@ -913,8 +918,10 @@ describe("computeSubagentCardData — web tools match main-chat group labels", (
     if (step.kind === "thinking") {
       expect(step.detailKey).toBe("tu-wf");
       expect(details.has(step.detailKey!)).toBe(true);
-      // The payload routes to the web_fetch view (kind "tool" + toolName).
-      expect(details.get(step.detailKey!)?.toolName).toBe("web_fetch");
+      // The payload routes to the web_fetch view (kind "tool" + call name).
+      expect(toolCallDetailOf(details.get(step.detailKey!)).call.name).toBe(
+        "web_fetch",
+      );
     }
   });
 
@@ -1343,12 +1350,12 @@ describe("buildSubagentStepDetails", () => {
       }).events,
     );
     expect(details.size).toBe(1);
-    const payload = details.get("tu-1")!;
-    expect(payload.toolCallId).toBe("tu-1");
-    expect(payload.toolName).toBe("bash");
+    const payload = toolCallDetailOf(details.get("tu-1"));
+    expect(payload.call.id).toBe("tu-1");
+    expect(payload.call.name).toBe("bash");
     // Raw input is preserved verbatim (not the reconstructed summary bag).
-    expect(payload.input).toEqual({ command: "ls -la" });
-    expect(payload.result).toBe("total 0");
+    expect(payload.call.input).toEqual({ command: "ls -la" });
+    expect(payload.call.result).toBe("total 0");
     expect(payload.status).toBe("completed");
     expect(payload.durationLabel).toBe("3s");
     expect(payload.kind).toBe("tool");
@@ -1362,9 +1369,8 @@ describe("buildSubagentStepDetails", () => {
       }).events,
     );
     expect(details.size).toBe(1);
-    const payload = details.get("te-0")!;
-    expect(payload.kind).toBe("thinking");
-    expect(payload.status).toBe("completed");
+    const payload = thinkingDetailOf(details.get("te-0"));
+    expect(payload.detailKey).toBe("te-0");
     // Full content verbatim — NOT the collapsed/truncated timeline preview.
     expect(payload.thinkingText).toBe(content);
   });
@@ -1403,13 +1409,12 @@ describe("buildSubagentStepDetails", () => {
       }).events,
     );
     expect(details.size).toBe(1);
-    const payload = details.get("tu-ws")!;
     // A dedicated web_search payload (NOT the generic "tool" body) carrying the
     // query + the parsed source list for the nested detail view.
-    expect(payload.kind).toBe("web_search");
+    const payload = webSearchDetailOf(details.get("tu-ws"));
     expect(payload.searchQuery).toBe("best vector databases");
     expect(payload.status).toBe("completed");
-    expect(payload.searchResults?.map((r) => r.url)).toEqual([
+    expect(payload.searchResults.map((r) => r.url)).toEqual([
       "https://example.com/a",
       "https://foo.org/b",
     ]);
@@ -1436,8 +1441,7 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-ws")!;
-    expect(payload.kind).toBe("web_search");
+    const payload = webSearchDetailOf(details.get("tu-ws"));
     expect(payload.searchQuery).toBe("best thermos 2025");
   });
 
@@ -1470,7 +1474,9 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    expect(details.get("tu-1")!.result).toBe("fallback output");
+    expect(toolCallDetailOf(details.get("tu-1")).call.result).toBe(
+      "fallback output",
+    );
   });
 
   // Codex review (P2): a FAILED tool's error output must stay inspectable in
@@ -1501,9 +1507,9 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("error");
-    expect(payload.result).toBe("bash: command not found: foo");
+    expect(payload.call.result).toBe("bash: command not found: foo");
   });
 
   test("failed tool delivered as a raw error event → payload preserves the content", () => {
@@ -1527,9 +1533,9 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("error");
-    expect(payload.result).toBe("permission denied");
+    expect(payload.call.result).toBe("permission denied");
   });
 
   test("failed web_search → payload kept (status error) with the full untruncated error", () => {
@@ -1559,12 +1565,10 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-ws")!;
-    expect(payload).toBeDefined();
-    expect(payload.kind).toBe("web_search");
+    const payload = webSearchDetailOf(details.get("tu-ws"));
     expect(payload.status).toBe("error");
-    expect(payload.result).toBe(longError);
-    expect(payload.result!.length).toBeGreaterThan(160);
+    expect(payload.call.result).toBe(longError);
+    expect(payload.call.result?.length).toBeGreaterThan(160);
   });
 
   test("in-flight tool_call with no result → running payload, result undefined", () => {
@@ -1584,11 +1588,11 @@ describe("buildSubagentStepDetails", () => {
       }).events,
     );
     expect(details.size).toBe(1);
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("running");
-    expect(payload.result).toBeUndefined();
+    expect(payload.call.result).toBeUndefined();
     expect(payload.durationLabel).toBe("");
-    expect(payload.input).toEqual({ command: "sleep 5" });
+    expect(payload.call.input).toEqual({ command: "sleep 5" });
   });
 
   test("tool_call with empty toolUseId is skipped (can't be keyed/clicked)", () => {
@@ -1636,14 +1640,14 @@ describe("buildSubagentStepDetails", () => {
       }).events,
     );
     expect(details.size).toBe(2);
-    const a = details.get("tu-A")!;
-    const b = details.get("tu-B")!;
+    const a = toolCallDetailOf(details.get("tu-A"));
+    const b = toolCallDetailOf(details.get("tu-B"));
     expect(a.status).toBe("running");
-    expect(a.result).toBeUndefined();
-    expect(a.input).toEqual({ command: "first" });
+    expect(a.call.result).toBeUndefined();
+    expect(a.call.input).toEqual({ command: "first" });
     expect(b.status).toBe("completed");
-    expect(b.result).toBe("second done");
-    expect(b.input).toEqual({ command: "second" });
+    expect(b.call.result).toBe("second done");
+    expect(b.call.input).toEqual({ command: "second" });
   });
 
   test("isError result → error status with the result preserved", () => {
@@ -1667,9 +1671,9 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("error");
-    expect(payload.result).toBe("command failed");
+    expect(payload.call.result).toBe("command failed");
   });
 
   test("a FAILED tool result mapped to a raw error event is still matched", () => {
@@ -1696,9 +1700,9 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("error");
-    expect(payload.result).toBe("boom");
+    expect(payload.call.result).toBe("boom");
   });
 
   test("equal timestamps (synthetic history) yield no durationLabel", () => {
@@ -1722,7 +1726,7 @@ describe("buildSubagentStepDetails", () => {
         ],
       }).events,
     );
-    const payload = details.get("tu-1")!;
+    const payload = toolCallDetailOf(details.get("tu-1"));
     expect(payload.status).toBe("completed");
     expect(payload.durationLabel).toBe("");
   });
@@ -1947,6 +1951,6 @@ describe("heavy projections are memoizable on entry.events", () => {
     const second = memo.run(entryB.events);
     expect(memo.calls).toBe(1);
     expect(second).toBe(first);
-    expect(first.get("tu-1")?.status).toBe("completed");
+    expect(toolCallDetailOf(first.get("tu-1")).status).toBe("completed");
   });
 });

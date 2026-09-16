@@ -88,11 +88,8 @@ describe("useChannelSetupCloseNotify", () => {
     });
     act(() => {
       useViewerStore.getState().openToolDetail({
-        toolCallId: "t1",
-        toolName: "bash",
-        title: "Running command",
-        activity: "",
-        input: {},
+        kind: "tool",
+        call: { id: "t1", name: "bash", input: {} },
         status: "completed",
       });
     });

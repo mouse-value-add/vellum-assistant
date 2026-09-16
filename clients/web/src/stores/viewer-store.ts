@@ -356,48 +356,63 @@ export function isSameChannelSidecarRef(
   return a.conversationId === b.conversationId && a.channelId === b.channelId;
 }
 
-export interface ToolDetailPayload {
-  toolCallId: string;
-  toolName: string;
-  title: string; // phase title, e.g. "Spawning subagent"
-  activity: string; // rich sentence (may be "")
-  input: Record<string, unknown>;
-  result?: string;
+/** Fields shared by every drawer detail that shows one tool call. */
+interface ToolCallDetailFields {
   /**
-   * Open-time snapshot of the live streamed tool output (e.g. foreground bash
-   * stdout/stderr). Only a fallback: an open drawer re-derives the live value
-   * from the chat-session store via `useLiveToolCall`, so this is used only
-   * when the tool call can't be resolved live (e.g. paged out).
+   * The tool call itself, as the transcript holds it. Snapshot at open time:
+   * an open drawer re-derives the live call from the chat-session store via
+   * `useLiveToolCall(call.id)` and reads this only when the call can't be
+   * resolved live (paged out, or a subagent call the transcript never held).
+   * The title and activity sentence are derived from it at render time
+   * (`deriveStepLabel`), never copied beside it.
    */
-  streamedOutput?: string;
+  call: ChatMessageToolCall;
+  /**
+   * Execution status. Carried beside `call` rather than derived from it because
+   * a subagent call's status comes from its timeline events, which a wire call
+   * does not record.
+   */
   status: "running" | "completed" | "error" | "denied";
-  riskLevel?: string;
-  riskReason?: string;
   durationLabel?: string;
-  /**
-   * Variant discriminator. Absent or `"tool"` → the standard tool-call detail
-   * view (technical details + output). `"thinking"` → the reasoning view that
-   * renders `thinkingText` as markdown with no input/output sections.
-   * `"web_search"` → the search view that renders `searchQuery` + the
-   * `searchResults` source list with no technical input/output sections.
-   */
-  kind?: "tool" | "thinking" | "web_search";
+}
+
+/** A tool call rendered by its registered renderer or the generic body. */
+export interface ToolCallDetailPayload extends ToolCallDetailFields {
+  kind: "tool";
+}
+
+/**
+ * A subagent `web_search` call: the query and the parsed result sources,
+ * rendered as the same favicon source chips the timeline uses, in place of the
+ * technical input and output sections. A failed search keeps its error on
+ * `call.result` and falls through to the generic body.
+ */
+export interface WebSearchDetailPayload extends ToolCallDetailFields {
+  kind: "web_search";
+  /** The search query, rendered verbatim above the source list. */
+  searchQuery?: string;
+  /** The parsed result sources. Empty while the search is still in flight. */
+  searchResults: WebSearchResultItem[];
+}
+
+/** A drawer detail that shows one tool call. */
+export type CallDetailPayload = ToolCallDetailPayload | WebSearchDetailPayload;
+
+/** A reasoning segment, rendered as markdown with no input or output sections. */
+export interface ThinkingDetailPayload {
+  kind: "thinking";
+  title: string;
   /**
    * Reasoning markdown captured when the drawer was opened. Used as the
    * fallback when the live source (below) can't be resolved.
    */
-  thinkingText?: string;
+  thinkingText: string;
   /**
-   * The search query for a `"web_search"` detail, rendered verbatim above the
-   * source list. Unset for other kinds.
+   * The id a subagent timeline pill emits for this segment (its source text
+   * event id). Absent for transcript reasoning, which is addressed by the
+   * (message, group, segment) identity below instead.
    */
-  searchQuery?: string;
-  /**
-   * The parsed result sources for a `"web_search"` detail, rendered as the same
-   * favicon source chips the timeline uses. Empty while the search is still in
-   * flight. Unset for other kinds.
-   */
-  searchResults?: WebSearchResultItem[];
+  detailKey?: string;
   /**
    * Stable identity of the reasoning run this drawer mirrors. When present, the
    * panel re-derives live text from the chat-session store (via
@@ -410,6 +425,9 @@ export interface ToolDetailPayload {
   thinkingGroupIndex?: number;
   thinkingItemIndex?: number;
 }
+
+/** Payload of the tool-detail drawer, discriminated on `kind`. */
+export type ToolDetailPayload = CallDetailPayload | ThinkingDetailPayload;
 
 /**
  * Payload for the activity-steps side panel — the full steps timeline of one
@@ -523,7 +541,7 @@ export function sameChatInfoTarget(
 
 /** The identity fields a thinking drawer target is matched on. */
 type ThinkingTarget = Pick<
-  ToolDetailPayload,
+  ThinkingDetailPayload,
   "messageId" | "thinkingGroupIndex" | "thinkingItemIndex" | "thinkingText"
 >;
 
@@ -1246,8 +1264,7 @@ const useViewerStoreBase = create<ViewerStore>()((set, get) => ({
       active != null &&
       (payload.kind === "thinking"
         ? active.kind === "thinking" && sameThinkingTarget(active, payload)
-        : active.kind !== "thinking" &&
-          active.toolCallId === payload.toolCallId);
+        : active.kind !== "thinking" && active.call.id === payload.call.id);
     if (isSameTarget) {
       get().closeToolDetail();
     } else {

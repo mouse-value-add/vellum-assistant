@@ -844,14 +844,9 @@ export function applyDetailEvent(
       return;
     }
     payloads.push({
-      toolCallId: event.id,
-      toolName: "",
-      title: "Thought",
-      activity: "",
-      input: {},
-      status: "completed",
-      durationLabel: "",
       kind: "thinking",
+      detailKey: event.id,
+      title: "Thought",
       thinkingText: event.content,
     });
     meta.push({ startTs: event.timestamp, running: false });
@@ -865,6 +860,7 @@ export function applyDetailEvent(
       return;
     }
     const toolName = event.toolName ?? "";
+    const call = { id: toolCallId, name: toolName, input: event.input ?? {} };
     // Web search → a dedicated detail payload carrying the query and (once the
     // result lands) the parsed source list, rendered as favicon chips rather
     // than the raw technical-details body. Mirrors the `web_search` step the
@@ -875,32 +871,25 @@ export function applyDetailEvent(
         event.content ||
         undefined;
       payloads.push({
-        toolCallId,
-        toolName,
-        title: "Searched the web",
-        activity: "",
-        input: event.input ?? {},
+        kind: "web_search",
+        call,
         status: "running",
         durationLabel: "",
-        kind: "web_search",
         searchQuery: query,
         searchResults: [],
       });
       meta.push({ startTs: event.timestamp, running: true });
       return;
     }
-    const labelInput =
-      event.input ?? reconstructInputBag(toolName, event.content ?? "");
-    const label = deriveStepLabelFromName(toolName, labelInput);
+    // The panel derives the title and activity sentence from `call` at render
+    // time. Its `input` stays the raw event input: the summary-derived bag
+    // `reconstructInputBag` builds for the timeline only fills keys that feed a
+    // step's `info`, which no detail header shows.
     payloads.push({
-      toolCallId,
-      toolName,
-      title: label.title,
-      activity: label.activity,
-      input: event.input ?? {},
+      kind: "tool",
+      call,
       status: "running",
       durationLabel: "",
-      kind: "tool",
     });
     meta.push({ startTs: event.timestamp, running: true });
     return;
@@ -912,17 +901,29 @@ export function applyDetailEvent(
   // against the in-flight list regardless of the mapped type.
   if (event.type === "tool_result" || event.type === "error") {
     const matchIndex = matchInFlightTool(
-      payloads.map((payload, i) => ({
-        toolCallId: payload.toolCallId,
-        toolName: payload.toolName,
-        running: meta[i]!.running,
-      })),
+      payloads.map((payload, i) =>
+        payload.kind === "thinking"
+          ? {
+              toolCallId: payload.detailKey ?? "",
+              toolName: "",
+              running: false,
+            }
+          : {
+              toolCallId: payload.call.id,
+              toolName: payload.call.name,
+              running: meta[i]!.running,
+            },
+      ),
       event,
     );
     if (matchIndex === -1) {
       return;
     }
     const target = payloads[matchIndex]!;
+    // Only a call can be in flight, so a match is never a thinking payload.
+    if (target.kind === "thinking") {
+      return;
+    }
     const start = meta[matchIndex]!.startTs;
     // Shared with `computeSubagentCardData` so the non-positive-delta
     // suppression (synthetic equal-timestamp history events → "") can't drift
@@ -935,6 +936,17 @@ export function applyDetailEvent(
       target.kind === "web_search"
         ? {
             ...target,
+            call: {
+              ...target.call,
+              // On failure, keep the full provider/backend error so the nested
+              // detail can show it untruncated; the timeline chip only carries
+              // a `trimTextPreview` snippet. Parity with how a failed tool keeps
+              // its full `result`.
+              result: event.isError
+                ? (event.result ?? event.content)
+                : undefined,
+              isError: event.isError,
+            },
             status: event.isError ? "error" : "completed",
             durationLabel,
             // Backfill the query from the result metadata for the nested
@@ -944,15 +956,14 @@ export function applyDetailEvent(
             searchResults: event.isError
               ? []
               : parseWebSearchResultText(event.result ?? event.content),
-            // On failure, keep the full provider/backend error so the nested
-            // detail can show it untruncated — the timeline chip only carries
-            // a `trimTextPreview` snippet. Parity with how a failed tool keeps
-            // its full `result`.
-            result: event.isError ? (event.result ?? event.content) : undefined,
           }
         : {
             ...target,
-            result: event.result ?? event.content,
+            call: {
+              ...target.call,
+              result: event.result ?? event.content,
+              isError: event.isError,
+            },
             status: event.isError ? "error" : "completed",
             durationLabel,
           };
@@ -976,5 +987,18 @@ export function buildSubagentStepDetails(
   // id. The timeline's `web_search_error` step carries the same id as its
   // `detailKey`, so clicking the failed-search chip opens this payload's full,
   // untruncated error — parity with a failed tool.
-  return new Map(payloads.map((payload) => [payload.toolCallId, payload]));
+  return new Map(
+    payloads.map((payload) => [subagentDetailKey(payload), payload]),
+  );
+}
+
+/**
+ * The id a subagent timeline pill emits to open `payload`: the tool-use id of a
+ * call, or the source text event id of a thinking segment. The one key both
+ * detail-map builders index by, so the full and incremental maps agree.
+ */
+export function subagentDetailKey(payload: ToolDetailPayload): string {
+  return payload.kind === "thinking"
+    ? (payload.detailKey ?? "")
+    : payload.call.id;
 }

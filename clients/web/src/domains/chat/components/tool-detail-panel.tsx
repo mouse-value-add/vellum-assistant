@@ -25,13 +25,17 @@ import { friendlyName } from "@/domains/chat/components/tool-call-chip/utils";
 import { ToolOutputBody } from "@/domains/chat/components/tool-activity/tool-output-body";
 import { getToolActivityRenderer } from "@/domains/chat/components/tool-activity/tool-activity-renderers";
 import { useLiveToolCall } from "@/domains/chat/hooks/use-live-tool-call";
-import { deriveStepLabelFromName } from "@/domains/chat/components/tool-progress-card/derive-step-label";
+import { deriveStepLabel } from "@/domains/chat/components/tool-progress-card/derive-step-label";
 import { ICON_MAP } from "@/domains/chat/components/tool-progress-card/phase-grouped-step-list";
 import {
   isToolCallDenied,
   isToolCallRunning,
 } from "@/domains/chat/utils/tool-call-status";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type {
+  CallDetailPayload,
+  ThinkingDetailPayload,
+  ToolDetailPayload,
+} from "@/stores/viewer-store";
 
 /**
  * Thinking variant body. Reuses the shared shell around the live reasoning
@@ -42,7 +46,7 @@ function ThinkingDetailBody({
   onClose,
   assistantId,
 }: {
-  detail: ToolDetailPayload;
+  detail: ThinkingDetailPayload;
   onClose: () => void;
   assistantId?: string | null;
 }) {
@@ -72,21 +76,21 @@ function ThinkingDetailBody({
  *
  * Subscribes to the chat-session store via `useLiveToolCall` so an open drawer
  * streams `tool_output_chunk` output while the call runs and flips to the final
- * `result` when it lands, falling back to the open-time snapshot on `detail`
- * when the call can't be resolved live (e.g. paged out).
+ * `result` when it lands, falling back to the open-time snapshot in
+ * `detail.call` when the call can't be resolved live (e.g. paged out).
  */
 export function ToolDetailBody({
   detail,
   assistantId,
 }: {
-  detail: ToolDetailPayload;
+  detail: CallDetailPayload;
   /** Threaded to any markdown a tool-specific renderer shows. */
   assistantId?: string | null;
 }) {
   const { t } = useTranslation("chat");
-  const liveTc = useLiveToolCall(detail.toolCallId);
-  const result = liveTc?.result ?? detail.result;
-  const streamedOutput = liveTc?.streamedOutput ?? detail.streamedOutput;
+  const liveTc = useLiveToolCall(detail.call.id);
+  const result = liveTc?.result ?? detail.call.result;
+  const streamedOutput = liveTc?.streamedOutput ?? detail.call.streamedOutput;
 
   // An empty string is a result: the tool ran and returned nothing. Only an
   // absent result means the call has not produced one yet.
@@ -102,7 +106,7 @@ export function ToolDetailBody({
   const isDenied = liveTc
     ? isToolCallDenied(liveTc)
     : detail.status === "denied";
-  const inputJson = JSON.stringify(detail.input, null, 2);
+  const inputJson = JSON.stringify(detail.call.input, null, 2);
 
   // Tools with purpose-built activity UI replace the generic name/activity/JSON
   // block; those that also own their output suppress the shared Output section.
@@ -153,18 +157,30 @@ export function ToolDetailBody({
 }
 
 /**
- * Title the panel hosting a tool detail shows for it: the activity sentence
- * when the call carries one, else the phase title.
+ * Title the panel hosting a detail shows for it. A tool call reads as its
+ * activity sentence when it carries one, else its phase title, both derived
+ * from the call; a search reads as the search it was; reasoning keeps the title
+ * it was opened with.
  *
  * Every host of `ToolDetailBody` renders its own header, and the body relies on
  * all of them showing this, which is why the body itself does not repeat the
  * activity underneath the tool name.
  */
 export function toolDetailHeaderTitle(detail: ToolDetailPayload): string {
-  // The activity sentence is written by the model, so it can carry newlines or
-  // runs of spaces that a single-line header would render as gaps. Collapse
-  // them here rather than at each of the three panels that show it.
-  return (detail.activity || detail.title).replace(/\s+/g, " ").trim();
+  switch (detail.kind) {
+    case "thinking":
+      return detail.title;
+    case "web_search":
+      return "Searched the web";
+    case "tool": {
+      const { activity, title } = deriveStepLabel(detail.call);
+      // The activity sentence is written by the model, so it can carry
+      // newlines or runs of spaces that a single-line header would render as
+      // gaps. Collapse them here rather than at each of the three panels that
+      // show it.
+      return (activity || title).replace(/\s+/g, " ").trim();
+    }
+  }
 }
 
 /**
@@ -180,13 +196,13 @@ export function toolDetailHeaderTitle(detail: ToolDetailPayload): string {
 export function ToolDetailHeaderTitle({
   detail,
 }: {
-  detail: ToolDetailPayload;
+  detail: CallDetailPayload;
 }) {
   // Risk is classified asynchronously and can land after the drawer opens, so
   // read it live and fall back to the open-time snapshot. The raw `riskReason`
   // rule-match string ("ls (default)") is classifier jargon and stays hidden.
-  const liveTc = useLiveToolCall(detail.toolCallId);
-  const riskLevel = liveTc?.riskLevel ?? detail.riskLevel;
+  const liveTc = useLiveToolCall(detail.call.id);
+  const riskLevel = liveTc?.riskLevel ?? detail.call.riskLevel;
   const title = toolDetailHeaderTitle(detail);
   return (
     <div className="min-w-0 py-0.5">
@@ -210,7 +226,7 @@ export function ToolDetailHeaderTitle({
           as="span"
           className="shrink-0 truncate text-[var(--content-tertiary)]"
         >
-          {friendlyName(detail.toolName)}
+          {friendlyName(detail.call.name)}
         </Typography>
         <RiskChip level={riskLevel} />
       </div>
@@ -245,7 +261,7 @@ export function ToolDetailPanel({
     );
   }
 
-  const { iconName } = deriveStepLabelFromName(detail.toolName, detail.input);
+  const { iconName } = deriveStepLabel(detail.call);
   const Glyph = ICON_MAP[iconName] ?? Bolt;
 
   return (

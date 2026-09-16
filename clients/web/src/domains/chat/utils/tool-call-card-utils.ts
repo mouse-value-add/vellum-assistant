@@ -5,7 +5,7 @@
  *  Zustand turn store; these functions own the data mapping. */
 
 import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { ToolCallDetailPayload } from "@/stores/viewer-store";
 import {
   isToolCallDenied,
   isToolCallRunning,
@@ -537,26 +537,18 @@ function computeTotalDurationLabel(
 /**
  * Build the tool-detail drawer payload for a single tool call. Shared by the
  * activity-run card's tool-step pill and the inline single-tool chip so the
- * drawer payload construction lives in one place. Reuses the same
- * `deriveStepLabel` / status / duration derivations the card row uses, so the
- * drawer opens with identical title/activity/status/duration regardless of
- * which affordance the user clicks.
+ * drawer payload construction lives in one place. The payload carries the call
+ * itself beside the same status / duration derivations the card row uses, so
+ * the drawer opens with identical status and duration regardless of which
+ * affordance the user clicks.
  */
 export function toolDetailPayloadFromToolCall(
   tc: ChatMessageToolCall,
-): ToolDetailPayload {
-  const { title, activity } = deriveStepLabel(tc);
+): ToolCallDetailPayload {
   return {
-    toolCallId: tc.id,
-    toolName: tc.name,
-    title,
-    activity,
-    input: tc.input ?? {},
-    result: tc.result,
-    streamedOutput: tc.streamedOutput,
+    kind: "tool",
+    call: tc,
     status: deriveToolStepStatus(tc),
-    riskLevel: tc.riskLevel,
-    riskReason: tc.riskReason,
     durationLabel: computeToolDurationLabel(tc),
   };
 }

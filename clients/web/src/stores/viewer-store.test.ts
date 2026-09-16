@@ -4,7 +4,9 @@ import { waitFor } from "@testing-library/react";
 import type {
   ActivityStepsPayload,
   MessageFilesPayload,
-  ToolDetailPayload,
+  CallDetailPayload,
+  ThinkingDetailPayload,
+  ToolCallDetailPayload,
 } from "@/stores/viewer-store";
 import type { DocumentsByIdGetResponse } from "@/generated/daemon/types.gen";
 import { ApiError } from "@/utils/api-errors";
@@ -77,15 +79,39 @@ const SAMPLE_FILE_PREVIEW = {
   documentName: "rows.csv",
   previewKind: "csv",
 } as const;
-const SAMPLE_TOOL: ToolDetailPayload = {
-  toolCallId: "tc-1",
-  toolName: "spawn_subagent",
-  title: "Spawning subagent",
-  activity: "Spawning a research subagent",
-  input: { task: "research" },
-  result: "done",
+const SAMPLE_TOOL: ToolCallDetailPayload = {
+  kind: "tool",
+  call: {
+    id: "tc-1",
+    name: "spawn_subagent",
+    input: { activity: "Spawning a research subagent", task: "research" },
+    result: "done",
+  },
   status: "completed",
 };
+
+/** `SAMPLE_TOOL` for a different call. */
+function sampleToolWithId(id: string): ToolCallDetailPayload {
+  return { ...SAMPLE_TOOL, call: { ...SAMPLE_TOOL.call, id } };
+}
+
+/** The drawer's open payload, which the asserting case expects to be a tool call. */
+function activeCallDetail(): CallDetailPayload {
+  const detail = getState().activeToolDetail;
+  if (detail == null || detail.kind === "thinking") {
+    throw new Error(`expected a tool call detail, got ${detail?.kind}`);
+  }
+  return detail;
+}
+
+/** The drawer's open payload, which the asserting case expects to be reasoning. */
+function activeThinkingDetail(): ThinkingDetailPayload {
+  const detail = getState().activeToolDetail;
+  if (detail?.kind !== "thinking") {
+    throw new Error(`expected a thinking detail, got ${detail?.kind}`);
+  }
+  return detail;
+}
 
 // ---------------------------------------------------------------------------
 // View navigation
@@ -699,10 +725,10 @@ describe("openToolDetail", () => {
       viewBeforeToolDetail: "app",
       activeToolDetail: SAMPLE_TOOL,
     });
-    getState().openToolDetail({ ...SAMPLE_TOOL, toolCallId: "tc-2" });
+    getState().openToolDetail(sampleToolWithId("tc-2"));
     const state = getState();
     expect(state.viewBeforeToolDetail).toBe("app");
-    expect(state.activeToolDetail?.toolCallId).toBe("tc-2");
+    expect(activeCallDetail().call.id).toBe("tc-2");
   });
 });
 
@@ -724,21 +750,16 @@ describe("toggleToolDetail", () => {
 
   it("switches to a DIFFERENT tool target instead of closing", () => {
     getState().openToolDetail(SAMPLE_TOOL);
-    getState().toggleToolDetail({ ...SAMPLE_TOOL, toolCallId: "tc-2" });
+    getState().toggleToolDetail(sampleToolWithId("tc-2"));
     const state = getState();
     expect(state.mainView).toBe("tool-detail");
-    expect(state.activeToolDetail?.toolCallId).toBe("tc-2");
+    expect(activeCallDetail().call.id).toBe("tc-2");
   });
 
   it("closes the drawer when toggled with the SAME thinking target", () => {
-    const thinking: ToolDetailPayload = {
+    const thinking: ThinkingDetailPayload = {
       kind: "thinking",
-      toolCallId: "",
-      toolName: "",
       title: "Thought process",
-      activity: "",
-      input: {},
-      status: "completed",
       thinkingText: "reasoning",
     };
     getState().openToolDetail(thinking);
@@ -749,21 +770,16 @@ describe("toggleToolDetail", () => {
   });
 
   it("switches to a DIFFERENT thinking target instead of closing", () => {
-    const thinking: ToolDetailPayload = {
+    const thinking: ThinkingDetailPayload = {
       kind: "thinking",
-      toolCallId: "",
-      toolName: "",
       title: "Thought process",
-      activity: "",
-      input: {},
-      status: "completed",
       thinkingText: "reasoning A",
     };
     getState().openToolDetail(thinking);
     getState().toggleToolDetail({ ...thinking, thinkingText: "reasoning B" });
     const state = getState();
     expect(state.mainView).toBe("tool-detail");
-    expect(state.activeToolDetail?.thinkingText).toBe("reasoning B");
+    expect(activeThinkingDetail().thinkingText).toBe("reasoning B");
   });
 });
 

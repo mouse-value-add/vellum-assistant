@@ -1,4 +1,3 @@
-
 import { useTranslation } from "@/i18n";
 /**
  * Nested detail view for a subagent "Searching the web" query pill: the search
@@ -8,19 +7,21 @@ import { useTranslation } from "@/i18n";
  * view.
  *
  * Static / presentational: reads only the `searchQuery` + `searchResults` the
- * panel already built into the `ToolDetailPayload` (see
+ * panel already built into the `WebSearchDetailPayload` (see
  * `buildSubagentStepDetails`), so it never re-parses or fetches.
  */
 
 import { Typography } from "@vellumai/design-library";
 
 import { WebSearchStepRow } from "@/domains/chat/components/web-search/web-search-step-row";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { CallDetailPayload } from "@/stores/viewer-store";
 
-export function WebSearchDetailView({ detail }: { detail: ToolDetailPayload }) {
+export function WebSearchDetailView({ detail }: { detail: CallDetailPayload }) {
   const { t } = useTranslation("chat");
-  const query = detail.searchQuery ?? "";
-  const results = detail.searchResults ?? [];
+  // Registered as the renderer for the `web_search` kind only, so any other
+  // payload has no query or sources to show.
+  const query = detail.kind === "web_search" ? (detail.searchQuery ?? "") : "";
+  const results = detail.kind === "web_search" ? detail.searchResults : [];
 
   return (
     <div className="flex flex-col gap-5">
@@ -50,7 +51,9 @@ export function WebSearchDetailView({ detail }: { detail: ToolDetailPayload }) {
           className="text-[var(--content-emphasised)]"
         >
           {results.length > 0
-            ? t("webSearchDetailView.sourcesWithCount", { count: results.length })
+            ? t("webSearchDetailView.sourcesWithCount", {
+                count: results.length,
+              })
             : t("webSearchDetailView.sources")}
         </Typography>
         {results.length > 0 ? (

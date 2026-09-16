@@ -48,14 +48,14 @@ export function FileChangeDetail({
   isDenied,
 }: ToolActivityRendererProps) {
   const { t } = useTranslation("chat");
-  const path = readToolInputString(detail.input, ...FILE_PATH_KEYS);
+  const path = readToolInputString(detail.call.input, ...FILE_PATH_KEYS);
   const applied = !isRunning && !isError && !isDenied;
 
   // Which rendering to use follows the tool, not the input keys. The write
   // schemas are `z.looseObject`, so a write can carry a stray `old_string`
   // without being invalid, and keying off that would show an empty diff in
   // place of the file the call actually writes.
-  const isEdit = EDIT_TOOL_NAMES.has(detail.toolName.toLowerCase());
+  const isEdit = EDIT_TOOL_NAMES.has(detail.call.name.toLowerCase());
 
   return (
     <div>
@@ -76,11 +76,11 @@ export function FileChangeDetail({
       {isEdit ? (
         <FileDiffView
           path={path}
-          oldText={fileText(detail.input.old_string)}
-          newText={fileText(detail.input.new_string)}
+          oldText={fileText(detail.call.input.old_string)}
+          newText={fileText(detail.call.input.new_string)}
         />
       ) : (
-        <CodeBlock text={fileText(detail.input.content)} />
+        <CodeBlock text={fileText(detail.call.input.content)} />
       )}
     </div>
   );

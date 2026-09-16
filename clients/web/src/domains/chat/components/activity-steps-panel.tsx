@@ -229,12 +229,7 @@ function TimelineStep({
         onClick={() =>
           onOpenDetail({
             kind: "thinking",
-            toolCallId: "",
-            toolName: "",
             title: t("activityStepsPanel.thinkingTitle"),
-            activity: "",
-            input: {},
-            status: "completed",
             thinkingText: step.text,
             ...target,
           })
@@ -257,7 +252,11 @@ function TimelineStep({
     <ToolStepPill
       iconName={step.iconName}
       label={step.activity || step.info || step.title}
-      active={activeDetail?.toolCallId === step.toolCallId}
+      active={
+        activeDetail != null &&
+        activeDetail.kind !== "thinking" &&
+        activeDetail.call.id === step.toolCallId
+      }
       onClick={() => {
         if (!tc) {
           return;

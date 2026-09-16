@@ -35,7 +35,11 @@ const { ToolDetailPanel } =
   await import("@/domains/chat/components/tool-detail-panel");
 const { useChatSessionStore } =
   await import("@/domains/chat/chat-session-store");
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { ChatMessageToolCall } from "@/domains/chat/api/event-types";
+import type {
+  ThinkingDetailPayload,
+  ToolCallDetailPayload,
+} from "@/stores/viewer-store";
 import type { DisplayMessage } from "@/domains/chat/types/types";
 import type { PaginatedHistoryResult } from "@/domains/chat/transcript/types";
 
@@ -73,19 +77,30 @@ function seedHistory(messages: DisplayMessage[]) {
   useChatSessionStore.setState({ snapshot: snap(messages) });
 }
 
+/**
+ * A tool detail for a `subagent_spawn` call. `overrides` replaces fields of the
+ * call, plus the payload's `status`, which a call does not carry.
+ */
 function makeDetail(
-  overrides: Partial<ToolDetailPayload> = {},
-): ToolDetailPayload {
+  overrides: Partial<ChatMessageToolCall> &
+    Partial<Pick<ToolCallDetailPayload, "status">> = {},
+): ToolCallDetailPayload {
+  const { status = "completed", ...call } = overrides;
   return {
-    toolCallId: "tc-1",
-    toolName: "subagent_spawn",
-    title: "Spawning subagent",
-    activity: "Spawning subagent to research Toronto's location",
-    input: { label: "toronto-location", role: "researcher" },
-    result: '{"summary":"Toronto is in Ontario, Canada."}',
-    status: "completed",
-    riskLevel: "low",
-    ...overrides,
+    kind: "tool",
+    call: {
+      id: "tc-1",
+      name: "subagent_spawn",
+      input: {
+        activity: "Spawning subagent to research Toronto's location",
+        label: "toronto-location",
+        role: "researcher",
+      },
+      result: '{"summary":"Toronto is in Ontario, Canada."}',
+      riskLevel: "low",
+      ...call,
+    },
+    status,
   };
 }
 
@@ -201,7 +216,9 @@ describe("ToolDetailPanel", () => {
     const { container } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          activity: "  Reading the risk helpers\n  and the badge styles  ",
+          input: {
+            activity: "  Reading the risk helpers\n  and the badge styles  ",
+          },
         })}
         onClose={noop}
       />,
@@ -222,7 +239,9 @@ describe("ToolDetailPanel", () => {
   test("falls back to the phase title when there is no activity", () => {
     const { getByText } = render(
       <ToolDetailPanel
-        detail={makeDetail({ activity: "", title: "Spawning subagent" })}
+        detail={makeDetail({
+          input: { label: "toronto-location", role: "researcher" },
+        })}
         onClose={noop}
       />,
     );
@@ -374,7 +393,7 @@ describe("ToolDetailPanel", () => {
     const { getByText, queryByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_edit",
+          name: "file_edit",
           input: { path: "a.ts", old_string: "one", new_string: "two" },
           result: undefined,
           status: "denied",
@@ -393,7 +412,7 @@ describe("ToolDetailPanel", () => {
     const { getByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_edit",
+          name: "file_edit",
           input: { path: "a.ts", old_string: "one", new_string: "two" },
           result: "Applied 1 edit",
           status: "completed",
@@ -409,7 +428,7 @@ describe("ToolDetailPanel", () => {
     const { getByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_edit",
+          name: "file_edit",
           // The daemon's alias table rewrites `file_path` to `path` only for
           // aliased tool names, so a direct `file_edit` call still carries this
           // spelling, and every surface that shows a path accepts all three.
@@ -431,7 +450,7 @@ describe("ToolDetailPanel", () => {
     const { getByText, queryByTestId } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_write",
+          name: "file_write",
           // The write schemas are `z.looseObject`, so unread fields survive
           // validation. The rendering follows the tool, not the input keys.
           input: {
@@ -454,7 +473,7 @@ describe("ToolDetailPanel", () => {
     const { getByText, queryByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_write",
+          name: "file_write",
           // `path` is what the executor reads, and what the alias table
           // rewrites the other spelling into, so it wins either way.
           input: {
@@ -476,7 +495,7 @@ describe("ToolDetailPanel", () => {
     const { getByText, queryByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_write",
+          name: "file_write",
           input: { path: "src/a.ts", content: "const a = 1;\n" },
           result: undefined,
           status: "denied",
@@ -495,7 +514,7 @@ describe("ToolDetailPanel", () => {
     const { getByText, queryByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "file_write",
+          name: "file_write",
           input: {
             path: "src/a.ts",
             content: 'const greeting = "hi";\nexport default greeting;\n',
@@ -517,7 +536,7 @@ describe("ToolDetailPanel", () => {
     const { getByText } = render(
       <ToolDetailPanel
         detail={makeDetail({
-          toolName: "bash",
+          name: "bash",
           input: { cmd: "git status --short" },
           result: "clean",
         })}
@@ -552,11 +571,11 @@ describe("ToolDetailPanel", () => {
   });
 
   test("thinking variant renders the reasoning markdown without input/output sections", () => {
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thinking",
       thinkingText: "I should first check the directory listing.",
-    });
+    };
     const { getByText, queryByText } = render(
       <ToolDetailPanel detail={detail} onClose={noop} />,
     );
@@ -575,11 +594,11 @@ describe("ToolDetailPanel", () => {
 
   test("thinking variant close button fires onClose", () => {
     const onClose = mock(() => {});
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thinking",
       thinkingText: "Reasoning.",
-    });
+    };
     const { getByLabelText } = render(
       <ToolDetailPanel detail={detail} onClose={onClose} />,
     );
@@ -600,13 +619,13 @@ describe("ToolDetailPanel", () => {
         ] as DisplayMessage[]),
       });
     });
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thought process",
       messageId: "m1",
       thinkingGroupIndex: 0,
       thinkingText: "stale snapshot",
-    });
+    };
     const { getByText, queryByText } = render(
       <ToolDetailPanel detail={detail} onClose={noop} />,
     );
@@ -633,13 +652,13 @@ describe("ToolDetailPanel", () => {
   });
 
   test("thinking variant falls back to the snapshot when the message is absent", () => {
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thought process",
       messageId: "missing",
       thinkingGroupIndex: 0,
       thinkingText: "snapshot fallback",
-    });
+    };
     const { getByText } = render(
       <ToolDetailPanel detail={detail} onClose={noop} />,
     );
@@ -659,13 +678,13 @@ describe("ToolDetailPanel", () => {
         ],
       } as DisplayMessage,
     ]);
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thought process",
       messageId: "m1",
       thinkingGroupIndex: 0,
       thinkingText: "stale partial snapshot",
-    });
+    };
     const { getByText, queryByText } = render(
       <ToolDetailPanel detail={detail} onClose={noop} />,
     );
@@ -692,14 +711,14 @@ describe("ToolDetailPanel", () => {
         ] as DisplayMessage[]),
       });
     });
-    const detail = makeDetail({
+    const detail: ThinkingDetailPayload = {
       kind: "thinking",
       title: "Thinking",
       messageId: "m1",
       thinkingGroupIndex: 0,
       thinkingItemIndex: 1,
       thinkingText: "ignored snapshot",
-    });
+    };
     const { getByText, queryByText } = render(
       <ToolDetailPanel detail={detail} onClose={noop} />,
     );

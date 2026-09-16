@@ -26,7 +26,7 @@ export function BashDetail({
   isDenied,
 }: ToolActivityRendererProps) {
   const { t } = useTranslation("chat");
-  const command = readToolInputString(detail.input, ...COMMAND_KEYS);
+  const command = readToolInputString(detail.call.input, ...COMMAND_KEYS);
   const body =
     typeof result === "string" && result !== ""
       ? result

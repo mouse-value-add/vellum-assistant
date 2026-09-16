@@ -161,7 +161,8 @@ export function WebFetchDetailView({
   const body = typeof result === "string" ? result : "";
   // `parseWebFetchResult` distinguishes an absent fallback from an empty one,
   // so a blank url stays `undefined` rather than becoming "".
-  const fallbackUrl = readToolInputString(detail.input, "url") || undefined;
+  const fallbackUrl =
+    readToolInputString(detail.call.input, "url") || undefined;
   const parsed = useMemo(
     () => parseWebFetchResult(body, fallbackUrl),
     [body, fallbackUrl],

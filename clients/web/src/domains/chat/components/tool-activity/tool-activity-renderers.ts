@@ -19,7 +19,7 @@ import { SkillLoadDetail } from "@/domains/chat/components/tool-activity/skill-l
 import type { ToolActivityRenderer } from "@/domains/chat/components/tool-activity/types";
 import { WebFetchDetailView } from "@/domains/chat/components/web-fetch/web-fetch-detail-view";
 import { WebSearchDetailView } from "@/domains/chat/components/web-search/web-search-detail-view";
-import type { ToolDetailPayload } from "@/stores/viewer-store";
+import type { CallDetailPayload } from "@/stores/viewer-store";
 
 const RENDERERS: Record<string, ToolActivityRenderer> = {
   // A command and what it printed, rather than a JSON object quoting one.
@@ -59,10 +59,10 @@ const WEB_SEARCH: ToolActivityRenderer = {
  * its error renders in full.
  */
 export function getToolActivityRenderer(
-  detail: ToolDetailPayload,
+  detail: CallDetailPayload,
 ): ToolActivityRenderer | undefined {
   if (detail.kind === "web_search") {
     return detail.status === "error" ? undefined : WEB_SEARCH;
   }
-  return RENDERERS[detail.toolName.toLowerCase()];
+  return RENDERERS[detail.call.name.toLowerCase()];
 }
