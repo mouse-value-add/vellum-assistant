@@ -49,6 +49,7 @@ import {
 } from "../persistence/conversation-crud.js";
 import { VOICE_ESCALATION_CONTINUATION_MESSAGE_KIND } from "../plugin-api/constants.js";
 import { doesSupportVision } from "../plugin-api/vision-support.js";
+import { dispatchProviderResolvable } from "../providers/connection-resolution.js";
 import { pinnedListeningLanguage } from "../providers/speech-to-text/provider-catalog.js";
 import type { ContentBlock, Message } from "../providers/types.js";
 import { broadcastMessage } from "../runtime/assistant-event-hub.js";
@@ -134,6 +135,7 @@ function conversationProfileForEscalation(
   const selection = selectWinningProfile("mainAgent", getConfig().llm, {
     ...(overrideProfile != null ? { overrideProfile } : {}),
     selectionSeed: conversation.conversationId,
+    isResolvableProvider: dispatchProviderResolvable,
     onMixSelected: ({ chosenProfile }) => {
       chosenArm = chosenProfile;
     },
@@ -2052,6 +2054,7 @@ export async function startVoiceTurn(
               ...(profilePin != null ? { overrideProfile: profilePin } : {}),
               forceOverrideProfile: profilePin != null,
               selectionSeed: conversation.conversationId,
+              isResolvableProvider: dispatchProviderResolvable,
             })
           : null;
       if (escalationSelection !== null) {

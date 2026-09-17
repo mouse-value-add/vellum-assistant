@@ -569,6 +569,10 @@ export async function runAgentLoopImpl(
   const turnOverrideProfile = userExplicitOverride;
   const forceOverrideProfile = options?.forceOverrideProfile === true;
 
+  // Initial value for `createToolExecutor` and the turn tool resolver. The
+  // latter may run early for cache warming, before the normal agent loop.
+  ctx.currentTurnOverrideProfile = turnOverrideProfile;
+
   if (options?.warmPromptCache === true) {
     ctx.warmPromptCache({
       callSite: turnCallSite,
@@ -577,6 +581,7 @@ export async function runAgentLoopImpl(
         : {}),
       forceOverrideProfile,
       signal: abortController.signal,
+      tools: ctx.agentLoop.getResolvedTools(ctx.messages),
     });
   }
 
@@ -719,12 +724,6 @@ export async function runAgentLoopImpl(
       overflowRecovery: { enabled, safetyMarginRatio },
     };
   };
-
-  // Initial value for `createToolExecutor` to read into
-  // `ToolContext.overrideProfile`. `resolveCurrentOverrideProfile` refreshes
-  // this between model calls so a confirmed profile session opened by a tool
-  // applies to later tool executions and nested subagents in the same turn.
-  ctx.currentTurnOverrideProfile = turnOverrideProfile;
 
   // Mirrored onto the live conversation for `createToolExecutor` to read into
   // `ToolContext.cronRunId`, so a tool that delegates LLM work (subagent spawn

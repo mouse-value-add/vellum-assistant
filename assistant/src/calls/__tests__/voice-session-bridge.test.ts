@@ -2921,6 +2921,30 @@ describe("startVoiceTurn escalated-leg profile pin", () => {
     });
   });
 
+  test("reports the profile dispatch falls back to for an unresolvable selection", async () => {
+    setConfig("llm", {
+      activeProfile: "stale-entry",
+      profiles: {
+        "stale-entry": {
+          source: "user",
+          provider: "missing-connection-entry",
+          model: "missing-model",
+        },
+      },
+    });
+    const onEscalationTargetResolved = mock();
+
+    const runOptions = await runOptionsFor({
+      turn: { onEscalationTargetResolved },
+    });
+
+    expect(runOptions.overrideProfile).toBeUndefined();
+    expect(onEscalationTargetResolved).toHaveBeenCalledWith({
+      profile: "balanced",
+      source: "call_site",
+    });
+  });
+
   test("the conversation's own pin wins over the workspace selection", async () => {
     setConfig("llm", { activeProfile: "quality-optimized" });
 

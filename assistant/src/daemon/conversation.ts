@@ -1245,6 +1245,7 @@ export class Conversation {
     overrideProfile?: string;
     forceOverrideProfile?: boolean;
     signal?: AbortSignal;
+    tools?: ToolDefinition[];
   }): void {
     this.cacheWarmAbort?.abort();
     const abort = new AbortController();
@@ -1259,7 +1260,7 @@ export class Conversation {
     }
 
     const systemPrompt = this.buildCurrentSystemPrompt();
-    const tools = getAllToolDefinitions();
+    const tools = options?.tools ?? getAllToolDefinitions();
     const callSite = options?.callSite ?? "mainAgent";
     const providerConfig = {
       ...(options?.overrideProfile !== undefined
@@ -1278,7 +1279,7 @@ export class Conversation {
 
     void this.provider
       .sendMessage([warmMessage], {
-        tools,
+        tools: tools.length > 0 ? tools : undefined,
         systemPrompt,
         config: {
           max_tokens: 1,
