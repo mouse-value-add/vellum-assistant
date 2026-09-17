@@ -411,6 +411,14 @@
       "defaultEnabled": false
     },
     {
+      "id": "guardian-request-push-floor",
+      "scope": "assistant",
+      "key": "guardian-request-push-floor",
+      "label": "Guardian Request Push Floor",
+      "description": "Gates whether an actionable guardian request (`guardian.question`, `ingress.access_request`) keeps the decision engine's own `platform` push choice, with the push force-added only when the decision selected no outbound channel besides `vellum`. Off by default: high urgency force-adds the push for every signal.",
+      "defaultEnabled": false
+    },
+    {
       "id": "web-presence-suppression",
       "scope": "assistant",
       "key": "web-presence-suppression",

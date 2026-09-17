@@ -13,6 +13,7 @@ import type { GuardianDelivery } from "@vellumai/gateway-client";
 import { v4 as uuid } from "uuid";
 
 import { getDeliverableChannels } from "../channels/config.js";
+import { isAssistantFeatureFlagEnabled } from "../config/assistant-feature-flags.js";
 import {
   getGuardianDelivery,
   guardianForChannel,
@@ -39,6 +40,7 @@ import {
   runDeterministicChecks,
 } from "./deterministic-checks.js";
 import { createEvent, setEventDedupeKey } from "./events-store.js";
+import { isGuardianRequestSignalEvent } from "./guardian-feed-projection.js";
 import { writeHomeFeedItemForSignal } from "./home-feed-side-effect.js";
 import { dispatchDecision } from "./runtime-dispatch.js";
 import type {
@@ -54,6 +56,18 @@ import type {
 } from "./types.js";
 
 const log = getLogger("emit-signal");
+
+/**
+ * With the flag on, an actionable guardian request keeps the decision
+ * engine's own `platform` choice and the urgency floor adds the push only
+ * when that choice left nothing outbound besides `vellum`. With it off, high
+ * urgency force-adds `platform` for every signal.
+ */
+const GUARDIAN_REQUEST_PUSH_FLOOR_FLAG = "guardian-request-push-floor" as const;
+
+function isGuardianRequestPushFloorEnabled(): boolean {
+  return isAssistantFeatureFlagEnabled(GUARDIAN_REQUEST_PUSH_FLOOR_FLAG);
+}
 
 // ── Broadcaster singleton ──────────────────────────────────────────────
 
@@ -384,15 +398,25 @@ export async function emitNotificationSignal<TEventName extends string>(
     // the re-persist and the stored row matches what is dispatched.
     const prePolicyDecision = decision;
 
-    // Step 2.5a: High/critical urgency signals always get both the in-app
-    // system notification (vellum) and the remote push (platform),
-    // regardless of what the decision engine selected. macOS surfaces a
-    // banner even when the app is focused, and a suspended iOS device is
-    // only reachable via APNs. Platform is only forced when the daemon has
-    // platform credentials and an assistant id -- on unbound daemons the
-    // dispatch can never succeed and would write a failed delivery row per
-    // signal. The probe is deadline-bounded internally, so a slow credential
-    // backend cannot stall the urgent dispatch.
+    // Step 2.5a: High/critical urgency signals always get the in-app system
+    // notification (vellum) and, outside the guardian-request carve-out
+    // below, the remote push (platform), regardless of what the decision
+    // engine selected. macOS surfaces a banner even when the app is focused,
+    // and a suspended iOS device is only reachable via APNs. Platform is only
+    // forced when the daemon has platform credentials and an assistant id --
+    // on unbound daemons the dispatch can never succeed and would write a
+    // failed delivery row per signal. The probe is deadline-bounded
+    // internally, so a slow credential backend cannot stall the urgent
+    // dispatch.
+    //
+    // A guardian request (every one carries high urgency) is the one signal
+    // the user never asked for, and its decision already weighed the
+    // connected channels and the stored preferences. Behind the flag, that
+    // decision's push choice stands: a request the engine routed to the chat
+    // it came from does not also buzz the phone. The floor still adds the
+    // push when the decision left nothing outbound besides the local
+    // banner, so a request never reaches zero outbound channels; the
+    // LLM-unavailable fallback selects every channel on its own.
     //
     // Vellum PREPENDS and platform APPENDS: the broadcaster re-sorts by
     // dispatch rank, so selection order only matters to single_channel
@@ -411,12 +435,24 @@ export async function emitNotificationSignal<TEventName extends string>(
         selectedChannels.unshift("vellum");
         forcedChannels.push("vellum");
       }
-      if (
-        !selectedChannels.includes("platform") &&
-        (await isPlatformClientConfigured())
-      ) {
-        selectedChannels.push("platform");
-        forcedChannels.push("platform");
+      const pushLeftToDecision =
+        isGuardianRequestSignalEvent(signal.sourceEventName) &&
+        isGuardianRequestPushFloorEnabled() &&
+        decision.selectedChannels.some((ch) => ch !== "vellum");
+      if (!selectedChannels.includes("platform")) {
+        if (pushLeftToDecision) {
+          log.info(
+            {
+              signalId,
+              sourceEventName: params.sourceEventName,
+              selectedChannels: decision.selectedChannels,
+            },
+            "Guardian request push left to the decision: an outbound channel is selected",
+          );
+        } else if (await isPlatformClientConfigured()) {
+          selectedChannels.push("platform");
+          forcedChannels.push("platform");
+        }
       }
       if (forcedChannels.length > 0) {
         decision = {

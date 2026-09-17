@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+
+import { setOverridesForTesting } from "./feature-flag-test-helpers.js";
 
 const evaluateSignalMock = mock();
 const enforceRoutingIntentMock = mock();
@@ -705,5 +707,134 @@ describe("high/critical urgency channel force", () => {
       };
       expect(dispatched.selectedChannels).toEqual(["vellum"]);
     });
+  });
+});
+
+describe("guardian request push floor", () => {
+  const FLAG = "guardian-request-push-floor";
+
+  function makeDecision(selectedChannels: string[]) {
+    return {
+      shouldNotify: true,
+      selectedChannels,
+      reasoningSummary: `LLM selected ${selectedChannels.join(", ") || "nothing"}`,
+      renderedCopy: {},
+      dedupeKey: "dedupe-guardian-1",
+      confidence: 0.9,
+      fallbackUsed: false,
+      persistedDecisionId: "dec-guardian-1",
+    };
+  }
+
+  function emitGuardian(sourceEventName: string) {
+    return emitNotificationSignal({
+      sourceEventName,
+      sourceChannel: "slack",
+      sourceContextId: "conv-guardian-1",
+      attentionHints: {
+        requiresAction: true,
+        urgency: "high",
+        isAsyncBackground: false,
+        visibleInSourceNow: false,
+      },
+      contextPayload: { requestId: "req-guardian-1" },
+    });
+  }
+
+  function dispatchedDecision() {
+    return dispatchDecisionMock.mock.calls[0][1] as {
+      selectedChannels: string[];
+      reasoningSummary: string;
+    };
+  }
+
+  beforeEach(() => {
+    setOverridesForTesting({ [FLAG]: true });
+  });
+
+  afterEach(() => {
+    setOverridesForTesting({});
+  });
+
+  test("leaves the push to the decision when it selected an outbound channel", async () => {
+    evaluateSignalMock.mockResolvedValue(makeDecision(["telegram"]));
+
+    await emitGuardian("guardian.question");
+
+    const dispatched = dispatchedDecision();
+    expect(dispatched.selectedChannels).toEqual(["vellum", "telegram"]);
+    expect(dispatched.reasoningSummary).toContain(
+      "(vellum forced: high urgency)",
+    );
+    expect(dispatched.reasoningSummary).not.toContain("platform");
+  });
+
+  test("floors the push when the decision selected nothing besides vellum", async () => {
+    evaluateSignalMock.mockResolvedValue(makeDecision(["vellum"]));
+
+    await emitGuardian("guardian.question");
+
+    const dispatched = dispatchedDecision();
+    expect(dispatched.selectedChannels).toEqual(["vellum", "platform"]);
+    expect(dispatched.reasoningSummary).toContain(
+      "(platform forced: high urgency)",
+    );
+  });
+
+  test("floors the push when the decision selected no channel at all", async () => {
+    evaluateSignalMock.mockResolvedValue(makeDecision([]));
+
+    await emitGuardian("guardian.question");
+
+    expect(dispatchedDecision().selectedChannels).toEqual([
+      "vellum",
+      "platform",
+    ]);
+  });
+
+  test("covers access requests the same way", async () => {
+    evaluateSignalMock.mockResolvedValue(makeDecision(["telegram"]));
+
+    await emitGuardian("ingress.access_request");
+
+    const dispatched = dispatchedDecision();
+    expect(dispatched.selectedChannels).toEqual(["vellum", "telegram"]);
+    expect(dispatched.reasoningSummary).not.toContain("platform");
+  });
+
+  test("keeps the unconditional force-add when the flag is off", async () => {
+    setOverridesForTesting({ [FLAG]: false });
+    evaluateSignalMock.mockResolvedValue(makeDecision(["telegram"]));
+
+    await emitGuardian("guardian.question");
+
+    expect(dispatchedDecision().selectedChannels).toEqual([
+      "vellum",
+      "telegram",
+      "platform",
+    ]);
+  });
+
+  test("keeps the unconditional force-add for signals outside the guardian family", async () => {
+    evaluateSignalMock.mockResolvedValue(makeDecision(["telegram"]));
+
+    await emitGuardian("schedule.notify");
+
+    expect(dispatchedDecision().selectedChannels).toEqual([
+      "vellum",
+      "telegram",
+      "platform",
+    ]);
+  });
+
+  test("does not floor the push when the platform client is not configured", async () => {
+    isPlatformClientConfiguredMock.mockResolvedValue(false);
+    evaluateSignalMock.mockResolvedValue(makeDecision(["vellum"]));
+
+    await emitGuardian("guardian.question");
+
+    const dispatched = dispatchedDecision();
+    expect(dispatched.selectedChannels).toEqual(["vellum"]);
+    expect(dispatched.reasoningSummary).not.toContain("forced");
   });
 });
