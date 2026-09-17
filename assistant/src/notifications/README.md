@@ -70,7 +70,7 @@ Hard invariants that the LLM cannot override:
 
 Source-active suppression depends only on the signal, so it runs earlier — as the pre-decision gate in `emit-signal.ts` (see step 1), not as a pre-send check here.
 
-**Post-decision channel floors** (`emit-signal.ts`, before the pre-send checks): a high or critical urgency signal gets `vellum` prepended and, when the daemon has platform credentials, `platform` appended to whatever the decision selected. Behind `guardian-request-push-floor` (off by default), an actionable guardian request (`guardian.question`, `ingress.access_request`) keeps the decision's own `platform` choice and gets the push force-added only when the decision selected nothing outbound besides `vellum`. An `ingress.access_request` additionally always keeps `vellum`, even under a `single_channel` cap.
+**Post-decision channel floors** (`emit-signal.ts`, before the pre-send checks): a high or critical urgency signal gets `vellum` prepended and, when the assistant has platform credentials, `platform` appended to whatever the decision selected. Behind `guardian-request-push-floor` (off by default), an actionable guardian request (`guardian.question`, `ingress.access_request`) keeps the decision's own `platform` choice and gets the push force-added only when the decision selected nothing outbound besides `vellum`. An `ingress.access_request` additionally always keeps `vellum`, even under a `single_channel` cap.
 
 ### 5. Dispatch
 
