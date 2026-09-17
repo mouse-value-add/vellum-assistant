@@ -2048,36 +2048,6 @@ export async function startVoiceTurn(
         (needsImagePin
           ? VOICE_IMAGE_PROFILE
           : (conversationProfile?.profile ?? null));
-      const escalationSelection =
-        opts.routingLeg === "escalated"
-          ? selectWinningProfile("callAgent", config.llm, {
-              ...(profilePin != null ? { overrideProfile: profilePin } : {}),
-              forceOverrideProfile: profilePin != null,
-              selectionSeed: conversation.conversationId,
-              isResolvableProvider: dispatchProviderResolvable,
-            })
-          : null;
-      if (escalationSelection !== null) {
-        const target: VoiceEscalationTarget = {
-          profile: escalationSelection.profileName ?? "balanced",
-          source:
-            profilePin != null && escalationSelection.source === "override"
-              ? opts.overrideProfile != null
-                ? "turn_override"
-                : needsImagePin
-                  ? "image_compatibility"
-                  : "conversation"
-              : "call_site",
-        };
-        try {
-          opts.onEscalationTargetResolved?.(target);
-        } catch (err) {
-          log.warn(
-            { err, turnId, profile: target.profile, source: target.source },
-            "Voice escalation target callback failed",
-          );
-        }
-      }
       if (opts.macosDesktopSession === true && !frontDoorToolsSuppressed) {
         const sourceInterface = turnInterfaceContext.userMessageInterface;
         const sourceActorPrincipalId =
@@ -2187,9 +2157,71 @@ export async function startVoiceTurn(
         ...(profilePin != null
           ? { overrideProfile: profilePin, forceOverrideProfile: true }
           : {}),
-        // Use the memory/context preparation window to fill the selected
-        // profile's provider prompt cache before the real escalated call.
-        warmPromptCache: opts.routingLeg === "escalated",
+        // Resolve diagnostics and warm the cache only after pre-model routing
+        // finalizes the profile, prompt, and provider-native tool surface.
+        ...(opts.routingLeg === "escalated"
+          ? {
+              onFirstModelCallPrepared: async (prepared) => {
+                const escalationSelection = selectWinningProfile(
+                  prepared.callSite ?? "callAgent",
+                  config.llm,
+                  {
+                    ...(prepared.overrideProfile !== undefined
+                      ? { overrideProfile: prepared.overrideProfile }
+                      : {}),
+                    forceOverrideProfile: prepared.forceOverrideProfile,
+                    selectionSeed: conversation.conversationId,
+                    isResolvableProvider: dispatchProviderResolvable,
+                  },
+                );
+                let source: VoiceEscalationTarget["source"] = "call_site";
+                if (escalationSelection.source === "override") {
+                  if (prepared.overrideProfile !== profilePin) {
+                    source = "pre_model_hook";
+                  } else if (opts.overrideProfile != null) {
+                    source = "turn_override";
+                  } else if (needsImagePin) {
+                    source = "image_compatibility";
+                  } else {
+                    source = "conversation";
+                  }
+                }
+                const target: VoiceEscalationTarget = {
+                  profile: escalationSelection.profileName ?? "balanced",
+                  source,
+                };
+                try {
+                  opts.onEscalationTargetResolved?.(target);
+                } catch (err) {
+                  log.warn(
+                    {
+                      err,
+                      turnId,
+                      profile: target.profile,
+                      source: target.source,
+                    },
+                    "Voice escalation target callback failed",
+                  );
+                }
+                await conversation.warmPromptCache({
+                  ...(prepared.callSite !== undefined
+                    ? { callSite: prepared.callSite }
+                    : {}),
+                  ...(prepared.overrideProfile !== undefined
+                    ? { overrideProfile: prepared.overrideProfile }
+                    : {}),
+                  ...(prepared.forceOverrideProfile
+                    ? { forceOverrideProfile: true }
+                    : {}),
+                  signal: opts.signal,
+                  ...(prepared.systemPrompt !== undefined
+                    ? { systemPrompt: prepared.systemPrompt }
+                    : {}),
+                  tools: prepared.tools,
+                });
+              },
+            }
+          : {}),
       });
       if (lastError) {
         log.error(

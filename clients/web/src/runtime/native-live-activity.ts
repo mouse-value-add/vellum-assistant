@@ -45,9 +45,9 @@ export interface VoiceLiveActivityContent {
    *
    * These raw strings cross the bridge and are decoded by
    * `VoiceSessionAttributes.ContentState.Phase` in
-   * `clients/ios/App/App/Shared/VoiceSessionAttributes.swift`. **The two must
-   * change together**: a value added or renamed here without a matching Swift
-   * case fails to decode on the native side.
+   * `clients/ios/App/App/Shared/VoiceSessionAttributes.swift`. Every value here
+   * must have a matching Swift case. Swift also accepts the server-only
+   * `working` phase used by APNs during an escalated handoff.
    */
   phase: ActiveLiveVoiceSessionState;
   /**

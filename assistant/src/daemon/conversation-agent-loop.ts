@@ -15,6 +15,7 @@ import type {
   AgentEvent,
   AgentLoopExitReason,
   CheckpointDecision,
+  PreparedModelCall,
 } from "../agent/loop.js";
 import { createAssistantMessage } from "../agent/message-types.js";
 import type { AssistantEvent } from "../api/index.js";
@@ -413,12 +414,10 @@ export async function runAgentLoopImpl(
      * sites. Used when a caller explicitly pins a background run to a profile.
      */
     forceOverrideProfile?: boolean;
-    /**
-     * Warm the selected provider/profile in parallel with prompt preparation.
-     * Used by an escalated voice leg, whose memory and context hooks provide a
-     * useful window for a one-token cache fill before its real call starts.
-     */
-    warmPromptCache?: boolean;
+    /** Observe the first model call after pre-model routing settles. */
+    onFirstModelCallPrepared?: (
+      prepared: PreparedModelCall,
+    ) => void | Promise<void>;
     /**
      * Origin tag of this turn (the conversation's `TitleOrigin`, e.g.
      * "memory_consolidation"), threaded from `runBackgroundJob`. Exposed on
@@ -569,8 +568,7 @@ export async function runAgentLoopImpl(
   const turnOverrideProfile = userExplicitOverride;
   const forceOverrideProfile = options?.forceOverrideProfile === true;
 
-  // Initial value for `createToolExecutor` and the turn tool resolver. The
-  // latter may run early for cache warming, before the normal agent loop.
+  // Initial value for `createToolExecutor` and the turn tool resolver.
   ctx.currentTurnOverrideProfile = turnOverrideProfile;
 
   const readCurrentOverrideProfile = (): string | undefined =>
@@ -1034,18 +1032,6 @@ export async function runAgentLoopImpl(
       return;
     }
 
-    if (options?.warmPromptCache === true) {
-      ctx.warmPromptCache({
-        callSite: turnCallSite,
-        ...(turnOverrideProfile !== undefined
-          ? { overrideProfile: turnOverrideProfile }
-          : {}),
-        forceOverrideProfile,
-        signal: abortController.signal,
-        tools: ctx.agentLoop.getResolvedTools(ctx.messages),
-      });
-    }
-
     // Workspace Git readiness is required only when tools can run. Tool-less
     // callers use the same depth gate consumed by tool resolution.
     if (!toolsDisabledForTurn) {
@@ -1475,6 +1461,18 @@ export async function runAgentLoopImpl(
     // fields self-resolve from its own conversation id.
     const loopTrust = ctx.getTurnOrRestingTrust() ?? FALLBACK_TURN_TRUST;
 
+    const notifyFirstModelCallPrepared = options?.onFirstModelCallPrepared;
+    let firstModelCallPrepared = false;
+    const onModelCallPrepared = notifyFirstModelCallPrepared
+      ? async (prepared: PreparedModelCall): Promise<void> => {
+          if (firstModelCallPrepared) {
+            return;
+          }
+          firstModelCallPrepared = true;
+          await notifyFirstModelCallPrepared(prepared);
+        }
+      : undefined;
+
     /**
      * Shared closure: runs the agent loop with the wrapper's turn context and
      * maps the loop's returned checkpoint pause-reason into the wrapper's yield
@@ -1503,6 +1501,7 @@ export async function runAgentLoopImpl(
           overrideProfile: turnOverrideProfile,
           ...(forceOverrideProfile ? { forceOverrideProfile: true } : {}),
           resolveOverrideProfile: resolveCurrentOverrideProfile,
+          ...(onModelCallPrepared !== undefined ? { onModelCallPrepared } : {}),
           resolveContextWindow,
           compactInPlace,
           isNonInteractive,

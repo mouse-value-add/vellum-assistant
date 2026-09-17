@@ -53,10 +53,11 @@ import { createStorageAccessor } from "@/utils/typed-storage";
  * Every phase an activity can be pushed into, paired with its wording in the
  * app's current language.
  *
- * Derived from the key table rather than restated, so a phase added to the
- * session cannot quietly ship without server-side copy. `idle` and `failed` are
- * filtered out for the same reason they have no `ContentState.Phase` case:
- * neither has an activity to address.
+ * Local phases are derived from the key table so a session phase cannot
+ * quietly ship without server-side copy. `working` is added separately for
+ * server-driven escalation, which has no distinct local session state.
+ * `idle` and `failed` are filtered out because neither has an activity to
+ * address.
  *
  * The non-reactive `t`, because this is plain module code on the registration
  * path rather than a render. The map is a snapshot of the language the
@@ -87,6 +88,9 @@ function phaseLabels(muted: boolean): Record<string, string> {
     const key = liveVoiceSurfaceLabelKey(phase, false, true, muted);
     labels[phase] = key ? t(key) : "";
   }
+  // Server-driven escalation uses a structured phase that is not a local
+  // session state. Register its localized wording alongside the local phases.
+  labels.working = t("liveVoiceStatus.working");
   return labels;
 }
 

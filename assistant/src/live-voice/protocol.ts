@@ -576,8 +576,9 @@ export interface LiveVoiceThinkingServerFrame extends LiveVoiceServerFrameBase {
  * the room) can otherwise only say "Thinking...". The label is composed here
  * rather than by each surface for the same reason phase wording is composed
  * once: the Live Activity has two independent drivers (this socket and an APNs
- * push the daemon dispatches), they must carry identical content, and the only
- * way to guarantee that is for both to be handed the same string.
+ * push the daemon dispatches), they must carry compatible content. Structured
+ * kinds let each surface use registered localized phase copy when the generic
+ * activity label is not appropriate as a visible detail line.
  *
  * An empty `label` means "no current activity", which is what a turn's end
  * sends. Emitted only on change, never per tool result.

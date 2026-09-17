@@ -12,12 +12,12 @@ import Foundation
 /// lives in `ContentState`.
 struct VoiceSessionAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
-        /// Session phase, mirroring `LiveVoiceSessionState` in
-        /// `clients/web/src/domains/chat/voice/live-voice/live-voice-store.ts`,
-        /// which is the source of truth. **The two enums must be changed
-        /// together**: the web side sends these raw values across the Capacitor
-        /// bridge, so a case added or renamed there without a matching change
-        /// here fails to decode.
+        /// Session phase. The ordinary cases mirror `LiveVoiceSessionState` in
+        /// `clients/web/src/domains/chat/voice/live-voice/live-voice-store.ts`.
+        /// `working` is server-only: it keeps an escalated handoff distinct
+        /// when APNs is driving the activity while the web view is suspended.
+        /// Every local phase added or renamed on the web side still needs a
+        /// matching case here or the Capacitor payload fails to decode.
         ///
         /// `idle` and `failed` are deliberately absent — these are exactly the
         /// phases of a *running* session. An idle session has no Live Activity,
@@ -32,6 +32,7 @@ struct VoiceSessionAttributes: ActivityAttributes {
             case listening
             case transcribing
             case thinking
+            case working
             case speaking
             case ending
         }

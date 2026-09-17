@@ -75,7 +75,7 @@ capacitor-deep-links.ts  →  parseStartVoiceDeepLink  →  bus `deeplink.startV
 use-global-deep-link-consumer.ts  →  navigate + the live-voice `starter`
 ```
 
-## The two enums that must change together
+## The local phase enums and the server-only phase
 
 `LiveVoiceSessionState` in
 [`live-voice-store.ts`](../../web/src/domains/chat/voice/live-voice/live-voice-store.ts)
@@ -87,15 +87,16 @@ idle | connecting | listening | transcribing | thinking | speaking | ending | fa
 
 `VoiceSessionAttributes.ContentState.Phase` in
 [`App/App/Shared/VoiceSessionAttributes.swift`](../App/App/Shared/VoiceSessionAttributes.swift)
-declares the same cases **minus `idle` and `failed`**, with raw values that
-string-match. The web side sends those raw strings across the Capacitor bridge
-and `VoiceLiveActivityPlugin.contentState(from:)` decodes them with
-`Phase(rawValue:)`, so a case added or renamed on one side without the other
-fails to decode and the plugin rejects the call. The TypeScript type is
-`ActiveLiveVoiceSessionState` — the type `isLiveVoiceSessionActive()` narrows
-to, derived rather than restated — so a web-side rename is a compile error on
-the web and a silent decode failure natively. **The native enum is the half that
-has to be remembered.**
+declares the same cases **minus `idle` and `failed`**, plus the server-only
+`working` phase used while an escalated handoff is preparing. The shared local
+cases have raw values that string-match. The web side sends those raw strings
+across the Capacitor bridge and `VoiceLiveActivityPlugin.contentState(from:)`
+decodes them with `Phase(rawValue:)`, so a local case added or renamed on one
+side without the other fails to decode and the plugin rejects the call. The
+TypeScript type is `ActiveLiveVoiceSessionState`, the type
+`isLiveVoiceSessionActive()` narrows to, derived rather than restated. A
+web-side rename is therefore a compile error on the web and a silent decode
+failure natively. **The native enum is the half that has to be remembered.**
 
 Both omissions are the same rule: a Live Activity exists only for a *running*
 session. `idle` is the absence of one, and on a failure `toActivityContent()`

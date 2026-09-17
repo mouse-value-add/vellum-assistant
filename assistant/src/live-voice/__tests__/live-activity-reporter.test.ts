@@ -187,7 +187,7 @@ describe("LiveActivityReporter", () => {
 });
 
 describe("LiveActivityReporter activity line", () => {
-  test("does not duplicate escalation as an English detail line", () => {
+  test("publishes escalation as a structured phase without a detail line", () => {
     const reporter = new RecordingReporter("conv-1");
 
     reporter.report(frame("thinking"));
@@ -195,6 +195,7 @@ describe("LiveActivityReporter activity line", () => {
 
     expect(reporter.dispatched).toEqual([
       { phase: "thinking", event: "update", detail: "" },
+      { phase: "working", event: "update", detail: "" },
     ]);
   });
 

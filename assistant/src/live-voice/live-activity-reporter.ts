@@ -33,12 +33,13 @@ import type { LiveVoiceServerFramePayload } from "./protocol.js";
 
 const log = getLogger("live-activity-reporter");
 
-/** The phases an iOS Live Activity can render. Mirrors the client's union. */
+/** Running client phases plus server-only escalation work. */
 export type LiveActivityPhase =
   | "connecting"
   | "listening"
   | "transcribing"
   | "thinking"
+  | "working"
   | "speaking"
   | "ending";
 
@@ -88,6 +89,8 @@ export function phaseForFrame(
       // Unconditional, unlike `stt_final`: the session sends this frame
       // precisely when it has committed to a turn.
       return "thinking";
+    case "activity":
+      return frame.kind === "escalation" ? "working" : null;
     case "tts_audio":
       return "speaking";
     case "tts_done":

@@ -16,7 +16,7 @@
  */
 
 import { repairHistory } from "../agent/history-repair/history-repair.js";
-import type { AgentLoopConfig } from "../agent/loop.js";
+import type { AgentLoopConfig, PreparedModelCall } from "../agent/loop.js";
 import { AgentLoop } from "../agent/loop.js";
 import type { AssistantActivityStateEvent } from "../api/events/assistant-activity-state.js";
 import type { ConfirmationStateChangedEvent } from "../api/events/confirmation-state-changed.js";
@@ -1237,16 +1237,17 @@ export class Conversation {
   // ── Prompt Cache Warming ─────────────────────────────────────────
 
   /**
-   * Fire-and-forget LLM call with max_tokens=1 to populate the selected
+   * Non-rejecting LLM call with max_tokens=1 to populate the selected
    * provider's prompt cache (system prompt + tools).
    */
-  warmPromptCache(options?: {
+  async warmPromptCache(options?: {
     callSite?: LLMCallSite;
     overrideProfile?: string;
     forceOverrideProfile?: boolean;
     signal?: AbortSignal;
+    systemPrompt?: string;
     tools?: ToolDefinition[];
-  }): void {
+  }): Promise<void> {
     this.cacheWarmAbort?.abort();
     const abort = new AbortController();
     this.cacheWarmAbort = abort;
@@ -1259,7 +1260,8 @@ export class Conversation {
       externalSignal?.addEventListener("abort", relayAbort, { once: true });
     }
 
-    const systemPrompt = this.buildCurrentSystemPrompt();
+    const systemPrompt =
+      options?.systemPrompt ?? this.buildCurrentSystemPrompt();
     const tools = options?.tools ?? getAllToolDefinitions();
     const callSite = options?.callSite ?? "mainAgent";
     const providerConfig = {
@@ -1277,8 +1279,8 @@ export class Conversation {
       content: [{ type: "text", text: "hi" }],
     };
 
-    void this.provider
-      .sendMessage([warmMessage], {
+    try {
+      await this.provider.sendMessage([warmMessage], {
         tools: tools.length > 0 ? tools : undefined,
         systemPrompt,
         config: {
@@ -1288,36 +1290,33 @@ export class Conversation {
           usageTracking: "manual",
         },
         signal: abort.signal,
-      })
-      .then(() => {
-        if (!abort.signal.aborted) {
-          log.info(
-            {
-              callSite,
-              profile: options?.overrideProfile ?? null,
-            },
-            "Prompt cache warmed successfully",
-          );
-        }
-      })
-      .catch((err) => {
-        if (!abort.signal.aborted) {
-          log.warn(
-            {
-              err,
-              callSite,
-              profile: options?.overrideProfile ?? null,
-            },
-            "Prompt cache warming failed (non-fatal)",
-          );
-        }
-      })
-      .finally(() => {
-        externalSignal?.removeEventListener("abort", relayAbort);
-        if (this.cacheWarmAbort === abort) {
-          this.cacheWarmAbort = undefined;
-        }
       });
+      if (!abort.signal.aborted) {
+        log.info(
+          {
+            callSite,
+            profile: options?.overrideProfile ?? null,
+          },
+          "Prompt cache warmed successfully",
+        );
+      }
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        log.warn(
+          {
+            err,
+            callSite,
+            profile: options?.overrideProfile ?? null,
+          },
+          "Prompt cache warming failed (non-fatal)",
+        );
+      }
+    } finally {
+      externalSignal?.removeEventListener("abort", relayAbort);
+      if (this.cacheWarmAbort === abort) {
+        this.cacheWarmAbort = undefined;
+      }
+    }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
@@ -3467,8 +3466,10 @@ export class Conversation {
       overrideProfile?: string;
       /** Float `overrideProfile` above call-site layers for this run. */
       forceOverrideProfile?: boolean;
-      /** Warm this turn's selected profile while prompt hooks prepare input. */
-      warmPromptCache?: boolean;
+      /** Observe the first model call after pre-model routing settles. */
+      onFirstModelCallPrepared?: (
+        prepared: PreparedModelCall,
+      ) => void | Promise<void>;
       /**
        * Firing's `cron_runs.id` stamped onto this turn's usage rows. Per-turn:
        * forwarded into {@link runAgentLoopImpl} and threaded to `recordUsage`.

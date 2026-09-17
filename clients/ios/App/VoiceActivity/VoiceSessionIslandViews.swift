@@ -112,6 +112,7 @@ extension VoiceSessionAttributes.ContentState {
         case .listening: return "waveform"
         case .transcribing: return "text.bubble"
         case .thinking: return "ellipsis"
+        case .working: return "ellipsis"
         case .speaking: return "speaker.wave.2.fill"
         case .ending: return "phone.down.fill"
         }

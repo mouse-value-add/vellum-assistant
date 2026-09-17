@@ -360,9 +360,10 @@ export interface LiveVoiceThinkingServerFrame extends LiveVoiceServerFrameBase {
  *
  * The wording is the daemon's, not this layer's, and that is deliberate: the
  * iOS Live Activity is driven both by this socket and by an APNs push the
- * daemon dispatches when this web layer is suspended, the two must carry
- * identical content state, and handing both the same string is the only way to
- * guarantee it. See `assistant/src/live-voice/activity-label.ts`.
+ * daemon dispatches when this web layer is suspended. Structured kinds let
+ * each surface use registered localized phase copy when the generic activity
+ * label is not appropriate as a visible detail line. See
+ * `assistant/src/live-voice/activity-label.ts`.
  */
 export interface LiveVoiceActivityServerFrame extends LiveVoiceServerFrameBase {
   readonly type: "activity";
@@ -377,6 +378,7 @@ export interface LiveVoiceActivityServerFrame extends LiveVoiceServerFrameBase {
     | "conversation"
     | "turn_override"
     | "image_compatibility"
+    | "pre_model_hook"
     | "call_site";
   /**
    * The confirmation this turn is blocked on, when the label describes a wait

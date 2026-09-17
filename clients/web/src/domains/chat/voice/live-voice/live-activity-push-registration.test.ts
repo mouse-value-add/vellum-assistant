@@ -152,6 +152,7 @@ describe("registerLiveActivityPushToken content state", () => {
     expect(lastUpsertArg?.body.labels.listening).toBe("Muted");
     // The assistant's own phases are unaffected by a muted mic.
     expect(lastUpsertArg?.body.labels.thinking).toBe("Thinking…");
+    expect(lastUpsertArg?.body.labels.working).toBe("Working on that…");
   });
 
   test("pushes the listening label unmuted when the mic is live", async () => {
@@ -172,6 +173,7 @@ describe("registerLiveActivityPushToken content state", () => {
 
       expect(lastUpsertArg?.body.labels.listening).toBe("Escuchando…");
       expect(lastUpsertArg?.body.labels.thinking).toBe("Pensando…");
+      expect(lastUpsertArg?.body.labels.working).toBe("Trabajando en ello…");
     } finally {
       // Process-global, so leaving it set would fail every later assertion.
       await changeLocale("en");
