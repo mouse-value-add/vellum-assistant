@@ -128,10 +128,15 @@ export class LiveActivityReporter {
       return;
     }
     const phase = phaseForFrame(frame, this.lastPhase);
-    // The session sends this frame only on a change it wants surfaced, and
-    // sends an empty label when the turn stops working, so it is taken
-    // verbatim rather than derived.
-    const detail = frame.type === "activity" ? frame.label : this.lastDetail;
+    // Tool and approval activity is server-owned wording. Escalation is the
+    // exception: clients render its localized phase label, so carrying the
+    // English label as detail would duplicate the status and mix languages.
+    const detail =
+      frame.type === "activity"
+        ? frame.kind === "escalation"
+          ? ""
+          : frame.label
+        : this.lastDetail;
     const phaseMoved = phase !== null && phase !== this.lastPhase;
     if (!phaseMoved && detail === this.lastDetail) {
       return;

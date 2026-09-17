@@ -429,6 +429,8 @@ export function ChatComposer({
   // declare it.
   const supportsLiveVoice = useSupportsLiveVoice(assistantId);
   const liveVoiceState = useLiveVoiceStore.use.state();
+  const liveVoiceAssistantAudioActive =
+    useLiveVoiceStore.use.assistantAudioActive();
   const liveVoiceResponsePhase = useLiveVoiceStore.use.responsePhase();
   const liveVoiceError = useLiveVoiceStore.use.error();
   const liveVoiceErrorRecovery = useLiveVoiceStore.use.errorRecovery();
@@ -1655,6 +1657,7 @@ export function ChatComposer({
         <div className="mb-2">
           <VoiceComposerBar
             state={liveVoiceState}
+            assistantAudioActive={liveVoiceAssistantAudioActive}
             responsePhase={liveVoiceResponsePhase}
             getAmplitude={getLiveVoiceInputAmplitude}
             getOutputAmplitude={getLiveVoiceOutputAmplitude}

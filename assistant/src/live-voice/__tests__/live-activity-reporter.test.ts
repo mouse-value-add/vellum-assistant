@@ -46,11 +46,15 @@ class RecordingReporter extends LiveActivityReporter {
   }
 }
 
-function activity(label: string): LiveVoiceServerFramePayload {
+function activity(
+  label: string,
+  kind?: "escalation",
+): LiveVoiceServerFramePayload {
   return {
     type: "activity",
     turnId: "t1",
     label,
+    ...(kind ? { kind } : {}),
   } as LiveVoiceServerFramePayload;
 }
 
@@ -183,6 +187,17 @@ describe("LiveActivityReporter", () => {
 });
 
 describe("LiveActivityReporter activity line", () => {
+  test("does not duplicate escalation as an English detail line", () => {
+    const reporter = new RecordingReporter("conv-1");
+
+    reporter.report(frame("thinking"));
+    reporter.report(activity("Working on that", "escalation"));
+
+    expect(reporter.dispatched).toEqual([
+      { phase: "thinking", event: "update", detail: "" },
+    ]);
+  });
+
   test("carries the activity label alongside the phase it holds", () => {
     const reporter = new RecordingReporter("conv-1");
 

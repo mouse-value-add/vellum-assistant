@@ -103,6 +103,7 @@ const BAR_HEIGHT_CLASS = "h-10 touch-mobile:h-11";
 
 export interface VoiceComposerBarProps {
   state: LiveVoiceSessionState;
+  assistantAudioActive?: boolean;
   responsePhase?: LiveVoiceResponsePhase | null;
   /** Mic level, polled ~30 Hz by the band's draw loop. No re-render per sample. */
   getAmplitude: () => number;
@@ -144,6 +145,7 @@ export interface VoiceComposerBarProps {
 
 export function VoiceComposerBar({
   state,
+  assistantAudioActive = state === "speaking",
   responsePhase = null,
   getAmplitude,
   getOutputAmplitude,
@@ -181,14 +183,14 @@ export function VoiceComposerBar({
     "--vbtn-fg": voiceSurfaceMutedInk(paint),
   } as CSSProperties;
   // The session's own word, taken as a catalog key so the live region reads in
-  // the user's language. The bar is handed a phase and a mute flag and nothing
-  // else, so the reconnect and assistant-audio remaps are handed the values
-  // that leave them unfired. Mute keeps the branch at the region below: this
-  // bar says "Muted" in every phase, not only the one the session relabels.
+  // the user's language. The bar has no reconnect state, while actual playback
+  // distinguishes silent handoff work from active speech. Mute stays in the
+  // region below: this bar says "Muted" in every phase, not only the one the
+  // session relabels.
   const stateKey = liveVoiceSurfaceLabelKey(
     state,
     false,
-    true,
+    assistantAudioActive,
     false,
     responsePhase,
   );

@@ -573,18 +573,6 @@ export async function runAgentLoopImpl(
   // latter may run early for cache warming, before the normal agent loop.
   ctx.currentTurnOverrideProfile = turnOverrideProfile;
 
-  if (options?.warmPromptCache === true) {
-    ctx.warmPromptCache({
-      callSite: turnCallSite,
-      ...(turnOverrideProfile !== undefined
-        ? { overrideProfile: turnOverrideProfile }
-        : {}),
-      forceOverrideProfile,
-      signal: abortController.signal,
-      tools: ctx.agentLoop.getResolvedTools(ctx.messages),
-    });
-  }
-
   const readCurrentOverrideProfile = (): string | undefined =>
     options?.overrideProfile ?? resolveOverrideProfile(ctx);
 
@@ -1044,6 +1032,18 @@ export async function runAgentLoopImpl(
         errorCategory: DISK_PRESSURE_ERROR_CATEGORY,
       });
       return;
+    }
+
+    if (options?.warmPromptCache === true) {
+      ctx.warmPromptCache({
+        callSite: turnCallSite,
+        ...(turnOverrideProfile !== undefined
+          ? { overrideProfile: turnOverrideProfile }
+          : {}),
+        forceOverrideProfile,
+        signal: abortController.signal,
+        tools: ctx.agentLoop.getResolvedTools(ctx.messages),
+      });
     }
 
     // Workspace Git readiness is required only when tools can run. Tool-less
