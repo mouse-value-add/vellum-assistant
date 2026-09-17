@@ -8,7 +8,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { MemoryRouter, useNavigate } from "react-router";
 
 import type { OAuthConnection } from "@/generated/api/types.gen";
@@ -33,6 +33,25 @@ let oauthFails = false;
 let mcpFails = false;
 let pluginCatalogFails = false;
 let pluginListFails = false;
+// The catalog is the slowest source on the page, so the tests drive its phase
+// from outside React: "pending" is the first load, "refetching" a background
+// one after the list is already on screen.
+type CatalogPhase = "pending" | "loaded" | "refetching";
+let catalogPhase: CatalogPhase = "loaded";
+const catalogPhaseListeners = new Set<() => void>();
+const readCatalogPhase = () => catalogPhase;
+function subscribeCatalogPhase(listener: () => void) {
+  catalogPhaseListeners.add(listener);
+  return () => {
+    catalogPhaseListeners.delete(listener);
+  };
+}
+function setCatalogPhase(phase: CatalogPhase) {
+  catalogPhase = phase;
+  for (const listener of catalogPhaseListeners) {
+    listener();
+  }
+}
 let mcpAuthFails = false;
 let assistantAvailable = true;
 let platformGate = "full";
@@ -188,14 +207,20 @@ mock.module("@/hooks/use-managed-oauth-connect", () => ({
   }),
 }));
 mock.module("@/hooks/use-plugins-list", () => ({
-  usePluginsList: () => ({
-    isLoading: false,
-    isError: pluginListFails,
-    installedLoaded: !pluginListFails || seededPlugins.length > 0,
-    catalogError: pluginCatalogFails,
-    catalogMatches: seededCatalog,
-    installedPlugins: seededPlugins,
-  }),
+  usePluginsList: () => {
+    const phase = useSyncExternalStore(subscribeCatalogPhase, readCatalogPhase);
+    return {
+      isLoading: false,
+      isError: pluginListFails,
+      installedLoaded: !pluginListFails || seededPlugins.length > 0,
+      // Pending is the first load only; a refetch keeps the matches it has.
+      catalogLoading: phase === "pending",
+      isFetching: phase !== "loaded",
+      catalogError: pluginCatalogFails,
+      catalogMatches: phase === "pending" ? [] : seededCatalog,
+      installedPlugins: seededPlugins,
+    };
+  },
 }));
 mock.module("@/lib/sentry/capture-error", () => ({ captureError: () => {} }));
 // A desktop shell hands the authorization URL to the OS browser, so the
@@ -362,6 +387,7 @@ afterEach(() => {
   mcpFails = false;
   pluginCatalogFails = false;
   pluginListFails = false;
+  catalogPhase = "loaded";
   mcpAuthFails = false;
   assistantAvailable = true;
   platformGate = "full";
@@ -463,6 +489,44 @@ describe("IntegrationsPage", () => {
     await screen.findByText("Notion");
     screen.getByText("example-integration");
     screen.getByText(/Plugin integrations could not be loaded/);
+    // A catalog that will never arrive stops the wait: the notice reports it.
+    expect(screen.queryByText("Loading...")).toBeNull();
+  });
+
+  test("holds the whole grid until the plugin catalog arrives", async () => {
+    catalogPhase = "pending";
+    seededProviders = [provider()];
+    seededCatalog = [catalogMatch()];
+    render(<IntegrationsPage />, { wrapper: Wrapper });
+
+    // The providers resolve first; showing them alone would pop the catalog
+    // tiles in afterwards.
+    await screen.findByText("Loading...");
+    expect(screen.queryByText("Notion")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Available/ })).toBeNull();
+
+    await act(async () => {
+      setCatalogPhase("loaded");
+    });
+
+    await screen.findByText("Example");
+    screen.getByText("Notion");
+    expect(screen.queryByText("Loading...")).toBeNull();
+  });
+
+  test("a background catalog refetch leaves the grid on screen", async () => {
+    seededProviders = [provider()];
+    seededCatalog = [catalogMatch()];
+    render(<IntegrationsPage />, { wrapper: Wrapper });
+    await screen.findByText("Example");
+
+    await act(async () => {
+      setCatalogPhase("refetching");
+    });
+
+    expect(screen.queryByText("Loading...")).toBeNull();
+    screen.getByText("Example");
+    screen.getByText("Notion");
   });
 
   test("connects an available MCP plugin from its own tile", async () => {

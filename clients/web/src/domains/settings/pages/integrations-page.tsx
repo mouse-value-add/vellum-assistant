@@ -304,13 +304,20 @@ function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) 
     .sort(
       (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
     );
+  // The grid is drawn once, complete. Every source is waited on for its first
+  // result, the plugin catalog included: it is the slowest of them, so letting
+  // it land after the grid pops a screenful of tiles into a page that already
+  // looked settled. Each of these is a first-load signal only, so a source
+  // that fails stops the wait (its own notice reports it) and a later
+  // background refetch leaves the grid where it is.
   const loading =
     assistantLoading ||
     providers.isLoading ||
     connections.isLoading ||
     platformAssistantIdLoading ||
     mcp.list.isLoading ||
-    ((plugins.isLoading || plugins.catalogLoading) && allItems.length === 0);
+    plugins.isLoading ||
+    plugins.catalogLoading;
   // One attempt at a time, on every surface: a managed authorization is just
   // as exclusive as an MCP one, and the rows and cards that predate the tiles
   // only knew about the MCP machine.
@@ -565,35 +572,37 @@ function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) 
           <Loader2 className="size-4 animate-spin" />
           {t("integrationsPage.loading")}
         </div>
-      ) : null}
-
-      {configuredItems.length > 0 ? (
-        <IntegrationSection
-          title={t("integrationsPage.sectionConfigured")}
-          count={configuredItems.length}
-          gridClassName={CONFIGURED_GRID}
-        >
-          {configuredItems.map(renderItem)}
-        </IntegrationSection>
-      ) : null}
-      {availableItems.length > 0 ? (
-        <IntegrationSection
-          title={t("integrationsPage.sectionAvailable")}
-          count={availableItems.length}
-          gridClassName={AVAILABLE_GRID}
-        >
-          {availableItems.map(renderItem)}
-        </IntegrationSection>
-      ) : null}
-      {!loading && items.length === 0 ? (
-        <p className="py-8 text-center text-body-medium-default text-[var(--content-tertiary)]">
-          {searchText.trim()
-            ? t("integrationsPage.emptySearchSubtitle", {
-                query: searchText.trim(),
-              })
-            : t("integrationsPage.empty")}
-        </p>
-      ) : null}
+      ) : (
+        <>
+          {configuredItems.length > 0 ? (
+            <IntegrationSection
+              title={t("integrationsPage.sectionConfigured")}
+              count={configuredItems.length}
+              gridClassName={CONFIGURED_GRID}
+            >
+              {configuredItems.map(renderItem)}
+            </IntegrationSection>
+          ) : null}
+          {availableItems.length > 0 ? (
+            <IntegrationSection
+              title={t("integrationsPage.sectionAvailable")}
+              count={availableItems.length}
+              gridClassName={AVAILABLE_GRID}
+            >
+              {availableItems.map(renderItem)}
+            </IntegrationSection>
+          ) : null}
+          {items.length === 0 ? (
+            <p className="py-8 text-center text-body-medium-default text-[var(--content-tertiary)]">
+              {searchText.trim()
+                ? t("integrationsPage.emptySearchSubtitle", {
+                    query: searchText.trim(),
+                  })
+                : t("integrationsPage.empty")}
+            </p>
+          ) : null}
+        </>
+      )}
 
       {connect.modal &&
       connectModalPlan &&
