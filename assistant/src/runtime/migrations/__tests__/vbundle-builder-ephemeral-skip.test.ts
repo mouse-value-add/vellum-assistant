@@ -10,7 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { buildExportVBundle, streamExportVBundle } from "../vbundle-builder.js";
+import {
+  buildExportVBundle,
+  isUnderSkippedDir,
+  streamExportVBundle,
+} from "../vbundle-builder.js";
 import { defaultV1Options } from "./v1-test-helpers.js";
 
 const KEPT = [
@@ -86,4 +90,22 @@ describe("workspace export skips per-process runtime state", () => {
       workspace.cleanup();
     }
   });
+});
+
+describe("isUnderSkippedDir", () => {
+  const skip = ["embedding-models", "data/logs"];
+
+  test.each(["data/logs", "data/logs/assistant.log", "embedding-models"])(
+    "%s is skipped",
+    (rel) => {
+      expect(isUnderSkippedDir(rel, skip)).toBe(true);
+    },
+  );
+
+  test.each(["data", "data/logs-archive", "logs", "data/db/assistant.db"])(
+    "%s is walked",
+    (rel) => {
+      expect(isUnderSkippedDir(rel, skip)).toBe(false);
+    },
+  );
 });

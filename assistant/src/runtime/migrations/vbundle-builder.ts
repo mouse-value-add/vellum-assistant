@@ -488,6 +488,22 @@ const WORKSPACE_SKIP_FILES: readonly string[] = [".backup.key"];
  * holds every committed row) and pid files (a restored pid names a process
  * on the source host, so the CLI would probe or kill the wrong daemon).
  */
+/** `path.relative` in the archive's POSIX form, whatever the host separator. */
+function relativePosix(from: string, to: string): string {
+  return relative(from, to).split(sep).join("/");
+}
+
+/**
+ * True when `relDir` (a POSIX-form path relative to the walk root) is one
+ * of `skipDirs` or lies beneath one.
+ */
+export function isUnderSkippedDir(
+  relDir: string,
+  skipDirs: readonly string[],
+): boolean {
+  return skipDirs.some((s) => relDir === s || relDir.startsWith(s + "/"));
+}
+
 function isEphemeralWorkspaceFile(basename: string): boolean {
   return (
     basename.endsWith(".db-wal") ||
@@ -560,13 +576,7 @@ function classifySymlink(args: {
     return { kind: "drop", reason: "target outside workspace" };
   }
 
-  const targetRelToWorkspace = relative(dirAbs, targetAbs);
-  if (
-    skipDirs.some(
-      (s) =>
-        targetRelToWorkspace === s || targetRelToWorkspace.startsWith(s + "/"),
-    )
-  ) {
+  if (isUnderSkippedDir(relativePosix(dirAbs, targetAbs), skipDirs)) {
     return { kind: "drop", reason: "target inside skipDir" };
   }
 
@@ -640,8 +650,7 @@ export function walkDirectory(
 
       if (stat.isDirectory()) {
         // Check skip list against the relative path from the walk root
-        const relDir = relative(dir, fullPath);
-        if (skipDirs.some((s) => relDir === s || relDir.startsWith(s + "/"))) {
+        if (isUnderSkippedDir(relativePosix(dir, fullPath), skipDirs)) {
           continue;
         }
         walk(fullPath);
@@ -863,8 +872,7 @@ export function walkDirectoryForMetadata(
 
       if (fileStat.isDirectory()) {
         // Check skip list against the relative path from the walk root
-        const relDir = relative(dir, fullPath);
-        if (skipDirs.some((s) => relDir === s || relDir.startsWith(s + "/"))) {
+        if (isUnderSkippedDir(relativePosix(dir, fullPath), skipDirs)) {
           continue;
         }
         walk(fullPath);
