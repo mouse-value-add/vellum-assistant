@@ -61,12 +61,24 @@
     "takingLonger": "Tu asistente está tardando más de lo esperado.",
     "tryAgain": "Reintentar"
   },
+  "mobileDetailSheet": {
+    "title": "Detalles de la actividad"
+  },
   "activityStepsPanel": {
     "backAria": "Volver a todos los pasos",
     "backTooltip": "Todos los pasos",
     "closeSteps": "Cerrar pasos",
+    "screenshotAria": "Vista previa de la captura de pantalla de {activity}",
+    "screenshotFallbackAria": "Vista previa de la captura de pantalla del ordenador",
+    "screenshotFallbackTitle": "Captura de pantalla del ordenador",
+    "screenshotTitle": "Captura de pantalla de {activity}",
     "thinkingTitle": "Pensando",
     "viewThinkingAria": "Ver razonamiento"
+  },
+  "computerUseScreenshotPreview": {
+    "unavailable": "La captura de pantalla más reciente no está disponible.",
+    "unavailableShowingPrevious": "La captura de pantalla más reciente no está disponible. Se muestra la captura anterior.",
+    "updating": "Actualizando la captura de pantalla..."
   },
   "addToChatSheet": {
     "camera": "Cámara",
@@ -102,6 +114,7 @@
     "hideAria": "Ocultar escritorio virtual",
     "closeAria": "Cerrar vista previa del escritorio virtual",
     "moveAria": "Mover vista previa del escritorio virtual (teclas de flecha)",
+    "resizeAria": "Cambiar tamaño de la vista previa del escritorio virtual (teclas de flecha)",
     "expandAria": "Ampliar escritorio virtual",
     "busy": "Otro usuario está usando el escritorio virtual.",
     "connecting": "Conectando con el escritorio virtual…",
@@ -686,10 +699,6 @@
     "copied": "Copiado",
     "copy": "Copiar"
   },
-  "copyButton": {
-    "copied": "Copiado",
-    "copyFailed": "No se pudo copiar al portapapeles."
-  },
   "copyIdToClipboard": {
     "conversationCopied": "ID de conversación copiado al portapapeles.",
     "conversationFailed": "No se pudo copiar el ID de conversación.",
@@ -950,7 +959,13 @@
     "pictureInPictureUnavailable": "Imagen sobre imagen no está disponible"
   },
   "localFileLink": {
-    "unavailable": "Este archivo no está disponible aquí"
+    "closePreview": "Cerrar vista previa: {filename}",
+    "fileOptions": "Opciones del archivo: {filename}",
+    "openInWorkspace": "Abrir en el espacio de trabajo: {filename}",
+    "openPreview": "Abrir vista previa: {filename}",
+    "unavailable": "Este archivo no está disponible aquí",
+    "unavailableLabel": "Archivo no disponible: {filename}",
+    "viewImage": "Ver imagen: {filename}"
   },
   "localFileMenu": {
     "download": "Descargar",
@@ -1523,6 +1538,8 @@
     "submitFailed": "No se pudo enviar el secreto. Inténtalo de nuevo."
   },
   "secretPromptCard": {
+    "showValue": "Mostrar valor",
+    "hideValue": "Ocultar valor",
     "cancel": "Cancelar",
     "domains": "Dominios: {list}",
     "placeholder": "Introduce el valor secreto...",
@@ -1576,16 +1593,18 @@
     "titleFallback": "Habilidad"
   },
   "skillExecuteDetail": {
-    "parameters": "Parámetros",
-    "rawInput": "Entrada sin procesar",
     "runningSuffix": " · en ejecución"
   },
   "skillLoadCard": {
     "view": "Ver"
   },
   "skillLoadDetail": {
+    "failed": "No se pudo cargar",
+    "loading": "Cargando habilidad…",
     "loadingAria": "Cargando habilidad",
+    "notApproved": "No aprobada",
     "provides": "Proporciona",
+    "unnamedSkill": "Habilidad",
     "usedSkill": "Habilidad usada"
   },
   "skillLoadOutput": {
@@ -1660,7 +1679,8 @@
   "tableSurface": {
     "copied": "Copiado",
     "copy": "Copiar",
-    "copyAria": "Copiar tabla como markdown"
+    "copyAria": "Copiar tabla como markdown",
+    "copyFailed": "No se pudo copiar la tabla."
   },
   "taskPreferencesSurface": {
     "continue": "Continuar",
@@ -1708,10 +1728,16 @@
     "command": "Comando",
     "denied": "Esta llamada a la herramienta no se aprobó, así que no se ejecutó.",
     "emptyOutput": "La herramienta no devolvió ninguna salida.",
-    "input": "Entrada",
     "output": "Salida",
     "requestedChanges": "Cambios solicitados",
     "running": "Ejecutando…"
+  },
+  "toolInputParameters": {
+    "parameters": "Parámetros",
+    "rawInput": "Entrada sin procesar"
+  },
+  "toolParamFields": {
+    "moreCount": "{count, plural, one {# más en Entrada sin procesar} other {# más en Entrada sin procesar}}"
   },
   "toolStepPill": {
     "openAria": "Abrir {label}",
@@ -1928,5 +1954,14 @@
     "savedTime": "Guardado: {time}",
     "pendingAria": "Fotograma de cámara, la imagen aún se está cargando. {time}",
     "timeUnavailable": "Hora no disponible"
+  },
+  "desktopHelpCard": {
+    "showPreview": "Mostrar vista previa en directo",
+    "needsHelp": "El escritorio virtual necesita tu ayuda.",
+    "stepIn": "Intervenir",
+    "done": "Listo",
+    "skip": "Omitir",
+    "showMore": "Mostrar más",
+    "showLess": "Mostrar menos"
   }
 }

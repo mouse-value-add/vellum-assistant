@@ -61,12 +61,24 @@
     "takingLonger": "您的助理回應時間超出預期。",
     "tryAgain": "再試一次"
   },
+  "mobileDetailSheet": {
+    "title": "活動詳細資訊"
+  },
   "activityStepsPanel": {
     "backAria": "返回所有步驟",
     "backTooltip": "所有步驟",
     "closeSteps": "關閉步驟",
+    "screenshotAria": "預覽來自「{activity}」的螢幕截圖",
+    "screenshotFallbackAria": "預覽電腦螢幕截圖",
+    "screenshotFallbackTitle": "電腦螢幕截圖",
+    "screenshotTitle": "來自「{activity}」的螢幕截圖",
     "thinkingTitle": "思考中",
     "viewThinkingAria": "檢視思考過程"
+  },
+  "computerUseScreenshotPreview": {
+    "unavailable": "最新螢幕截圖無法使用。",
+    "unavailableShowingPrevious": "最新螢幕截圖無法使用。正在顯示上一張螢幕截圖。",
+    "updating": "正在更新螢幕截圖..."
   },
   "addToChatSheet": {
     "camera": "相機",
@@ -102,6 +114,7 @@
     "hideAria": "隱藏虛擬桌面",
     "closeAria": "關閉虛擬桌面預覽",
     "moveAria": "移動虛擬桌面預覽（方向鍵）",
+    "resizeAria": "調整虛擬桌面預覽大小（方向鍵）",
     "expandAria": "展開虛擬桌面",
     "busy": "虛擬桌面正由其他使用者使用中。",
     "connecting": "正在連線至虛擬桌面…",
@@ -683,10 +696,6 @@
     "copied": "已複製",
     "copy": "複製"
   },
-  "copyButton": {
-    "copied": "已複製",
-    "copyFailed": "無法複製到剪貼簿。"
-  },
   "copyIdToClipboard": {
     "conversationCopied": "對話 ID 已複製到剪貼簿。",
     "conversationFailed": "無法複製對話 ID。",
@@ -988,7 +997,13 @@
     "pictureInPictureUnavailable": "子母畫面無法使用"
   },
   "localFileLink": {
-    "unavailable": "此檔案在此處無法使用"
+    "closePreview": "關閉預覽：{filename}",
+    "fileOptions": "檔案選項：{filename}",
+    "openInWorkspace": "在工作區中開啟：{filename}",
+    "openPreview": "開啟預覽：{filename}",
+    "unavailable": "此檔案在此處無法使用",
+    "unavailableLabel": "檔案無法使用：{filename}",
+    "viewImage": "檢視圖片：{filename}"
   },
   "localFileMenu": {
     "download": "下載",
@@ -1561,6 +1576,8 @@
     "submitFailed": "提交金鑰失敗。請再試一次。"
   },
   "secretPromptCard": {
+    "showValue": "顯示值",
+    "hideValue": "隱藏值",
     "cancel": "取消",
     "domains": "網域：{list}",
     "placeholder": "輸入金鑰值...",
@@ -1614,16 +1631,18 @@
     "titleFallback": "技能"
   },
   "skillExecuteDetail": {
-    "parameters": "參數",
-    "rawInput": "原始輸入",
     "runningSuffix": " · 執行中"
   },
   "skillLoadCard": {
     "view": "檢視"
   },
   "skillLoadDetail": {
+    "failed": "載入失敗",
+    "loading": "正在載入技能…",
     "loadingAria": "正在載入技能",
+    "notApproved": "未獲核准",
     "provides": "提供",
+    "unnamedSkill": "技能",
     "usedSkill": "已使用技能"
   },
   "skillLoadOutput": {
@@ -1698,7 +1717,8 @@
   "tableSurface": {
     "copied": "已複製",
     "copy": "複製",
-    "copyAria": "將表格複製為 Markdown"
+    "copyAria": "將表格複製為 Markdown",
+    "copyFailed": "無法複製表格。"
   },
   "taskPreferencesSurface": {
     "continue": "繼續",
@@ -1746,10 +1766,16 @@
     "command": "指令",
     "denied": "此工具呼叫未獲核准，因此沒有執行。",
     "emptyOutput": "該工具沒有回傳任何輸出。",
-    "input": "輸入",
     "output": "輸出",
     "requestedChanges": "要求的變更",
     "running": "正在執行…"
+  },
+  "toolInputParameters": {
+    "parameters": "參數",
+    "rawInput": "原始輸入"
+  },
+  "toolParamFields": {
+    "moreCount": "{count, plural, other {另有 # 項，見「原始輸入」}}"
   },
   "toolStepPill": {
     "openAria": "開啟 {label}",
@@ -1994,5 +2020,14 @@
     "savedTime": "儲存於 {time}",
     "pendingAria": "攝影機畫面，影像仍在載入。{time}",
     "timeUnavailable": "時間無法取得"
+  },
+  "desktopHelpCard": {
+    "showPreview": "顯示即時預覽",
+    "needsHelp": "虛擬桌面需要你的協助。",
+    "stepIn": "接管",
+    "done": "完成",
+    "skip": "略過",
+    "showMore": "展開",
+    "showLess": "收起"
   }
 }

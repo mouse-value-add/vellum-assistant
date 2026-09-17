@@ -22,6 +22,11 @@ import {
 import { supportsChannelReaction } from "../messaging/providers/index.js";
 import type { PermissionPrompter } from "../permissions/prompter.js";
 import type { SecretPrompter } from "../permissions/secret-prompter.js";
+import {
+  type ConversationToolSurface,
+  hashConversationToolSurface,
+  recordConversationToolSurface,
+} from "../persistence/conversation-tool-surface.js";
 import { getBindingByConversation } from "../persistence/external-conversation-store.js";
 import { getAllDefaultPluginNames } from "../plugins/defaults/main.js";
 import { isActivationSession } from "../plugins/defaults/memory/activation-session-store.js";
@@ -45,11 +50,8 @@ import {
   injectActivityField,
   stripActivityField,
 } from "../tools/schema-transforms.js";
-import {
-  augmentSkillExecuteError,
-  recoverSkillExecuteEnvelope,
-  resolveSkillExecuteInput,
-} from "../tools/skills/execute.js";
+import { augmentSkillExecuteError } from "../tools/skills/execute.js";
+import { resolveSkillExecuteInvocation } from "../tools/skills/resolve-execute-invocation.js";
 import { resolveToolInvocationAlias } from "../tools/tool-name-aliases.js";
 import type {
   ProxyApprovalCallback,
@@ -535,23 +537,8 @@ export function createToolExecutor(
     // risk level, permission checks, hooks, and lifecycle events all fire
     // with the real tool name.
     if (executionName === "skill_execute") {
-      // Recover an envelope the provider wrapped as unparseable when MiniMax's
-      // coercion failed to JSON-decode a bare-string `input` (see
-      // recoverSkillExecuteEnvelope), then resolve the inner tool + params.
-      const envelope = recoverSkillExecuteEnvelope(executionInput);
-      const rawToolName =
-        typeof envelope.tool === "string" ? envelope.tool : "";
-      const innerSchema = rawToolName
-        ? getTool(rawToolName)?.input_schema
-        : undefined;
-      const rawToolInput = resolveSkillExecuteInput(envelope, innerSchema);
-
-      // Clone to avoid mutating shared input objects
-      const { name: toolName, input: toolInput } = resolveToolInvocationAlias(
-        rawToolName,
-        { ...rawToolInput },
-        ctx.allowedToolNames,
-      );
+      const { name: toolName, input: toolInput } =
+        resolveSkillExecuteInvocation(executionInput, ctx.allowedToolNames);
 
       if (!toolName) {
         return {
@@ -950,8 +937,12 @@ export function canSpawnSubagentsForTurn(ctx: Conversation): boolean {
   // executor instead. That is the right answer to "is this tool on the wire"
   // and the wrong one to "could this turn actually spawn": the memory
   // retrospective wake runs in execution mode with an allowlist that names
-  // `skill_load` but neither the dispatcher nor the spawn tool, so the spawn
-  // is denied after the prompt has already told the model to delegate.
+  // `skill_load` but neither the dispatcher nor the spawn tool, so a spawn is
+  // denied at execution. A wake replaying its source's recorded surface
+  // renders the source's delegation state in place of this answer
+  // (`Conversation.delegateIndependentTasksReplay`): a denied spawn attempt
+  // costs one tool error, a system prompt that differs from the source's
+  // costs the whole cached prefix behind it.
   const allowlist = ctx.subagentAllowedTools;
   return SUBAGENT_SPAWN_PATH_TOOL_NAMES.every(
     (name) =>
@@ -959,6 +950,57 @@ export function canSpawnSubagentsForTurn(ctx: Conversation): boolean {
       (allowlist === undefined || allowlist.has(name)) &&
       isToolActiveForContext(name, ctx),
   );
+}
+
+/**
+ * Build the agent loop's `onToolsSent` observer for a conversation: record
+ * the tool array each provider call sends, with the delegation-section state
+ * the prompt build captured for the prompt that call carries
+ * (`Conversation.renderedDelegateIndependentTasks`), so a later fork wake can
+ * replay both (`recordConversationToolSurface`). Only the loop's send boundary sees the
+ * sent array. The resolver is also consulted out of band (the token count
+ * behind `/compact` and `/clean`, compaction estimates), where a read outside
+ * any turn resolves a clientless surface that would overwrite the one the
+ * conversation's turns actually send.
+ *
+ * Arrays that are not the conversation's own surface are skipped: a replaying
+ * wake sends its source's array, an empty array is a tools-disabled call (a
+ * fork replaying it could never call `remember`), and disk-pressure cleanup
+ * mode narrows the wire to cleanup tools. Best-effort: a failed write is
+ * logged and the surface still counts as recorded, so a persistent failure
+ * logs once per distinct surface rather than once per provider call.
+ */
+export function createWireToolSurfaceRecorder(
+  ctx: Conversation,
+): (tools: ToolDefinition[]) => void {
+  return (tools) => {
+    if (
+      !ctx.conversationId ||
+      ctx.wireToolReplay ||
+      tools.length === 0 ||
+      ctx.diskPressureCleanupModeActive === true
+    ) {
+      return;
+    }
+    const surface: ConversationToolSurface = {
+      tools,
+      // Unknown before the first prompt build or for a verbatim override.
+      delegateIndependentTasks: ctx.renderedDelegateIndependentTasks ?? null,
+    };
+    try {
+      ctx.recordedToolSurfaceHash = recordConversationToolSurface(
+        ctx.conversationId,
+        surface,
+        ctx.recordedToolSurfaceHash,
+      );
+    } catch (err) {
+      log.warn(
+        { err, conversationId: ctx.conversationId },
+        "failed to record the conversation's wire tool surface; continuing",
+      );
+      ctx.recordedToolSurfaceHash = hashConversationToolSurface(surface);
+    }
+  };
 }
 
 /**
@@ -1255,6 +1297,14 @@ export function createResolveToolsCallback(
 
     ctx.allowedToolNames = turnAllowed;
 
-    return applyActivityField(allBaseDefs);
+    // A wake replaying its source's recorded surface sends that array
+    // verbatim: the wire tool block is the first tier of the provider cache
+    // prefix (tools → system → messages), so only the same bytes read the
+    // source's cached prefix instead of rewriting it. Execution is unaffected:
+    // `allowedToolNames` above and the executor's allowlist gate still decide
+    // what may run.
+    return ctx.wireToolReplay
+      ? [...ctx.wireToolReplay]
+      : applyActivityField(allBaseDefs);
   };
 }
