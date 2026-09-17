@@ -517,6 +517,30 @@ describe("isControlPlaneWorkspaceWrite / executable sinks", () => {
       ),
     ).toBe(false);
   });
+
+  test.each([
+    ["relative", "config.json"],
+    ["container /workspace form", "/workspace/config.json"],
+    ["mcp.json", "mcp.json"],
+    ["container mcp.json", "/workspace/mcp.json"],
+  ])("blocks a write to control-plane config via %s", (_label, path) => {
+    expect(
+      isControlPlaneWorkspaceWrite("file_write", { path }, wsRoot),
+    ).toBe(true);
+    expect(
+      isControlPlaneWorkspaceWrite("file_edit", { path }, wsRoot),
+    ).toBe(true);
+  });
+
+  test("a file merely named config.json in a subdirectory stays clear", () => {
+    expect(
+      isControlPlaneWorkspaceWrite(
+        "file_write",
+        { path: "notes-real/config.json" },
+        wsRoot,
+      ),
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

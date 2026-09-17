@@ -43,6 +43,7 @@ import {
   mcpOAuthCredentialKey,
   type McpOAuthCredentialTarget,
   pluginMcpOAuthCredentialPrefix,
+  workspaceMcpOAuthCredentialPrefix,
   workspaceMcpOAuthCredentialTarget,
 } from "./credential-target.js";
 
@@ -647,26 +648,28 @@ export async function hasMcpOAuthTokens(
 export async function deleteMcpOAuthCredentials(
   serverId: string,
 ): Promise<{ ok: boolean; failedKeys: string[] }> {
-  const [tokensResult, clientResult, bindingResult, discoveryResult] =
-    await Promise.all([
-      ...MCP_OAUTH_CREDENTIAL_LEAVES.map((leaf) =>
-        deleteSecureKeyAsync(
-          mcpOAuthCredentialKey(
-            workspaceMcpOAuthCredentialTarget(serverId),
-            leaf,
-          ),
-        ),
-      ),
-    ]);
-  const results = [
-    { key: "tokens", result: tokensResult },
-    { key: "client_info", result: clientResult },
-    { key: "client_binding", result: bindingResult },
-    { key: "discovery", result: discoveryResult },
-  ];
-  const failedKeys = results
-    .filter((r) => r.result === "error")
-    .map((r) => r.key);
+  const { listSecureKeysAsync } = await import("../security/secure-keys.js");
+  const listed = await listSecureKeysAsync();
+  const prefix = workspaceMcpOAuthCredentialPrefix(serverId);
+  const unboundKeys = MCP_OAUTH_CREDENTIAL_LEAVES.map((leaf) =>
+    mcpOAuthCredentialKey(workspaceMcpOAuthCredentialTarget(serverId), leaf),
+  );
+  const prefixKeys = listed.unreachable
+    ? []
+    : listed.accounts.filter((key) => key.startsWith(prefix));
+  const matchedKeys = [...new Set([...unboundKeys, ...prefixKeys])];
+  const deletionResults = await Promise.all(
+    matchedKeys.map(async (key) => {
+      try {
+        return { key, result: await deleteSecureKeyAsync(key) };
+      } catch {
+        return { key, result: "error" as const };
+      }
+    }),
+  );
+  const failedKeys = deletionResults
+    .filter(({ result }) => result === "error")
+    .map(({ key }) => key);
   if (failedKeys.length > 0) {
     log.warn(
       { serverId, failedKeys },

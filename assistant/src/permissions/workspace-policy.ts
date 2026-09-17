@@ -5,7 +5,9 @@ import { getIsContainerized } from "../config/env-registry.js";
 import { resolveTrailingLinkTarget } from "../util/fs-symlinks.js";
 import {
   getMonitoringDataDir,
+  getWorkspaceConfigPath,
   getWorkspaceHooksDir,
+  getWorkspaceMcpConfigPath,
   getWorkspacePluginsDir,
   getWorkspaceRoutesDir,
   getWorkspaceSkillsDir,
@@ -240,6 +242,15 @@ const PROMPT_SURFACE_FILES = [
 ];
 const PROMPT_SURFACE_DIRS = ["users", "channels"];
 
+/**
+ * Workspace config the daemon hot-reloads and then executes from.
+ * `config.json` carries ACP spawn commands and other runtime policy.
+ * `mcp.json` declares stdio MCP servers the daemon starts.
+ */
+function controlPlaneConfigFiles(): string[] {
+  return [getWorkspaceConfigPath(), getWorkspaceMcpConfigPath()];
+}
+
 // `memory/**` is deliberately data-plane, not control-plane: memory pages
 // inject into guardian sessions as past-record rather than standing
 // instructions, consolidation owns and rewrites those files, and the gated
@@ -249,10 +260,11 @@ const PROMPT_SURFACE_DIRS = ["users", "channels"];
 
 /**
  * Whether a sandbox file-tool invocation writes a workspace control-plane
- * target: an executable sink directory (code the daemon executes) or a
- * prompt surface (instructions it obeys). The two categories are one
- * delegation a layer apart — approving the write approves everything the
- * planted code or rewritten instructions cause later.
+ * target: an executable sink directory (code the daemon executes), a
+ * prompt surface (instructions it obeys), or hot-reloaded config the
+ * daemon executes from (`config.json`, `mcp.json`). Approving the write
+ * approves everything the planted code, rewritten instructions, or
+ * spawned ACP/MCP processes cause later.
  *
  * Unlike {@link isOutOfWorkspaceFileInvocation} this holds in containerized
  * mode too: the workspace boundary is what contains an escaping *path*, and
@@ -299,6 +311,10 @@ export function isControlPlaneWorkspaceWrite(
     executableSinkDirs().some(writesUnder) ||
     PROMPT_SURFACE_FILES.some((file) => {
       const canonicalFile = canonicalize(`${root}/${file}`);
+      return target === canonicalFile || addressed === canonicalFile;
+    }) ||
+    controlPlaneConfigFiles().some((file) => {
+      const canonicalFile = canonicalize(file);
       return target === canonicalFile || addressed === canonicalFile;
     }) ||
     PROMPT_SURFACE_DIRS.some((dir) => writesUnder(`${root}/${dir}`)) ||

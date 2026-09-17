@@ -19,6 +19,8 @@ export type McpOAuthCredentialTarget =
   | {
       readonly source: "workspace";
       readonly serverId: string;
+      readonly transportType?: "sse" | "streamable-http";
+      readonly url?: string;
     }
   | {
       readonly source: "plugin";
@@ -30,8 +32,17 @@ export type McpOAuthCredentialTarget =
 
 export function workspaceMcpOAuthCredentialTarget(
   serverId: string,
+  transport?: Extract<McpTransport, { type: "sse" | "streamable-http" }>,
 ): McpOAuthCredentialTarget {
-  return { source: "workspace", serverId };
+  if (!transport) {
+    return { source: "workspace", serverId };
+  }
+  return {
+    source: "workspace",
+    serverId,
+    transportType: transport.type,
+    url: transport.url,
+  };
 }
 
 export function resolveMcpOAuthCredentialTarget(
@@ -43,7 +54,7 @@ export function resolveMcpOAuthCredentialTarget(
     return null;
   }
   if (config.source === "workspace") {
-    return workspaceMcpOAuthCredentialTarget(serverId);
+    return workspaceMcpOAuthCredentialTarget(serverId, transport);
   }
   return pluginMcpOAuthCredentialTarget(
     config.pluginName,
@@ -71,9 +82,21 @@ export function mcpOAuthCredentialKey(
   leaf: McpOAuthCredentialLeaf,
 ): string {
   if (target.source === "workspace") {
+    if (target.transportType && target.url) {
+      const endpoint = `${target.transportType}\n${canonicalUrlWithoutFragment(target.url)}`;
+      const endpointDigest = createHash("sha256")
+        .update(endpoint)
+        .digest("hex");
+      return `mcp:${target.serverId}:${endpointDigest}:${leaf}`;
+    }
     return `mcp:${target.serverId}:${leaf}`;
   }
   return `${pluginMcpOAuthCredentialPrefix(target.pluginName, target.serverKey, target.transportType, target.url)}${leaf}`;
+}
+
+/** Prefix covering every workspace OAuth leaf for one server id. */
+export function workspaceMcpOAuthCredentialPrefix(serverId: string): string {
+  return `mcp:${serverId}:`;
 }
 
 export function pluginMcpOAuthCredentialPrefix(

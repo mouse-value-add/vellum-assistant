@@ -132,6 +132,16 @@ mock.module("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 
 const { orchestrateMcpOAuthConnect } =
   await import("../mcp-auth-orchestrator.js");
+const { mcpOAuthCredentialKey, workspaceMcpOAuthCredentialTarget } =
+  await import("../credential-target.js");
+
+const TEST_SERVER_TOKEN_KEY = mcpOAuthCredentialKey(
+  workspaceMcpOAuthCredentialTarget("test-server", {
+    type: "sse",
+    url: "https://example.com",
+  }),
+  "tokens",
+);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -177,7 +187,7 @@ describe("orchestrateMcpOAuthConnect", () => {
       "test-server",
       "https://auth.example.com/oauth",
       expect.any(String) as unknown as string, // attemptId UUID
-      "mcp:test-server:tokens",
+      TEST_SERVER_TOKEN_KEY,
     ]);
     // Sanity-check the attemptId looks UUID-shaped
     expect(mockSetMcpAuthPending.mock.calls[0][2]).toMatch(
@@ -206,7 +216,7 @@ describe("orchestrateMcpOAuthConnect", () => {
     expect(mockSetMcpAuthComplete).toHaveBeenCalledWith(
       "test-server",
       expect.any(String) as unknown as string,
-      "mcp:test-server:tokens",
+      TEST_SERVER_TOKEN_KEY,
     );
     // Daemon-side reload should be triggered after a successful completion.
     expect(mockReloadMcpServers).toHaveBeenCalled();
@@ -230,7 +240,7 @@ describe("orchestrateMcpOAuthConnect", () => {
       "test-server",
       "exchange failed",
       expect.any(String) as unknown as string,
-      "mcp:test-server:tokens",
+      TEST_SERVER_TOKEN_KEY,
     );
     expect(mockSetMcpAuthComplete).not.toHaveBeenCalled();
   });
@@ -249,7 +259,7 @@ describe("orchestrateMcpOAuthConnect", () => {
       "test-server",
       "MCP OAuth callback timed out",
       expect.any(String) as unknown as string,
-      "mcp:test-server:tokens",
+      TEST_SERVER_TOKEN_KEY,
     );
     expect(mockSetMcpAuthComplete).not.toHaveBeenCalled();
   });

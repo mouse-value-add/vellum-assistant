@@ -14,8 +14,9 @@
  *   outside the sandbox working directory on a non-containerized install,
  *   High if targeting skill source code, the workspace hooks directory, the
  *   user plugins directory, the workspace tools directory, the workspace
- *   routes directory, the workspace workflows directory, or the monitoring
- *   data directory.
+ *   routes directory, the workspace workflows directory, the monitoring
+ *   data directory, or workspace control-plane config (`config.json`,
+ *   `mcp.json`).
  * - host_file_read: Medium (tool registry default; no special escalation).
  * - host_file_write / host_file_edit: Medium by default, High if targeting
  *   skill source code, the workspace hooks directory, the user plugins
@@ -94,6 +95,13 @@ export interface FileClassificationContext {
    * code-injection risk and must clear the High-risk approval gate.
    */
   monitoringDir: string;
+  /**
+   * Canonical workspace config files the daemon hot-reloads and then
+   * executes from (`config.json`, `mcp.json`). A write here can plant
+   * ACP spawn commands or stdio MCP servers, so it must clear the
+   * High-risk approval gate.
+   */
+  controlPlaneConfigFiles?: string[];
   /**
    * Absolute paths of all skill source root directories (managed, bundled,
    * and any extra dirs from config). The classifier checks whether a file
@@ -394,6 +402,23 @@ function isSkillSourcePath(
   return false;
 }
 
+/**
+ * Check whether a resolved absolute path is a workspace control-plane
+ * config file (`config.json` or `mcp.json`). Exact file match only: a
+ * sibling named `notes/config.json` is ordinary data.
+ */
+function isControlPlaneConfigPath(
+  resolvedPath: string,
+  context: FileClassificationContext,
+): boolean {
+  for (const file of context.controlPlaneConfigFiles ?? []) {
+    if (resolvedPath === file) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // -- Allowlist option helpers -------------------------------------------------
 
 const FILE_TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -491,6 +516,8 @@ function classifyCodeInjectionSink(
     return high("workflows directory");
   if (isMonitoringPath(resolvedPath, context))
     return high("monitoring directory");
+  if (isControlPlaneConfigPath(resolvedPath, context))
+    return high("control-plane config");
   return null;
 }
 

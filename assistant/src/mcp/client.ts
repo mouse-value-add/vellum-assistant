@@ -17,6 +17,7 @@ import {
 } from "./credential-target.js";
 import { getMcpHeaders } from "./mcp-header-store.js";
 import { hasMcpOAuthTokens, McpOAuthProvider } from "./mcp-oauth-provider.js";
+import { buildMcpStdioEnv } from "./stdio-env.js";
 
 const log = getLogger("mcp-client");
 
@@ -225,7 +226,7 @@ export class McpClient {
     if (this.source === "workspace") {
       return transport.type === "stdio"
         ? null
-        : workspaceMcpOAuthCredentialTarget(this.serverId);
+        : workspaceMcpOAuthCredentialTarget(this.serverId, transport);
     }
     if (!this.serverConfig) {
       return null;
@@ -344,9 +345,7 @@ export class McpClient {
         return new StdioClientTransport({
           command: config.command,
           args: config.args,
-          env: config.env
-            ? ({ ...process.env, ...config.env } as Record<string, string>)
-            : undefined,
+          env: buildMcpStdioEnv(config.env),
         });
       case "sse":
         return new SSEClientTransport(new URL(config.url), {

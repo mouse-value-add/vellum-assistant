@@ -25,8 +25,10 @@ import {
   getDeprecatedDir,
   getMonitoringDataDir,
   getProtectedDir,
+  getWorkspaceConfigPath,
   getWorkspaceDir,
   getWorkspaceHooksDir,
+  getWorkspaceMcpConfigPath,
   getWorkspacePluginsDir,
   getWorkspaceRoutesDir,
   getWorkspaceToolsDir,
@@ -274,6 +276,10 @@ function buildFileContext(): ClassifyRiskFileContext {
     routesDir: resolveRealPath(getWorkspaceRoutesDir()),
     workflowsDir: resolveRealPath(getWorkspaceWorkflowsDir()),
     monitoringDir: resolveRealPath(getMonitoringDataDir()),
+    controlPlaneConfigFiles: [
+      resolveRealPath(getWorkspaceConfigPath()),
+      resolveRealPath(getWorkspaceMcpConfigPath()),
+    ],
     actorTokenSigningKeyPath: join(protectedDir, "actor-token-signing-key"),
     skillSourceDirs: getSkillRoots(config.skills.load.extraDirs).map(
       resolveRealPath,
