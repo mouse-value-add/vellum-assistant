@@ -2904,6 +2904,21 @@ describe("startVoiceTurn escalated-leg profile pin", () => {
     expect(runOptions.callSite).toBe("callAgent");
     expect(runOptions.overrideProfile).toBe("quality-optimized");
     expect(runOptions.forceOverrideProfile).toBe(true);
+    expect(runOptions.warmPromptCache).toBe(true);
+  });
+
+  test("reports the conversation profile selected for the handoff", async () => {
+    setConfig("llm", { activeProfile: "quality-optimized" });
+    const onEscalationTargetResolved = mock();
+
+    await runOptionsFor({
+      turn: { onEscalationTargetResolved },
+    });
+
+    expect(onEscalationTargetResolved).toHaveBeenCalledWith({
+      profile: "quality-optimized",
+      source: "conversation",
+    });
   });
 
   test("the conversation's own pin wins over the workspace selection", async () => {

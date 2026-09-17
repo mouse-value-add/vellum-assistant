@@ -74,6 +74,7 @@ import {
   stripInternalSpeechMarkers,
   terminalControlMarkerLength,
 } from "./voice-control-protocol.js";
+import type { VoiceEscalationTarget } from "./voice-escalation-target.js";
 import {
   createFrontDoorStreamGate,
   escalatedContinuationRule,
@@ -388,6 +389,8 @@ export interface VoiceTurnCallbacks {
   tool_result?: (event: VoiceToolResultEvent) => void;
 }
 
+export type { VoiceEscalationTarget } from "./voice-escalation-target.js";
+
 export interface VoiceTurnOptions {
   /** The conversation ID for this voice call's session. */
   conversationId: string;
@@ -497,6 +500,8 @@ export interface VoiceTurnOptions {
   onError?: (message: string) => void;
   /** Event-name callbacks: tool activity, persisted row ids, raw stream. */
   callbacks?: VoiceTurnCallbacks;
+  /** Called once the escalated leg's actual target profile is resolved. */
+  onEscalationTargetResolved?: (target: VoiceEscalationTarget) => void;
   /**
    * Called when this turn leaves a confirmation for the user to answer instead
    * of deciding it, so the client can put the prompt where they can see it.
@@ -2041,6 +2046,35 @@ export async function startVoiceTurn(
         (needsImagePin
           ? VOICE_IMAGE_PROFILE
           : (conversationProfile?.profile ?? null));
+      const escalationSelection =
+        opts.routingLeg === "escalated"
+          ? selectWinningProfile("callAgent", config.llm, {
+              ...(profilePin != null ? { overrideProfile: profilePin } : {}),
+              forceOverrideProfile: profilePin != null,
+              selectionSeed: conversation.conversationId,
+            })
+          : null;
+      if (escalationSelection !== null) {
+        const target: VoiceEscalationTarget = {
+          profile: escalationSelection.profileName ?? "balanced",
+          source:
+            profilePin != null && escalationSelection.source === "override"
+              ? opts.overrideProfile != null
+                ? "turn_override"
+                : needsImagePin
+                  ? "image_compatibility"
+                  : "conversation"
+              : "call_site",
+        };
+        try {
+          opts.onEscalationTargetResolved?.(target);
+        } catch (err) {
+          log.warn(
+            { err, turnId, profile: target.profile, source: target.source },
+            "Voice escalation target callback failed",
+          );
+        }
+      }
       if (opts.macosDesktopSession === true && !frontDoorToolsSuppressed) {
         const sourceInterface = turnInterfaceContext.userMessageInterface;
         const sourceActorPrincipalId =
@@ -2150,6 +2184,9 @@ export async function startVoiceTurn(
         ...(profilePin != null
           ? { overrideProfile: profilePin, forceOverrideProfile: true }
           : {}),
+        // Use the memory/context preparation window to fill the selected
+        // profile's provider prompt cache before the real escalated call.
+        warmPromptCache: opts.routingLeg === "escalated",
       });
       if (lastError) {
         log.error(

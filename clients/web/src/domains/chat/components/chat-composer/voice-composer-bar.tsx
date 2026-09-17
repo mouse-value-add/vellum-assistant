@@ -67,6 +67,7 @@ import { Button, cn } from "@vellumai/design-library";
 import {
   isLiveVoiceMicLive,
   liveVoiceSurfaceLabelKey,
+  type LiveVoiceResponsePhase,
   type LiveVoiceSessionState,
 } from "@/domains/chat/voice/live-voice/live-voice-store";
 import {
@@ -102,6 +103,7 @@ const BAR_HEIGHT_CLASS = "h-10 touch-mobile:h-11";
 
 export interface VoiceComposerBarProps {
   state: LiveVoiceSessionState;
+  responsePhase?: LiveVoiceResponsePhase | null;
   /** Mic level, polled ~30 Hz by the band's draw loop. No re-render per sample. */
   getAmplitude: () => number;
   /**
@@ -142,6 +144,7 @@ export interface VoiceComposerBarProps {
 
 export function VoiceComposerBar({
   state,
+  responsePhase = null,
   getAmplitude,
   getOutputAmplitude,
   muted,
@@ -182,7 +185,13 @@ export function VoiceComposerBar({
   // else, so the reconnect and assistant-audio remaps are handed the values
   // that leave them unfired. Mute keeps the branch at the region below: this
   // bar says "Muted" in every phase, not only the one the session relabels.
-  const stateKey = liveVoiceSurfaceLabelKey(state, false, true, false);
+  const stateKey = liveVoiceSurfaceLabelKey(
+    state,
+    false,
+    true,
+    false,
+    responsePhase,
+  );
   return (
     <div
       role="group"

@@ -1237,44 +1237,82 @@ export class Conversation {
   // ── Prompt Cache Warming ─────────────────────────────────────────
 
   /**
-   * Fire-and-forget LLM call with max_tokens=1 to populate the provider's
-   * prompt cache (system prompt + tools). Called after the canned first
-   * greeting so the user's next real message gets a cache hit.
+   * Fire-and-forget LLM call with max_tokens=1 to populate the selected
+   * provider's prompt cache (system prompt + tools).
    */
-  warmPromptCache(): void {
+  warmPromptCache(options?: {
+    callSite?: LLMCallSite;
+    overrideProfile?: string;
+    forceOverrideProfile?: boolean;
+    signal?: AbortSignal;
+  }): void {
     this.cacheWarmAbort?.abort();
     const abort = new AbortController();
     this.cacheWarmAbort = abort;
 
+    const externalSignal = options?.signal;
+    const relayAbort = (): void => abort.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) {
+      relayAbort();
+    } else {
+      externalSignal?.addEventListener("abort", relayAbort, { once: true });
+    }
+
     const systemPrompt = this.buildCurrentSystemPrompt();
     const tools = getAllToolDefinitions();
-    const provider = this.provider;
+    const callSite = options?.callSite ?? "mainAgent";
+    const providerConfig = {
+      ...(options?.overrideProfile !== undefined
+        ? { overrideProfile: options.overrideProfile }
+        : {}),
+      ...(options?.forceOverrideProfile !== undefined
+        ? { forceOverrideProfile: options.forceOverrideProfile }
+        : {}),
+      selectionSeed: this.conversationId,
+    };
 
     const warmMessage: Message = {
       role: "user",
       content: [{ type: "text", text: "hi" }],
     };
 
-    provider
+    void this.provider
       .sendMessage([warmMessage], {
         tools,
         systemPrompt,
         config: {
           max_tokens: 1,
-          callSite: "mainAgent",
+          callSite,
+          ...providerConfig,
           usageTracking: "manual",
         },
         signal: abort.signal,
       })
       .then(() => {
-        log.info("Prompt cache warmed successfully");
+        if (!abort.signal.aborted) {
+          log.info(
+            {
+              callSite,
+              profile: options?.overrideProfile ?? null,
+            },
+            "Prompt cache warmed successfully",
+          );
+        }
       })
       .catch((err) => {
         if (!abort.signal.aborted) {
-          log.warn({ err }, "Prompt cache warming failed (non-fatal)");
+          log.warn(
+            {
+              err,
+              callSite,
+              profile: options?.overrideProfile ?? null,
+            },
+            "Prompt cache warming failed (non-fatal)",
+          );
         }
       })
       .finally(() => {
+        externalSignal?.removeEventListener("abort", relayAbort);
         if (this.cacheWarmAbort === abort) {
           this.cacheWarmAbort = undefined;
         }
@@ -3428,6 +3466,8 @@ export class Conversation {
       overrideProfile?: string;
       /** Float `overrideProfile` above call-site layers for this run. */
       forceOverrideProfile?: boolean;
+      /** Warm this turn's selected profile while prompt hooks prepare input. */
+      warmPromptCache?: boolean;
       /**
        * Firing's `cron_runs.id` stamped onto this turn's usage rows. Per-turn:
        * forwarded into {@link runAgentLoopImpl} and threaded to `recordUsage`.

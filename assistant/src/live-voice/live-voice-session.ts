@@ -114,6 +114,7 @@ import {
   activityLabelForTool,
   approvalActivityLabel,
   dismissesUiSurface,
+  ESCALATION_ACTIVITY_LABEL,
   revealsUiSurface,
 } from "./activity-label.js";
 import {
@@ -3959,6 +3960,10 @@ export class LiveVoiceSession implements LiveVoiceSessionContract {
     turn: ActiveAssistantTurn,
     label: string,
     approvalRequestId?: string,
+    detail?: Pick<
+      Extract<LiveVoiceServerFramePayload, { type: "activity" }>,
+      "kind" | "profile" | "profileSource"
+    >,
   ): void {
     // De-duplicated on the request id as well as the wording. The two move
     // independently: a wait can be entered and left without the tool line
@@ -3979,6 +3984,7 @@ export class LiveVoiceSession implements LiveVoiceSessionContract {
         turnId: turn.turnId,
         label,
         ...(approvalRequestId !== undefined ? { approvalRequestId } : {}),
+        ...detail,
       },
       () => !this.isClosed,
     );
@@ -6008,6 +6014,25 @@ export class LiveVoiceSession implements LiveVoiceSessionContract {
         onApprovalsResolved: () => {
           this.clearAwaitingApproval(activeTurn);
         },
+        ...(leg.routingLeg === "escalated"
+          ? {
+              onEscalationTargetResolved: (target) => {
+                if (!this.isActiveAssistantTurn(token)) {
+                  return;
+                }
+                this.publishActivity(
+                  activeTurn,
+                  ESCALATION_ACTIVITY_LABEL,
+                  undefined,
+                  {
+                    kind: "escalation",
+                    profile: target.profile,
+                    profileSource: target.source,
+                  },
+                );
+              },
+            }
+          : {}),
         content: leg.content,
         ...(leg.attachments ? { attachments: leg.attachments } : {}),
         isInbound: true,

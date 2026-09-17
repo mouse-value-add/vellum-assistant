@@ -429,6 +429,7 @@ export function ChatComposer({
   // declare it.
   const supportsLiveVoice = useSupportsLiveVoice(assistantId);
   const liveVoiceState = useLiveVoiceStore.use.state();
+  const liveVoiceResponsePhase = useLiveVoiceStore.use.responsePhase();
   const liveVoiceError = useLiveVoiceStore.use.error();
   const liveVoiceErrorRecovery = useLiveVoiceStore.use.errorRecovery();
   // Whether any session is live anywhere (this thread or another). `failed`
@@ -1654,6 +1655,7 @@ export function ChatComposer({
         <div className="mb-2">
           <VoiceComposerBar
             state={liveVoiceState}
+            responsePhase={liveVoiceResponsePhase}
             getAmplitude={getLiveVoiceInputAmplitude}
             getOutputAmplitude={getLiveVoiceOutputAmplitude}
             muted={liveVoiceMuted}

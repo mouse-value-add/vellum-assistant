@@ -414,6 +414,12 @@ export async function runAgentLoopImpl(
      */
     forceOverrideProfile?: boolean;
     /**
+     * Warm the selected provider/profile in parallel with prompt preparation.
+     * Used by an escalated voice leg, whose memory and context hooks provide a
+     * useful window for a one-token cache fill before its real call starts.
+     */
+    warmPromptCache?: boolean;
+    /**
      * Origin tag of this turn (the conversation's `TitleOrigin`, e.g.
      * "memory_consolidation"), threaded from `runBackgroundJob`. Exposed on
      * the conversation so tool execution can scope narrow non-interactive
@@ -562,6 +568,17 @@ export async function runAgentLoopImpl(
 
   const turnOverrideProfile = userExplicitOverride;
   const forceOverrideProfile = options?.forceOverrideProfile === true;
+
+  if (options?.warmPromptCache === true) {
+    ctx.warmPromptCache({
+      callSite: turnCallSite,
+      ...(turnOverrideProfile !== undefined
+        ? { overrideProfile: turnOverrideProfile }
+        : {}),
+      forceOverrideProfile,
+      signal: abortController.signal,
+    });
+  }
 
   const readCurrentOverrideProfile = (): string | undefined =>
     options?.overrideProfile ?? resolveOverrideProfile(ctx);

@@ -104,6 +104,7 @@ function toActivityContent(
     session.reconnecting,
     session.assistantAudioActive,
     session.muted,
+    session.responsePhase,
   );
   return {
     phase: session.state,

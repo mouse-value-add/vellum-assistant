@@ -121,6 +121,9 @@ const TOOL_ACTIVITY_LABEL_PREFIXES: ReadonlyArray<readonly [string, string]> = [
  */
 export const GENERIC_ACTIVITY_LABEL = "Working on it";
 
+/** Neutral status while the conversation's selected profile takes over. */
+export const ESCALATION_ACTIVITY_LABEL = "Working on that";
+
 /**
  * The line to show while `toolName` runs.
  *
