@@ -96,26 +96,34 @@ describe("readValidatedPluginIcon", () => {
 
   // The installed list validates every plugin's icon on every request, and
   // validation hashes the whole file, so the result is cached on the file's
-  // mtime and size. Pinning the mtime puts the cache key under the test's
-  // control rather than the filesystem clock's.
-  test("reuses the validated result while mtime and size are unchanged", () => {
+  // identity. A cache hit returns the same object, which is what proves the
+  // file was neither re-read nor re-hashed.
+  test("reuses the validated result while the file is untouched", () => {
+    writeIcon(makePng(32, 48));
+    const first = readValidatedPluginIcon(pluginDir);
+    const second = readValidatedPluginIcon(pluginDir);
+    expect(second).toBe(first);
+    expect(second.hasIcon).toBe(true);
+  });
+
+  test("re-reads same-sized new bytes written under a restored mtime", () => {
+    // An archive extraction can restore an old mtime onto a replaced icon of
+    // the same size, so mtime and size alone are not content identity. The
+    // cache key also carries the inode and the kernel-set ctime.
     const iconPath = join(pluginDir, "icon.png");
-    const original = makePng(32, 32);
-    writeIcon(original);
+    writeIcon(makePng(32, 32));
     utimesSync(iconPath, PINNED_MTIME_S, PINNED_MTIME_S);
-    const before = readValidatedPluginIcon(pluginDir).iconVersion;
-    expect(before).toBe(sha16(original));
-
-    // Same length, same mtime: identity is unchanged, so the file is not
-    // re-read or re-hashed.
-    writeIcon(makePng(48, 48));
-    utimesSync(iconPath, PINNED_MTIME_S, PINNED_MTIME_S);
-    expect(readValidatedPluginIcon(pluginDir).iconVersion).toBe(before);
-
-    // A moved mtime invalidates the entry.
-    utimesSync(iconPath, PINNED_MTIME_S + 1, PINNED_MTIME_S + 1);
     expect(readValidatedPluginIcon(pluginDir).iconVersion).toBe(
-      sha16(makePng(48, 48)),
+      sha16(makePng(32, 32)),
+    );
+
+    const replacement = makePng(48, 48);
+    expect(replacement.length).toBe(makePng(32, 32).length);
+    writeIcon(replacement);
+    utimesSync(iconPath, PINNED_MTIME_S, PINNED_MTIME_S);
+
+    expect(readValidatedPluginIcon(pluginDir).iconVersion).toBe(
+      sha16(replacement),
     );
   });
 

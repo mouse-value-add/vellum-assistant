@@ -25,6 +25,7 @@ import {
   mergePlatformCatalogWithBundledLocals,
   PLUGIN_CATALOG_CACHE_TTL_MS,
   PLUGIN_CATALOG_REFRESH_BACKOFF_MS,
+  revalidatePluginCatalogInBackground,
 } from "../plugin-catalog-cache.js";
 import { readBundledPluginCatalog } from "../plugin-catalog-local.js";
 import type { SearchPluginsDeps } from "../search-plugins.js";
@@ -98,7 +99,21 @@ const ORIGINAL_ENV = {
   VELLUM_DISABLE_PLATFORM: process.env.VELLUM_DISABLE_PLATFORM,
 };
 
-describe("getPluginCatalog", () => {
+/**
+ * What a display route does per request: read from memory, then schedule the
+ * revalidation. Mirrors `readDisplayCatalog` in `plugins-routes.ts`.
+ */
+async function readForDisplay(
+  ref: string,
+  deps: SearchPluginsDeps,
+  onChanged?: () => void,
+): Promise<PluginCatalog> {
+  const catalog = await getPluginCatalog(ref, deps);
+  revalidatePluginCatalogInBackground(ref, deps, onChanged);
+  return catalog;
+}
+
+describe("getPluginCatalog + revalidatePluginCatalogInBackground", () => {
   beforeEach(() => {
     invalidatePluginCatalogCache();
     // Default: platform features enabled (neither flag set).
@@ -118,7 +133,7 @@ describe("getPluginCatalog", () => {
   });
 
   test("serves the bundled catalog immediately on a cold cache and refreshes behind it", async () => {
-    // GIVEN platform features enabled and a platform fetch that never settles
+    // GIVEN platform features enabled and a platform fetch that has not settled
     // while the caller is waiting.
     const { fetch, calls, release } = platformFetch(["remote-only"], {
       delayMs: 1,
@@ -126,7 +141,7 @@ describe("getPluginCatalog", () => {
     const deps: SearchPluginsDeps = { fetch };
 
     // WHEN the first read lands on a cold cache
-    const first = await getPluginCatalog("main", deps);
+    const first = await readForDisplay("main", deps);
 
     // THEN it answers from the bundled manifest without waiting on the platform
     expect(first.matches).toEqual(readBundledPluginCatalog().matches);
@@ -137,9 +152,35 @@ describe("getPluginCatalog", () => {
     // WHEN the refresh lands, the next read serves the platform copy
     release();
     await settleRefresh();
-    const second = await getPluginCatalog("main", deps);
+    const second = await readForDisplay("main", deps);
     expect(githubNames(second)).toEqual(["remote-only"]);
     expect(calls()).toBe(1);
+  });
+
+  test("reports a refresh that changes what the ref serves, and stays quiet when it does not", async () => {
+    setSystemTime(new Date(BASE_TIME_MS));
+    const changes: number[] = [];
+    const onChanged = (): void => {
+      changes.push(Date.now());
+    };
+
+    // GIVEN a cold cache: the platform copy differs from the bundled manifest
+    const first = platformFetch(["remote-only"]);
+    await readForDisplay("main", { fetch: first.fetch }, onChanged);
+    await settleRefresh();
+
+    // THEN clients are told the catalog moved
+    expect(changes).toHaveLength(1);
+
+    // WHEN the TTL elapses and the platform returns the same rows
+    setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
+    const same = platformFetch(["remote-only"]);
+    await readForDisplay("main", { fetch: same.fetch }, onChanged);
+    await settleRefresh();
+
+    // THEN no invalidation is published for an unchanged catalog
+    expect(same.calls()).toBe(1);
+    expect(changes).toHaveLength(1);
   });
 
   test("serves the cached copy within the TTL without refreshing", async () => {
@@ -148,11 +189,11 @@ describe("getPluginCatalog", () => {
     const deps: SearchPluginsDeps = { fetch };
 
     // GIVEN a warm cache (first read kicks the refresh, which settles)
-    await getPluginCatalog("main", deps);
+    await readForDisplay("main", deps);
     await settleRefresh();
 
     // WHEN we read again inside the TTL
-    const warm = await getPluginCatalog("main", deps);
+    const warm = await readForDisplay("main", deps);
 
     // THEN it is the cached copy and no second fetch is issued
     expect(githubNames(warm)).toEqual(["a"]);
@@ -162,7 +203,7 @@ describe("getPluginCatalog", () => {
   test("serves the stale copy past the TTL and triggers exactly one refresh for concurrent callers", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const first = platformFetch(["stale"]);
-    await getPluginCatalog("main", { fetch: first.fetch });
+    await readForDisplay("main", { fetch: first.fetch });
     await settleRefresh();
 
     // GIVEN the cached copy is past its TTL
@@ -172,7 +213,7 @@ describe("getPluginCatalog", () => {
     // WHEN five callers read at once
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
-        getPluginCatalog("main", { fetch: next.fetch }),
+        readForDisplay("main", { fetch: next.fetch }),
       ),
     );
 
@@ -186,14 +227,14 @@ describe("getPluginCatalog", () => {
     next.release();
     await settleRefresh();
     expect(
-      githubNames(await getPluginCatalog("main", { fetch: next.fetch })),
+      githubNames(await readForDisplay("main", { fetch: next.fetch })),
     ).toEqual(["fresh"]);
   });
 
   test("keeps the last good copy when the refresh fails, and backs off", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const good = platformFetch(["good"]);
-    await getPluginCatalog("main", { fetch: good.fetch });
+    await readForDisplay("main", { fetch: good.fetch });
     await settleRefresh();
 
     // GIVEN the TTL has elapsed and the platform is down
@@ -201,7 +242,7 @@ describe("getPluginCatalog", () => {
     const failing = failingFetch();
 
     // WHEN we read while the refresh fails
-    const stale = await getPluginCatalog("main", { fetch: failing.fetch });
+    const stale = await readForDisplay("main", { fetch: failing.fetch });
     await settleRefresh();
 
     // THEN the last good copy is served rather than an error or an empty grid
@@ -209,7 +250,7 @@ describe("getPluginCatalog", () => {
     expect(failing.calls()).toBe(1);
 
     // AND further reads inside the backoff window do not re-hammer the platform
-    await getPluginCatalog("main", { fetch: failing.fetch });
+    await readForDisplay("main", { fetch: failing.fetch });
     await settleRefresh();
     expect(failing.calls()).toBe(1);
 
@@ -222,9 +263,28 @@ describe("getPluginCatalog", () => {
           2,
       ),
     );
-    await getPluginCatalog("main", { fetch: failing.fetch });
+    await readForDisplay("main", { fetch: failing.fetch });
     await settleRefresh();
     expect(failing.calls()).toBe(2);
+  });
+
+  test("a refresh that outlives an invalidation does not repopulate the cleared cache", async () => {
+    // GIVEN a slow refresh in flight
+    const slow = platformFetch(["stale-in-flight"], { delayMs: 1 });
+    await readForDisplay("main", { fetch: slow.fetch });
+    expect(slow.calls()).toBe(1);
+
+    // WHEN the cache is invalidated before it lands, and it lands afterwards
+    invalidatePluginCatalogCache();
+    slow.release();
+    await settleRefresh();
+
+    // THEN its result was discarded: the next read is cold again (bundled) and
+    // starts a fresh fetch rather than serving the fenced copy.
+    const next = platformFetch(["after-invalidate"]);
+    const after = await readForDisplay("main", { fetch: next.fetch });
+    expect(after.matches).toEqual(readBundledPluginCatalog().matches);
+    expect(next.calls()).toBe(1);
   });
 
   test("reads the bundled catalog with zero network when platform is disabled", async () => {
@@ -236,7 +296,7 @@ describe("getPluginCatalog", () => {
     const deps: SearchPluginsDeps = { fetch };
 
     // WHEN we request the catalog
-    const result = await getPluginCatalog("main", deps);
+    const result = await readForDisplay("main", deps);
 
     // THEN it comes from the bundled manifest and no fetch is made
     expect(calls()).toBe(0);
@@ -337,7 +397,7 @@ describe("getAuthoritativePluginCatalog", () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const failing = failingFetch();
     // A display read fails and arms the backoff.
-    await getPluginCatalog("main", { fetch: failing.fetch });
+    await readForDisplay("main", { fetch: failing.fetch });
     await settleRefresh();
     expect(failing.calls()).toBe(1);
 

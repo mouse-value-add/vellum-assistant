@@ -48,7 +48,10 @@ import {
   type InstalledPluginInfo,
   listInstalledPlugins,
 } from "../../cli/lib/list-installed-plugins.js";
-import { getPluginCatalog } from "../../cli/lib/plugin-catalog-cache.js";
+import {
+  getPluginCatalog,
+  revalidatePluginCatalogInBackground,
+} from "../../cli/lib/plugin-catalog-cache.js";
 import { resolvePluginSourceFromCatalog } from "../../cli/lib/plugin-catalog-resolve.js";
 import {
   DEFAULT_PIN_HISTORY_LIMIT,
@@ -69,6 +72,7 @@ import {
   assertValidSearchPattern,
   filterPluginCatalog,
   InvalidSearchPatternError,
+  type PluginCatalog,
   PluginCatalogUnavailableError,
   type PluginSearchMatch,
 } from "../../cli/lib/search-plugins.js";
@@ -941,20 +945,34 @@ function matchesQuery(plugin: PluginView, needle: string): boolean {
 const UNCATEGORIZED = "system";
 
 /**
+ * Read the catalog for a display response and schedule its revalidation.
+ *
+ * The read itself is in-memory (the cached copy, or the bundled manifest), so a
+ * response never waits on the platform. The revalidation runs behind the
+ * response: single-flight, TTL-gated, and backed off after a failure, so a
+ * burst of GETs produces at most one platform fetch. When a refresh changes
+ * what the ref serves, `plugins:list` goes out and every client refetches,
+ * which is what keeps an open Integrations page from sitting on the copy it was
+ * first served. This is the stale-while-revalidate GET exception in
+ * `AGENTS.md`: the handler stays read-only and answers immediately.
+ */
+async function readDisplayCatalog(ref: string): Promise<PluginCatalog> {
+  const deps = { fetch: globalThis.fetch.bind(globalThis) };
+  const catalog = await getPluginCatalog(ref, deps);
+  revalidatePluginCatalogInBackground(ref, deps, () => publishPluginsChanged());
+  return catalog;
+}
+
+/**
  * Resolve the marketplace category map for the installed list.
  *
- * The catalog read is the display path: it answers from the in-memory copy or
- * the bundled manifest and refreshes from the platform in the background, so it
- * never waits on a network round trip and needs no time budget here. It still
- * degrades to an empty map (every `category` resolves to `null`) if the read
+ * Degrades to an empty map (every `category` resolves to `null`) if the read
  * throws, because the installed list must render even when the catalog cannot
  * be resolved at all.
  */
 export async function loadCategoryMap(): Promise<Map<string, string | null>> {
   try {
-    const catalog = await getPluginCatalog(DEFAULT_PLUGIN_REF, {
-      fetch: globalThis.fetch.bind(globalThis),
-    });
+    const catalog = await readDisplayCatalog(DEFAULT_PLUGIN_REF);
     return new Map(catalog.matches.map((m) => [m.name, m.category]));
   } catch (err) {
     log.warn(
@@ -1049,15 +1067,11 @@ async function handleSearchPlugins({
     // Reject a malformed regex before any network I/O so a user typo is a
     // cheap deterministic 400 rather than a wasted catalog fetch.
     assertValidSearchPattern(query);
-    // getPluginCatalog is the display read: it answers from the in-memory copy
-    // or the bundled manifest and refreshes from the platform in the
-    // background, so this handler returns without a platform round trip and the
-    // copy it serves can be up to one refresh behind. An install resolves its
-    // pinned source through the authoritative read instead. Filtering by the
-    // query is in-memory over the resolved catalog.
-    const catalog = await getPluginCatalog(ref, {
-      fetch: globalThis.fetch.bind(globalThis),
-    });
+    // The display read answers from memory, so this handler returns without a
+    // platform round trip and the copy it serves can be up to one refresh
+    // behind. An install resolves its pinned source through the authoritative
+    // read instead. Filtering by the query is in-memory over the catalog.
+    const catalog = await readDisplayCatalog(ref);
     const matches = filterPluginCatalog(catalog, query);
     // Resolve the valid Skills slugs once per request, then normalize each
     // match's marketplace category against them so "Available" filters

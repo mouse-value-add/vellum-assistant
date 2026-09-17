@@ -165,11 +165,19 @@ const getCatalogSpy = mock(
   },
 );
 
+// Records the revalidation the display handlers schedule behind their
+// response, so tests can assert the ref and fire the `onChanged` callback the
+// route hands it.
+const revalidateSpy = mock(
+  (_ref: string, _deps: SearchPluginsDeps, _onChanged?: () => void): void => {},
+);
+
 // Both reads resolve to the same spy: the display read backs the list and
 // search handlers, the authoritative read backs install-by-name resolution.
 mock.module("../../../cli/lib/plugin-catalog-cache.js", () => ({
   getPluginCatalog: getCatalogSpy,
   getAuthoritativePluginCatalog: getCatalogSpy,
+  revalidatePluginCatalogInBackground: revalidateSpy,
 }));
 
 // Mock uninstallPlugin. The handler's error mapping is the wiring under
@@ -963,8 +971,32 @@ function catalog(
 describe("GET /v1/plugins/search", () => {
   beforeEach(() => {
     getCatalogSpy.mockClear();
+    revalidateSpy.mockClear();
+    broadcastMessageSpy.mockClear();
     // Default to a happy-path empty catalog; individual tests override.
     getCatalogSpy.mockImplementation(async (ref) => catalog(ref, []));
+  });
+
+  test("schedules a background revalidation and publishes plugins:list when it changes the catalog", async () => {
+    // WHEN a search is served from the in-memory copy
+    await invokeSearch({ queryParams: { q: "" } });
+
+    // THEN the response also schedules a revalidation for the same ref...
+    expect(revalidateSpy).toHaveBeenCalledTimes(1);
+    const [ref, , onChanged] = revalidateSpy.mock.calls[0] ?? [];
+    expect(ref).toBe("main");
+    expect(broadcastMessageSpy).not.toHaveBeenCalled();
+
+    // ...whose onChanged tells every client to refetch, so an open Integrations
+    // page does not sit on the copy it was first served.
+    onChanged?.();
+    expect(broadcastMessageSpy).toHaveBeenCalledTimes(1);
+    const message = broadcastMessageSpy.mock.calls[0]?.[0] as {
+      type: string;
+      tags: string[];
+    };
+    expect(message.type).toBe("sync_changed");
+    expect(message.tags).toContain("plugins:list");
   });
 
   test("resolves the catalog at the requested ref and filters by ?q=", async () => {

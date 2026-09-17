@@ -1,14 +1,27 @@
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-
 // Control what getRepoSkillsDir() returns per test. Mocked before the module
 // under test is imported so getLocalCategorySlugs() sees the override.
 let repoSkillsDirOverride: string | undefined;
 
 mock.module("../catalog-install.js", () => ({
   getRepoSkillsDir: () => repoSkillsDirOverride,
+}));
+
+// Count YAML parses so the memoization tests can assert the catalog is parsed
+// once per file version rather than once per call. Destructuring snapshots the
+// real exports before `mock.module` replaces them in the registry, so the
+// wrapper delegates to the real parser instead of to itself.
+const { parse: realParseYaml, ...restOfYaml } = await import("yaml");
+let yamlParseCount = 0;
+mock.module("yaml", () => ({
+  ...restOfYaml,
+  parse: (...args: Parameters<typeof realParseYaml>): unknown => {
+    yamlParseCount += 1;
+    return realParseYaml(...args);
+  },
 }));
 
 const { getLocalCategorySlugs, invalidateCategoriesCache } =
@@ -41,23 +54,18 @@ describe("getLocalCategorySlugs", () => {
 });
 
 /**
- * The catalog read and YAML parse are memoized on the file's mtime and size, so
- * a per-request caller costs one `stat`. Both tests pin the mtime explicitly
- * (`utimesSync`) so the cache key is under the test's control rather than the
- * filesystem clock's.
+ * The catalog read and YAML parse are memoized on the file's identity (inode,
+ * ctime, mtime, size), so a per-request caller costs one `stat`.
  */
 describe("getLocalCategorySlugs memoization", () => {
   let skillsDir: string;
   let catalogPath: string;
-  const PINNED_MTIME_S = 1_700_000_000;
 
-  /** A catalog whose byte length does not depend on the slug letters. */
-  function writeCatalog(slug: string, mtimeSeconds: number): void {
+  function writeCatalog(slug: string): void {
     writeFileSync(
       catalogPath,
       `categories:\n  - slug: ${slug}\n    label: ${slug}\n`,
     );
-    utimesSync(catalogPath, mtimeSeconds, mtimeSeconds);
   }
 
   beforeEach(() => {
@@ -65,6 +73,7 @@ describe("getLocalCategorySlugs memoization", () => {
     catalogPath = join(skillsDir, "skill-categories-catalog.yaml");
     repoSkillsDirOverride = skillsDir;
     invalidateCategoriesCache();
+    yamlParseCount = 0;
   });
 
   afterEach(() => {
@@ -72,25 +81,26 @@ describe("getLocalCategorySlugs memoization", () => {
     invalidateCategoriesCache();
   });
 
-  test("parses the catalog once while its mtime and size are unchanged", () => {
-    writeCatalog("aaa", PINNED_MTIME_S);
-    expect(getLocalCategorySlugs().has("aaa")).toBe(true);
+  test("parses the catalog once across repeated calls", () => {
+    writeCatalog("aaa");
 
-    // Same length, same mtime: identity is unchanged, so the parse is skipped
-    // and the memoized slugs are served.
-    writeCatalog("bbb", PINNED_MTIME_S);
-    const slugs = getLocalCategorySlugs();
-    expect(slugs.has("aaa")).toBe(true);
-    expect(slugs.has("bbb")).toBe(false);
+    for (let i = 0; i < 5; i += 1) {
+      expect(getLocalCategorySlugs().has("aaa")).toBe(true);
+    }
+
+    expect(yamlParseCount).toBe(1);
   });
 
-  test("re-parses once the catalog's mtime moves", () => {
-    writeCatalog("aaa", PINNED_MTIME_S);
+  test("re-parses once the catalog changes on disk", () => {
+    writeCatalog("aaa");
     expect(getLocalCategorySlugs().has("aaa")).toBe(true);
+    expect(yamlParseCount).toBe(1);
 
-    writeCatalog("bbb", PINNED_MTIME_S + 1);
+    writeCatalog("bbb");
     const slugs = getLocalCategorySlugs();
+
     expect(slugs.has("bbb")).toBe(true);
     expect(slugs.has("aaa")).toBe(false);
+    expect(yamlParseCount).toBe(2);
   });
 });

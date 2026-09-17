@@ -3,12 +3,13 @@
  *
  * Two read paths with different guarantees:
  *
- * - **Display** ({@link getPluginCatalog}) is stale-while-revalidate and never
- *   blocks on the network. It answers from the in-memory copy (even past its
- *   TTL), or from the bundled offline manifest when nothing is cached yet, and
- *   kicks a single background platform refresh whenever the entry is missing or
- *   expired. A refresh failure keeps the last good copy and backs off. The copy
- *   a caller sees may therefore be up to one refresh behind the platform.
+ * - **Display** ({@link getPluginCatalog}) is a pure read that never blocks on
+ *   the network: the in-memory copy, even past its TTL, or the bundled offline
+ *   manifest when nothing is cached yet. The copy a caller sees may therefore
+ *   be up to one refresh behind the platform. Catching it up is the caller's
+ *   explicit {@link revalidatePluginCatalogInBackground} call, which is
+ *   single-flight, TTL-gated, backs off on failure, and reports whether the
+ *   refresh changed what the ref serves.
  * - **Install** ({@link getAuthoritativePluginCatalog}) is platform-authoritative:
  *   it serves the cache only within the TTL and otherwise awaits a fresh
  *   platform fetch, propagating any failure. Pinned refs and sources reach the
@@ -58,6 +59,13 @@ const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<PluginCatalog>>();
 const backoff = new Map<string, BackoffEntry>();
 
+/**
+ * Bumped by every invalidation. A refresh captures it at its start and writes
+ * its result back only while it still matches, which fences a response that
+ * lands after the cache it was meant for was cleared.
+ */
+let generation = 0;
+
 /** Add bundled local packages without overriding platform-authoritative rows. */
 export function mergePlatformCatalogWithBundledLocals(
   platform: PluginCatalog,
@@ -94,11 +102,20 @@ function recordRefreshFailure(ref: string, err: unknown): void {
   );
 }
 
+/** Serialized copy of what a ref currently serves, for change detection. */
+function catalogSignature(catalog: PluginCatalog): string {
+  return JSON.stringify(catalog.matches);
+}
+
 /**
  * Fetch the platform catalog into the cache, deduped per ref: concurrent
  * callers share one in-flight request. Resolves with the merged catalog and
  * rejects with the fetch failure, so the authoritative path can propagate it
  * while the display path swallows it.
+ *
+ * A result whose generation no longer matches (the cache was invalidated while
+ * the fetch was in flight) is returned to its caller but never written back, so
+ * a slow response cannot resurrect a cleared cache or overwrite a newer one.
  */
 function refreshPluginCatalog(
   ref: string,
@@ -108,17 +125,23 @@ function refreshPluginCatalog(
   if (existing) {
     return existing;
   }
+  const startedAt = generation;
   const promise = fetchPluginCatalogFromPlatform(deps, { ref }).then(
     (catalog) => {
       const merged = mergePlatformCatalogWithBundledLocals(catalog);
+      if (generation !== startedAt) {
+        return merged;
+      }
       inFlight.delete(ref);
       cache.set(ref, { catalog: merged, timestamp: Date.now() });
       backoff.delete(ref);
       return merged;
     },
     (err: unknown) => {
-      inFlight.delete(ref);
-      recordRefreshFailure(ref, err);
+      if (generation === startedAt) {
+        inFlight.delete(ref);
+        recordRefreshFailure(ref, err);
+      }
       throw err;
     },
   );
@@ -130,33 +153,63 @@ function refreshPluginCatalog(
  * Resolve the catalog at {@link ref} for display, without ever waiting on the
  * platform.
  *
- * Answers from the in-memory copy when there is one (even an expired one),
- * otherwise from the bundled manifest, and triggers at most one background
- * refresh per ref when the copy is missing or past the TTL. Failures are logged
- * and backed off rather than surfaced, so a platform outage degrades to the
- * last known catalog instead of an empty grid.
+ * A pure read: the in-memory copy when there is one, even past its TTL,
+ * otherwise the bundled manifest. Bringing a stale copy up to date is
+ * {@link revalidatePluginCatalogInBackground}, which the caller invokes
+ * explicitly.
  */
 export async function getPluginCatalog(
   ref: string,
-  deps: SearchPluginsDeps,
+  _deps: SearchPluginsDeps,
 ): Promise<PluginCatalog> {
   if (!arePlatformFeaturesEnabled()) {
     return bundledCatalogAt(ref);
   }
+  return cache.get(ref)?.catalog ?? bundledCatalogAt(ref);
+}
+
+/**
+ * Bring {@link ref} up to date behind the response, at most one refresh at a
+ * time.
+ *
+ * A no-op when platform features are disabled, when the cached copy is still
+ * inside its TTL, or while a failed refresh is backing off. Otherwise it starts
+ * (or joins) the single in-flight platform fetch and returns immediately.
+ * `onChanged` fires once per refresh that replaces what the ref was serving,
+ * which is how a caller tells its clients to refetch; it is the caller's job
+ * because this module is transport-agnostic and runs in the CLI too. Failures
+ * are logged and backed off, never surfaced: the last known catalog keeps
+ * serving.
+ */
+export function revalidatePluginCatalogInBackground(
+  ref: string,
+  deps: SearchPluginsDeps,
+  onChanged?: () => void,
+): void {
+  if (!arePlatformFeaturesEnabled()) {
+    return;
+  }
 
   const cached = cache.get(ref);
   if (cached && isFresh(cached)) {
-    return cached.catalog;
+    return;
   }
 
   const backingOff = backoff.get(ref);
-  if (!backingOff || Date.now() >= backingOff.until) {
-    // Fire and forget: the refresh populates the cache for the next read. The
-    // rejection is already logged in `recordRefreshFailure`.
-    void refreshPluginCatalog(ref, deps).catch(() => {});
+  if (backingOff && Date.now() < backingOff.until) {
+    return;
   }
 
-  return cached?.catalog ?? bundledCatalogAt(ref);
+  const before = catalogSignature(cached?.catalog ?? bundledCatalogAt(ref));
+  // Fire and forget: the refresh populates the cache for the next read, and a
+  // rejection is already logged in `recordRefreshFailure`.
+  void refreshPluginCatalog(ref, deps)
+    .then((merged) => {
+      if (onChanged && catalogSignature(merged) !== before) {
+        onChanged();
+      }
+    })
+    .catch(() => {});
 }
 
 /**
@@ -186,6 +239,7 @@ export async function getAuthoritativePluginCatalog(
 
 /** Invalidate the cache (for testing or forced refresh). */
 export function invalidatePluginCatalogCache(): void {
+  generation += 1;
   cache.clear();
   inFlight.clear();
   backoff.clear();

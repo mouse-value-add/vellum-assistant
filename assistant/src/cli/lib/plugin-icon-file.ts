@@ -84,23 +84,31 @@ export function validatePluginIconBytes(bytes: Buffer): ValidatedPluginIcon {
   return { hasIcon: true, iconVersion };
 }
 
-interface CachedIcon {
-  /** Nanosecond mtime of the file the result was computed from. */
-  readonly mtimeNs: bigint;
-  readonly size: bigint;
-  readonly result: ValidatedPluginIcon;
+/**
+ * Identity of the file a cached result was computed from: inode, nanosecond
+ * ctime and mtime, and size.
+ *
+ * Every field earns its place. `ino` catches an atomic replace, which swaps the
+ * inode and can carry any timestamps the writer chooses. `ctimeNs` is set by
+ * the kernel on every write and cannot be back-dated from userland, so it
+ * catches an archive extraction that restores an old `mtime` onto same-sized
+ * bytes. Nanoseconds are what distinguish two writes inside the same
+ * millisecond, which a millisecond-truncated timestamp cannot.
+ */
+function fileIdentity(stat: BigIntStats): string {
+  return `${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}`;
 }
 
 /**
- * Validated icon per path, keyed by the file's mtime and size.
+ * Validated icon per path, keyed by {@link fileIdentity}.
  *
  * The installed-plugins list validates every plugin's icon on every request,
- * and validation hashes the whole file. Caching on identity keeps an unchanged
- * icon at one `stat` per request. Nanosecond mtime is what distinguishes two
- * writes inside the same millisecond, which a millisecond-truncated mtime
- * cannot.
+ * and validation hashes the whole file, so an unchanged icon costs one `stat`.
  */
-const iconCache = new Map<string, CachedIcon>();
+const iconCache = new Map<
+  string,
+  { identity: string; result: ValidatedPluginIcon }
+>();
 
 /**
  * Read and validate `<pluginDir>/icon.png`. Returns `{ hasIcon: true }` with a
@@ -124,11 +132,7 @@ export function readValidatedPluginIcon(
       return { hasIcon: false };
     }
     const cached = iconCache.get(iconPath);
-    if (
-      cached &&
-      cached.mtimeNs === stat.mtimeNs &&
-      cached.size === stat.size
-    ) {
+    if (cached && cached.identity === fileIdentity(stat)) {
       return cached.result;
     }
     bytes = readFileSync(iconPath);
@@ -141,10 +145,6 @@ export function readValidatedPluginIcon(
   const result: ValidatedPluginIcon = validated.hasIcon
     ? { ...validated, path: iconPath }
     : validated;
-  iconCache.set(iconPath, {
-    mtimeNs: stat.mtimeNs,
-    size: stat.size,
-    result,
-  });
+  iconCache.set(iconPath, { identity: fileIdentity(stat), result });
   return result;
 }

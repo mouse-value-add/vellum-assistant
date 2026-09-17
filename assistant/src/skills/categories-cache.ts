@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { type BigIntStats, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { parse as parseYaml } from "yaml";
@@ -50,33 +50,34 @@ async function fetchCategories(): Promise<SkillCategoryDef[]> {
 /** Catalog filename, fixed under whichever `skills/` dir resolves. */
 const CATEGORY_CATALOG_FILENAME = "skill-categories-catalog.yaml";
 
-interface ParsedCatalogFile {
-  /** Nanosecond mtime of the file the entry was parsed from. */
-  readonly mtimeNs: bigint;
-  readonly size: bigint;
-  readonly categories: SkillCategoryDef[];
+/**
+ * Identity of the file a parsed entry came from: inode, nanosecond ctime and
+ * mtime, and size. `ino` catches an atomic replace, `ctimeNs` catches an
+ * archive extraction that restores an old `mtime` onto same-sized bytes, and
+ * nanoseconds distinguish two writes inside the same millisecond.
+ */
+function fileIdentity(stat: BigIntStats): string {
+  return `${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}`;
 }
 
 /**
- * Parsed catalog per path, keyed by the file's mtime and size.
+ * Parsed catalog per path, keyed by {@link fileIdentity}.
  *
  * The plugins list and search paths resolve the taxonomy on every request, so
  * the read and the YAML parse are memoized: an unchanged file is parsed once
- * per process. Nanosecond mtime is what distinguishes two writes inside the
- * same millisecond, which a millisecond-truncated mtime cannot.
+ * per process.
  */
-const parsedCatalogs = new Map<string, ParsedCatalogFile>();
+const parsedCatalogs = new Map<
+  string,
+  { identity: string; categories: SkillCategoryDef[] }
+>();
 
 function readLocalCategories(repoSkillsDir: string): SkillCategoryDef[] {
   const path = join(repoSkillsDir, CATEGORY_CATALOG_FILENAME);
   try {
     const stat = statSync(path, { bigint: true });
     const cached = parsedCatalogs.get(path);
-    if (
-      cached &&
-      cached.mtimeNs === stat.mtimeNs &&
-      cached.size === stat.size
-    ) {
+    if (cached && cached.identity === fileIdentity(stat)) {
       return cached.categories;
     }
     const raw = readFileSync(path, "utf-8");
@@ -87,11 +88,7 @@ function readLocalCategories(repoSkillsDir: string): SkillCategoryDef[] {
             !!c && typeof c.slug === "string" && typeof c.label === "string",
         )
       : [];
-    parsedCatalogs.set(path, {
-      mtimeNs: stat.mtimeNs,
-      size: stat.size,
-      categories,
-    });
+    parsedCatalogs.set(path, { identity: fileIdentity(stat), categories });
     return categories;
   } catch {
     return [];
@@ -152,7 +149,8 @@ export function getCachedCategoriesSync(): SkillCategoryDef[] {
  * remote-fetch latency. Resolves the catalog across environments and degrades
  * to an empty set when it is unreachable — callers treat an empty set as
  * "everything is unknown" rather than failing. The file read and YAML parse
- * are memoized on the file's mtime, so a per-request caller costs one `stat`.
+ * are memoized on the file's identity, so a per-request caller costs one
+ * `stat`.
  */
 export function getLocalCategorySlugs(): Set<string> {
   // Primary: getRepoSkillsDir() resolves the catalog for compiled binaries and
