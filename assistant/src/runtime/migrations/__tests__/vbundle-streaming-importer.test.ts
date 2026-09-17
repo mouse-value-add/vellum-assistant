@@ -1387,6 +1387,11 @@ describe("streamCommitImport — preserves live workspace paths when bundle omit
       join(workspaceDir, "data", "monitoring", "daemon-heartbeat"),
       "42",
     );
+    mkdirSync(join(workspaceDir, "logs"), { recursive: true });
+    writeFileSync(
+      join(workspaceDir, "logs", "daemon-stderr.log"),
+      "live stderr line\n",
+    );
     const liveLogInode = statSync(
       join(workspaceDir, "data", "logs", "assistant-2026-09-16.log"),
     ).ino;
@@ -1439,6 +1444,9 @@ describe("streamCommitImport — preserves live workspace paths when bundle omit
         "utf-8",
       ),
     ).toBe("42");
+    expect(
+      readFileSync(join(workspaceDir, "logs", "daemon-stderr.log"), "utf-8"),
+    ).toBe("live stderr line\n");
   });
 
   test("lets the bundle overwrite data/db when it does carry an assistant.db entry", async () => {

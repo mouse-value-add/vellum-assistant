@@ -284,9 +284,9 @@ export function computeSecretsRedacted(
 /**
  * Compute the v1 manifest inputs that aren't tied to per-call options.
  *
- * The workspace walk in `vbundle-builder` skips `data/logs`, browser
- * state, and memory vectors (`data/qdrant`), so all three export-option
- * flags are false.
+ * The workspace walk in `vbundle-builder` skips the log directories,
+ * browser state, and memory vectors (`data/qdrant`), so all three
+ * export-option flags are false.
  */
 async function buildExportManifestInputs(): Promise<ExportManifestInputs> {
   const assistantId = await resolveAssistantId();

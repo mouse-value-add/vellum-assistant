@@ -26,6 +26,7 @@ const DROPPED = [
   "embed-worker.pid",
   "data/db/assistant.db-wal",
   "data/db/assistant.db-shm",
+  "logs/daemon-stderr.log",
   "data/logs/assistant-2026-09-16.log",
   "data/monitoring/samples.jsonl",
   "data/monitoring/monitoring.pid",

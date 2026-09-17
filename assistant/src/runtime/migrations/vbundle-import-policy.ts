@@ -32,10 +32,12 @@ export const WORKSPACE_PID_FILES: readonly string[] = [
 ];
 
 /**
- * Workspace subtrees holding per-process runtime state: daemon logs and
+ * Workspace subtrees holding per-process runtime state: the daemon's
+ * stderr log (`logs/daemon-stderr.log`), the rotating daemon logs, and
  * resource-monitor samples, snapshots, heartbeat, and pid.
  */
 export const WORKSPACE_RUNTIME_STATE_DIRS: readonly string[] = [
+  "logs",
   "data/logs",
   "data/monitoring",
 ];

@@ -53,6 +53,7 @@ describe("WORKSPACE_PRESERVE_PATHS", () => {
       "deprecated",
       "data/db",
       "data/qdrant",
+      "logs",
       "data/logs",
       "data/monitoring",
       "vellum.pid",
@@ -133,6 +134,7 @@ describe("isEphemeralArchivePath", () => {
     "workspace/vellum.pid",
     "workspace/embed-worker.pid",
     "workspace/data/monitoring/monitoring.pid",
+    "workspace/logs/daemon-stderr.log",
     "workspace/data/logs/assistant-2026-09-16.log",
     "workspace/data/monitoring/samples.jsonl",
     "workspace/data/monitoring/snapshots/baseline-1.json",
@@ -164,9 +166,10 @@ describe("partitionWorkspacePreserveSkipDirs", () => {
     const { topLevelSkipDirs, dataSubdirSkipDirs } =
       partitionWorkspacePreserveSkipDirs();
 
-    expect(topLevelSkipDirs.size).toBe(6);
+    expect(topLevelSkipDirs.size).toBe(7);
     expect(topLevelSkipDirs.has("embedding-models")).toBe(true);
     expect(topLevelSkipDirs.has("deprecated")).toBe(true);
+    expect(topLevelSkipDirs.has("logs")).toBe(true);
     expect(topLevelSkipDirs.has("vellum.pid")).toBe(true);
     expect(topLevelSkipDirs.has("embed-worker.pid")).toBe(true);
     expect(topLevelSkipDirs.has("memory-worker.pid")).toBe(true);
