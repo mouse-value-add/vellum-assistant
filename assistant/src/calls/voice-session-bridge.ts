@@ -1889,7 +1889,7 @@ export async function startVoiceTurn(
       updateMessageContent(rowId, JSON.stringify(cut.blocks));
       return "rewrite_spoken";
     }
-    // Terminal position only — mirrors parseTerminalSessionControl: a reply
+    // Terminal position only, mirroring parseTerminalSessionControl: a reply
     // whose CONTENT contains a marker mid-text never acted on it, so its
     // transcript keeps that content untouched too. Front-door answer rows (no
     // verdict token to cut) take this branch as well.
@@ -1899,7 +1899,7 @@ export async function startVoiceTurn(
     if (terminalMarkerLength === 0) {
       return "none";
     }
-    // Terminal marker first (boundary-aware — it may span text blocks), then
+    // Terminal marker first (boundary-aware, since it may span text blocks), then
     // the per-block strip for any interior complete markers.
     const cleaned = trimOuterTextEdges(
       stripMarkersFromBlocks(
@@ -1908,8 +1908,8 @@ export async function startVoiceTurn(
     );
     // A marker-only reply (the model said nothing beyond "[-1]") strips to
     // nothing at all; keeping the row would render a blank assistant bubble,
-    // so delete it like the front-door empty case. Any surviving block —
-    // including non-text blocks like tool_use — keeps the row.
+    // so delete it like the front-door empty case. Any surviving block,
+    // including non-text blocks like tool_use, keeps the row.
     if (cleaned.length === 0) {
       deleteMessageById(rowId);
       return "delete_empty";
