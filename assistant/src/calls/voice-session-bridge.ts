@@ -31,8 +31,10 @@ import {
 import { CONVERSATION_BUSY_MESSAGE } from "../daemon/conversation-messaging.js";
 import { resolveChannelCapabilities } from "../daemon/conversation-runtime-assembly.js";
 import { getOrCreateConversation } from "../daemon/conversation-store.js";
+import { buildDeferredFinalizeEffect } from "../daemon/conversation-turn-finalize.js";
 import { preactivateHostProxySkills } from "../daemon/host-proxy-preactivation.js";
 import type { TrustContext } from "../daemon/trust-context-types.js";
+import { chainTurnTail } from "../daemon/turn-tail-chain.js";
 import {
   newestPersistedSightFrame,
   pendingStandaloneImagePersist,
@@ -1867,15 +1869,18 @@ export async function startVoiceTurn(
    * Apply the teardown transcript hygiene to one reserved row and name what
    * it did: the whole-leg rules (discard, front-door verdict cut) and the
    * terminal-marker strip documented on {@link finalizeVoiceLegTranscript}.
+   * A rewrite also returns the content it wrote, for reindexing.
    */
-  const finalizeVoiceLegRow = (rowId: string): string => {
+  const finalizeVoiceLegRow = (
+    rowId: string,
+  ): { action: string; contentJson?: string } => {
     if (discarded) {
       deleteMessageById(rowId);
-      return "delete_discarded";
+      return { action: "delete_discarded" };
     }
     const row = getMessageById(rowId, opts.conversationId);
     if (!row) {
-      return "row_missing";
+      return { action: "row_missing" };
     }
     const cut =
       opts.routingLeg === "front-door"
@@ -1884,10 +1889,11 @@ export async function startVoiceTurn(
     if (cut) {
       if (cut.spokenText.length === 0) {
         deleteMessageById(rowId);
-        return "delete_empty";
+        return { action: "delete_empty" };
       }
-      updateMessageContent(rowId, JSON.stringify(cut.blocks));
-      return "rewrite_spoken";
+      const contentJson = JSON.stringify(cut.blocks);
+      updateMessageContent(rowId, contentJson);
+      return { action: "rewrite_spoken", contentJson };
     }
     // Terminal position only, mirroring parseTerminalSessionControl: a reply
     // whose CONTENT contains a marker mid-text never acted on it, so its
@@ -1897,7 +1903,7 @@ export async function startVoiceTurn(
       joinedTextOfBlocks(row.content),
     );
     if (terminalMarkerLength === 0) {
-      return "none";
+      return { action: "none" };
     }
     // Terminal marker first (boundary-aware, since it may span text blocks), then
     // the per-block strip for any interior complete markers.
@@ -1912,10 +1918,11 @@ export async function startVoiceTurn(
     // including non-text blocks like tool_use, keeps the row.
     if (cleaned.length === 0) {
       deleteMessageById(rowId);
-      return "delete_empty";
+      return { action: "delete_empty" };
     }
-    updateMessageContent(rowId, JSON.stringify(cleaned));
-    return "strip_control_marker";
+    const contentJson = JSON.stringify(cleaned);
+    updateMessageContent(rowId, contentJson);
+    return { action: "strip_control_marker", contentJson };
   };
 
   const finalizeVoiceLegTranscript = async (): Promise<void> => {
@@ -1936,9 +1943,24 @@ export async function startVoiceTurn(
     let changed = false;
     for (const rowId of reservedAssistantRowIds) {
       try {
-        const action = finalizeVoiceLegRow(rowId);
+        const { action, contentJson } = finalizeVoiceLegRow(rowId);
         if (action !== "none" && action !== "row_missing") {
           changed = true;
+        }
+        if (contentJson !== undefined) {
+          // The agent loop's detached turn tail indexes this row for memory
+          // from the content it finalized, markers included. Queue a reindex
+          // of the clean content behind it on the same per-conversation
+          // chain, so the clean segments land last.
+          chainTurnTail(
+            opts.conversationId,
+            buildDeferredFinalizeEffect({
+              conversationId: opts.conversationId,
+              assistantMessageId: rowId,
+              contentJson,
+              rlog: log,
+            }),
+          );
         }
         // Main legs run the pass on every voice turn; keep the no-op case
         // out of the logs.

@@ -92,12 +92,14 @@ const crudLog: {
   updates: Array<{ messageId: string; content: string }>;
   deletes: string[];
   retained: Array<{ messageId: string; ids: readonly string[] }>;
-} = { reads: [], updates: [], deletes: [], retained: [] };
+  reindexed: Array<{ messageId: string; content: string }>;
+} = { reads: [], updates: [], deletes: [], retained: [], reindexed: [] };
 function resetCrudLog(): void {
   crudLog.reads.length = 0;
   crudLog.updates.length = 0;
   crudLog.deletes.length = 0;
   crudLog.retained.length = 0;
+  crudLog.reindexed.length = 0;
   messageAttachmentLinks.clear();
   collectedAttachmentIds.clear();
   getMessageByIdImpl = () => null;
@@ -134,6 +136,24 @@ mock.module("../../persistence/conversation-crud.js", () => ({
   // The echo path advances the snapshot anchor for a real-user turn; the
   // fake conversation has no row in SQLite, so stub the write out.
   recordConversationPersistedSeq: () => {},
+}));
+
+// Memory reindexing of rows the hygiene pass rewrote, recorded instead of run.
+import * as realTurnFinalize from "../../daemon/conversation-turn-finalize.js";
+
+mock.module("../../daemon/conversation-turn-finalize.js", () => ({
+  ...realTurnFinalize,
+  buildDeferredFinalizeEffect: (params: {
+    assistantMessageId: string;
+    contentJson: string;
+  }) => {
+    return async () => {
+      crudLog.reindexed.push({
+        messageId: params.assistantMessageId,
+        content: params.contentJson,
+      });
+    };
+  },
 }));
 
 import { setConfig } from "../../__tests__/helpers/set-config.js";
@@ -2738,14 +2758,16 @@ describe("transcript hygiene (teardown pass)", () => {
     await flushMicrotasks();
 
     expect(crudLog.reads).toEqual(["assistant-row-1", "assistant-row-2"]);
+    const cleanContent = JSON.stringify([
+      { type: "text", text: "Pulling up your screen." },
+      { type: "tool_use", id: "tool-1", name: "file_read", input: {} },
+    ]);
     expect(crudLog.updates).toEqual([
-      {
-        messageId: "assistant-row-1",
-        content: JSON.stringify([
-          { type: "text", text: "Pulling up your screen." },
-          { type: "tool_use", id: "tool-1", name: "file_read", input: {} },
-        ]),
-      },
+      { messageId: "assistant-row-1", content: cleanContent },
+    ]);
+    // Memory indexes the clean row, not the marker the turn finalized with.
+    expect(crudLog.reindexed).toEqual([
+      { messageId: "assistant-row-1", content: cleanContent },
     ]);
     expect(crudLog.deletes).toHaveLength(0);
     expect(events).toContain("loadFromDb");
