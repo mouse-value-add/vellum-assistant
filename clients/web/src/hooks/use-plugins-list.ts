@@ -18,6 +18,7 @@ import { pluginsGet } from "@/generated/daemon/sdk.gen";
 import type { PluginsGetResponse } from "@/generated/daemon/types.gen";
 import { t } from "@/i18n";
 import { installedPluginsQueryOptions } from "@/lib/installed-plugins-query";
+import { awaitsFirstResult } from "@/utils/query-retry";
 
 // The catalog (the daemon's cached, rate-limited GitHub listing) changes
 // rarely, so `staleTime` keeps it warm across tab switches and revisiting
@@ -47,6 +48,15 @@ export interface UsePluginsListResult {
   isError: boolean;
   /** Whether the installed list has resolved at least once, including cached data. */
   installedLoaded: boolean;
+  /**
+   * True while a first read is still worth waiting for: one of the two is in
+   * flight with nothing to show and neither has failed an attempt yet. A view
+   * that draws installed and available together holds its first paint on this
+   * so the catalog, the slowest of the reads, doesn't land a screenful of rows
+   * into a page that already looked settled. A read that starts retrying ends
+   * the wait, so a failing source degrades instead of hiding the page.
+   */
+  awaitingFirstRead: boolean;
   /** True while either underlying query is fetching (incl. background). */
   isFetching: boolean;
   /**
@@ -318,6 +328,8 @@ export function usePluginsList(
     // Only the installed failure is fatal; a catalog failure degrades.
     isError: installedQuery.isError,
     installedLoaded: installedQuery.data !== undefined,
+    awaitingFirstRead:
+      awaitsFirstResult(installedQuery) || awaitsFirstResult(catalogQuery),
     isFetching: installedQuery.isFetching || catalogQuery.isFetching,
     catalogError: catalogQuery.isError,
     categorySupported,

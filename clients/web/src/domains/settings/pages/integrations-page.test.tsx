@@ -34,9 +34,10 @@ let mcpFails = false;
 let pluginCatalogFails = false;
 let pluginListFails = false;
 // The catalog is the slowest source on the page, so the tests drive its phase
-// from outside React: "pending" is the first load, "refetching" a background
-// one after the list is already on screen.
-type CatalogPhase = "pending" | "loaded" | "refetching";
+// from outside React: "pending" is the first load, "retrying" that same load
+// after an attempt has failed, "refetching" a background one after the list is
+// already on screen.
+type CatalogPhase = "pending" | "retrying" | "loaded" | "refetching";
 let catalogPhase: CatalogPhase = "loaded";
 const catalogPhaseListeners = new Set<() => void>();
 const readCatalogPhase = () => catalogPhase;
@@ -209,15 +210,18 @@ mock.module("@/hooks/use-managed-oauth-connect", () => ({
 mock.module("@/hooks/use-plugins-list", () => ({
   usePluginsList: () => {
     const phase = useSyncExternalStore(subscribeCatalogPhase, readCatalogPhase);
+    const beforeFirstResult = phase === "pending" || phase === "retrying";
     return {
       isLoading: false,
       isError: pluginListFails,
       installedLoaded: !pluginListFails || seededPlugins.length > 0,
-      // Pending is the first load only; a refetch keeps the matches it has.
-      catalogLoading: phase === "pending",
+      catalogLoading: beforeFirstResult,
+      // A first read is worth waiting for until it starts retrying; a refetch
+      // has its matches already.
+      awaitingFirstRead: phase === "pending",
       isFetching: phase !== "loaded",
       catalogError: pluginCatalogFails,
-      catalogMatches: phase === "pending" ? [] : seededCatalog,
+      catalogMatches: beforeFirstResult ? [] : seededCatalog,
       installedPlugins: seededPlugins,
     };
   },
@@ -511,6 +515,19 @@ describe("IntegrationsPage", () => {
 
     await screen.findByText("Example");
     screen.getByText("Notion");
+    expect(screen.queryByText("Loading...")).toBeNull();
+  });
+
+  test("a retrying catalog stops holding the grid back", async () => {
+    // Three attempts with 1s, 2s and 4s between them: long enough that the
+    // integrations already in hand must not wait behind them.
+    catalogPhase = "retrying";
+    seededProviders = [provider()];
+    seededServers = [server()];
+    render(<IntegrationsPage />, { wrapper: Wrapper });
+
+    await screen.findByText("Notion");
+    screen.getByText("example-integration");
     expect(screen.queryByText("Loading...")).toBeNull();
   });
 

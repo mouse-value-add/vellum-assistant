@@ -32,6 +32,7 @@ import { captureError } from "@/lib/sentry/capture-error";
 import { openExternalUrl } from "@/runtime/browser";
 import { useAssistantFeatureFlagStore } from "@/stores/assistant-feature-flag-store";
 import { navigateToNewConversation } from "@/utils/conversation-navigation";
+import { awaitsFirstResult } from "@/utils/query-retry";
 import { routes } from "@/utils/routes";
 
 import { IntegrationConnectModal } from "../components/integration-connect-modal";
@@ -307,17 +308,18 @@ function IntegrationsPanelInner({ mcpAssistantId }: { mcpAssistantId: string }) 
   // The grid is drawn once, complete. Every source is waited on for its first
   // result, the plugin catalog included: it is the slowest of them, so letting
   // it land after the grid pops a screenful of tiles into a page that already
-  // looked settled. Each of these is a first-load signal only, so a source
-  // that fails stops the wait (its own notice reports it) and a later
-  // background refetch leaves the grid where it is.
+  // looked settled. The wait is only ever a short one. It covers a first read
+  // and nothing else, so a background refetch leaves the grid where it is, and
+  // it ends at a source's first failed attempt rather than sitting through its
+  // retries, so a failing source degrades to what the page has and is reported
+  // by its own notice.
   const loading =
     assistantLoading ||
-    providers.isLoading ||
-    connections.isLoading ||
+    awaitsFirstResult(providers) ||
+    awaitsFirstResult(connections) ||
     platformAssistantIdLoading ||
-    mcp.list.isLoading ||
-    plugins.isLoading ||
-    plugins.catalogLoading;
+    awaitsFirstResult(mcp.list) ||
+    plugins.awaitingFirstRead;
   // One attempt at a time, on every surface: a managed authorization is just
   // as exclusive as an MCP one, and the rows and cards that predate the tiles
   // only knew about the MCP machine.

@@ -64,3 +64,21 @@ export function shouldRetryQuery(
 export function queryRetryDelay(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000);
 }
+
+/**
+ * Whether a first result is still worth holding UI for: the read is in flight,
+ * has produced nothing yet, and has not failed an attempt.
+ *
+ * `isLoading` alone stays true across the whole retry cycle above (three
+ * attempts, 1s + 2s + 4s of backoff between them), so a view that waits on it
+ * hides what it already has for seven seconds or more before it can degrade.
+ * The first failure is the signal that this read is no longer a short wait:
+ * from there the view shows what it has and lets the read's own error surface
+ * report the rest.
+ */
+export function awaitsFirstResult(query: {
+  isLoading: boolean;
+  failureCount: number;
+}): boolean {
+  return query.isLoading && query.failureCount === 0;
+}

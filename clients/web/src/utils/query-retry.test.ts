@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-const { httpStatusFromError, shouldRetryQuery, queryRetryDelay } =
-  await import("@/utils/query-retry");
+const {
+  httpStatusFromError,
+  shouldRetryQuery,
+  queryRetryDelay,
+  awaitsFirstResult,
+} = await import("@/utils/query-retry");
 const { ApiError } = await import("@/utils/api-errors");
 
 describe("httpStatusFromError", () => {
@@ -56,5 +60,23 @@ describe("queryRetryDelay", () => {
     expect(queryRetryDelay(1)).toBe(2000);
     expect(queryRetryDelay(2)).toBe(4000);
     expect(queryRetryDelay(10)).toBe(30_000); // capped
+  });
+});
+
+describe("awaitsFirstResult", () => {
+  test("waits on a first read that has not failed", () => {
+    expect(awaitsFirstResult({ isLoading: true, failureCount: 0 })).toBe(true);
+  });
+
+  test("stops waiting at the first failed attempt", () => {
+    // Still pending across the retry cycle, but no longer a short wait.
+    expect(awaitsFirstResult({ isLoading: true, failureCount: 1 })).toBe(false);
+  });
+
+  test("does not wait on a read that has data", () => {
+    // A background refetch: `isLoading` is false with data in hand.
+    expect(awaitsFirstResult({ isLoading: false, failureCount: 0 })).toBe(
+      false,
+    );
   });
 });
