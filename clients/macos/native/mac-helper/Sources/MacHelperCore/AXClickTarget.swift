@@ -54,16 +54,34 @@ public enum AXClickTarget {
 
     /// `hitChain` runs from the element under the point outwards through its
     /// ancestors. Nil or empty means the hit test did not answer.
+    ///
+    /// The nearest element decides, because that is the one a click operates.
+    /// A control the model named can hold another control that covers its
+    /// centre: a tab group whose centre is over one of its tabs, or a web
+    /// control wrapping a link. Finding the target anywhere in the chain
+    /// would accept those, and the click would work the child instead.
     public static func verdict(target: Element, hitChain: [Element]?) -> Verdict {
         guard let hitChain, !hitChain.isEmpty else { return .unknown }
-        if hitChain.contains(where: { isSame($0, as: target) }) {
-            return .reachesTarget
-        }
-        // The nearest actionable element is the one a click would operate.
-        if let found = hitChain.first(where: \.actionable) {
-            return .differentElement(found)
+        for reading in hitChain {
+            if isSame(reading, as: target) { return .reachesTarget }
+            if reading.actionable, !isPartOfTarget(reading, target) {
+                return .differentElement(reading)
+            }
         }
         return .unknown
+    }
+
+    /// Whether an actionable element nearer than the target is a piece of the
+    /// target rather than a control of its own.
+    ///
+    /// A control is routinely built from smaller ones: Docker's sign-in button
+    /// holds an unnamed link across its middle, and a click on either does the
+    /// same thing. What makes that different from a tab inside a tab group is
+    /// the name. Something a person could ask for by name is a control in its
+    /// own right, and a click landing on it rather than on what the model
+    /// named is the mistake this check exists to catch.
+    static func isPartOfTarget(_ reading: Element, _ target: Element) -> Bool {
+        reading.label == nil && !target.frame.isEmpty && target.frame.contains(reading.frame)
     }
 
     static func isSame(_ reading: Element, as target: Element) -> Bool {

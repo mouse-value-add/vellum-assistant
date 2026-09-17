@@ -34,6 +34,39 @@ struct AXClickTargetTests {
         #expect(AXClickTarget.verdict(target: Self.archive, hitChain: chain) == .reachesTarget)
     }
 
+    /// A tab group holds tabs, and a click at its centre works the tab under
+    /// it rather than the group the model named.
+    @Test("an actionable element inside the target is what a click would operate")
+    func actionableDescendantOfTarget() {
+        let group = AXClickTarget.Element(
+            role: "AXTabGroup", label: "Vellum", frame: .init(x: 8, y: 124, width: 47, height: 379), actionable: true
+        )
+        let tab = Self.element("AXTab", "Threads", .init(x: 8, y: 290, width: 47, height: 47))
+        #expect(AXClickTarget.verdict(target: group, hitChain: [tab, group]) == .differentElement(tab))
+    }
+
+    /// Docker's sign-in button holds an unnamed link across its middle, and a
+    /// click on either does the same thing.
+    @Test("an unnamed actionable piece of the target still reaches the target")
+    func unnamedActionablePartOfTarget() {
+        let button = AXClickTarget.Element(
+            role: "AXButton", label: "github-signin", frame: .init(x: 882, y: 593, width: 64, height: 39), actionable: true
+        )
+        let innerLink = Self.element("AXLink", nil, .init(x: 905, y: 602, width: 17, height: 21))
+        #expect(AXClickTarget.verdict(target: button, hitChain: [innerLink, button]) == .reachesTarget)
+    }
+
+    /// A named control inside the target is one a person could have asked for,
+    /// so a click landing on it instead is the mistake worth catching.
+    @Test("a named actionable element inside the target is not part of it")
+    func namedActionableInsideTarget() {
+        let outer = AXClickTarget.Element(
+            role: "AXGroup", label: "Row", frame: .init(x: 0, y: 0, width: 400, height: 40), actionable: true
+        )
+        let inner = Self.element("AXButton", "Delete", .init(x: 180, y: 8, width: 40, height: 24))
+        #expect(AXClickTarget.verdict(target: outer, hitChain: [inner, outer]) == .differentElement(inner))
+    }
+
     @Test("a layout that shifted a few points still reaches the target")
     func smallShift() {
         let shifted = Self.element("AXButton", "Archive", Self.archiveFrame.offsetBy(dx: 3, dy: 4))

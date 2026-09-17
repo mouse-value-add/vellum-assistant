@@ -629,10 +629,24 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
 
     // MARK: - Hit Test
 
-    /// Per-call timeout for the hit test and the reads up its ancestors. Short,
-    /// because it runs before every click by element ID, and an app too slow
-    /// to answer in time leaves the click to go ahead as it would have anyway.
-    static let hitTestTimeoutSeconds: Float = 0.5
+    /// Budget for one whole hit-chain read, the hit test and the walk up the
+    /// ancestors together. Short, because it runs before every click by
+    /// element ID, and an app too slow to answer inside it leaves the click to
+    /// go ahead as it would have anyway. A budget rather than a per-call
+    /// timeout: an app answering just inside a per-call limit would otherwise
+    /// cost that limit on every attribute of every node, which is tens of
+    /// seconds for a chain that ends in nothing.
+    static let hitChainBudgetSeconds: Double = 0.5
+
+    /// Attribute reads one node can cost: role, title, description, help,
+    /// position, size and parent. Each node gets its share of what is left of
+    /// the budget as its messaging timeout, so a node that answers slowly
+    /// spends the budget rather than multiplying it.
+    private static let hitChainReadsPerNode = 7
+
+    /// Floor for a node's messaging timeout, so the last node in the budget
+    /// still gets a chance to answer rather than being asked with no time.
+    private static let hitChainMinimumSliceSeconds = 0.02
 
     /// How many elements up from the hit the chain reads. Enough to climb from
     /// a link's text or a button's icon to the control, and past a cell or row
@@ -653,8 +667,11 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
     }
 
     private static func hitChainSync(at point: CGPoint) -> [AXClickTarget.Element]? {
+        let deadline = Date(timeIntervalSinceNow: hitChainBudgetSeconds)
         let systemWide = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(systemWide, hitTestTimeoutSeconds)
+        // Half the budget for the hit test, half for the walk that reads what
+        // it found. A hit test that spends its half leaves the walk its own.
+        AXUIElementSetMessagingTimeout(systemWide, Float(hitChainBudgetSeconds / 2))
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hit) == .success,
               var current = hit
@@ -668,7 +685,12 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
 
         var chain: [AXClickTarget.Element] = []
         for _ in 0..<hitChainLimit {
-            AXUIElementSetMessagingTimeout(current, hitTestTimeoutSeconds)
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { break }
+            AXUIElementSetMessagingTimeout(
+                current,
+                Float(max(hitChainMinimumSliceSeconds, remaining / Double(hitChainReadsPerNode)))
+            )
             let role = stringAttribute(current, kAXRoleAttribute as CFString) ?? ""
             if role == kAXWindowRole || role == kAXApplicationRole { break }
             chain.append(AXClickTarget.Element(
