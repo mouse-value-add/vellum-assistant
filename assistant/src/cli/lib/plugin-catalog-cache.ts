@@ -55,8 +55,22 @@ interface BackoffEntry {
   failures: number;
 }
 
+/**
+ * The one platform fetch a ref has in flight, plus everything that settles with
+ * it. The change notification lives here rather than on each caller's own
+ * `.then`: joiners share this record, so one refresh publishes at most one
+ * invalidation no matter how many reads join it.
+ */
+interface InFlightRefresh {
+  promise: Promise<PluginCatalog>;
+  /** What the ref served when the refresh started, for change detection. */
+  readonly before: string;
+  /** Registered by the first caller that supplies one, called at most once. */
+  notify?: () => void;
+}
+
 const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<PluginCatalog>>();
+const inFlight = new Map<string, InFlightRefresh>();
 const backoff = new Map<string, BackoffEntry>();
 
 /**
@@ -113,19 +127,35 @@ function catalogSignature(catalog: PluginCatalog): string {
  * rejects with the fetch failure, so the authoritative path can propagate it
  * while the display path swallows it.
  *
+ * `onChanged` belongs to the refresh, not to the caller: the first caller to
+ * supply one registers it on the in-flight record and every later joiner reuses
+ * it, so a refresh that moves the catalog notifies exactly once however many
+ * reads are waiting on it.
+ *
  * A result whose generation no longer matches (the cache was invalidated while
- * the fetch was in flight) is returned to its caller but never written back, so
- * a slow response cannot resurrect a cleared cache or overwrite a newer one.
+ * the fetch was in flight) is returned to its caller but never written back and
+ * never notifies, so a slow response cannot resurrect a cleared cache, overwrite
+ * a newer one, or announce a change that was discarded.
  */
 function refreshPluginCatalog(
   ref: string,
   deps: SearchPluginsDeps,
+  onChanged?: () => void,
 ): Promise<PluginCatalog> {
   const existing = inFlight.get(ref);
   if (existing) {
-    return existing;
+    existing.notify ??= onChanged;
+    return existing.promise;
   }
+
   const startedAt = generation;
+  const before = catalogSignature(
+    cache.get(ref)?.catalog ?? bundledCatalogAt(ref),
+  );
+  // Declared before the promise so the settle handler reads whatever a later
+  // joiner registered rather than only this caller's callback.
+  const pending: Pick<InFlightRefresh, "notify"> = { notify: onChanged };
+
   const promise = fetchPluginCatalogFromPlatform(deps, { ref }).then(
     (catalog) => {
       const merged = mergePlatformCatalogWithBundledLocals(catalog);
@@ -135,6 +165,9 @@ function refreshPluginCatalog(
       inFlight.delete(ref);
       cache.set(ref, { catalog: merged, timestamp: Date.now() });
       backoff.delete(ref);
+      if (pending.notify && catalogSignature(merged) !== before) {
+        pending.notify();
+      }
       return merged;
     },
     (err: unknown) => {
@@ -145,7 +178,8 @@ function refreshPluginCatalog(
       throw err;
     },
   );
-  inFlight.set(ref, promise);
+
+  inFlight.set(ref, Object.assign(pending, { promise, before }));
   return promise;
 }
 
@@ -175,11 +209,12 @@ export async function getPluginCatalog(
  * A no-op when platform features are disabled, when the cached copy is still
  * inside its TTL, or while a failed refresh is backing off. Otherwise it starts
  * (or joins) the single in-flight platform fetch and returns immediately.
- * `onChanged` fires once per refresh that replaces what the ref was serving,
- * which is how a caller tells its clients to refetch; it is the caller's job
- * because this module is transport-agnostic and runs in the CLI too. Failures
- * are logged and backed off, never surfaced: the last known catalog keeps
- * serving.
+ * `onChanged` is handed to that refresh rather than chained here, so a refresh
+ * that moves the catalog notifies once however many reads joined it: the
+ * installed list and the catalog search of one page load, and every tab, share
+ * a single invalidation. Telling clients is the caller's job because this
+ * module is transport-agnostic and runs in the CLI too. Failures are logged and
+ * backed off, never surfaced: the last known catalog keeps serving.
  */
 export function revalidatePluginCatalogInBackground(
   ref: string,
@@ -200,16 +235,9 @@ export function revalidatePluginCatalogInBackground(
     return;
   }
 
-  const before = catalogSignature(cached?.catalog ?? bundledCatalogAt(ref));
   // Fire and forget: the refresh populates the cache for the next read, and a
   // rejection is already logged in `recordRefreshFailure`.
-  void refreshPluginCatalog(ref, deps)
-    .then((merged) => {
-      if (onChanged && catalogSignature(merged) !== before) {
-        onChanged();
-      }
-    })
-    .catch(() => {});
+  void refreshPluginCatalog(ref, deps, onChanged).catch(() => {});
 }
 
 /**

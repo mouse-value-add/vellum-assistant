@@ -183,6 +183,54 @@ describe("getPluginCatalog + revalidatePluginCatalogInBackground", () => {
     expect(changes).toHaveLength(1);
   });
 
+  test("publishes one invalidation per refresh, not one per joined caller", async () => {
+    // GIVEN a cold cache and a platform fetch that has not settled yet, so
+    // every caller joins the same in-flight refresh.
+    const { fetch, calls, release } = platformFetch(["remote-only"], {
+      delayMs: 1,
+    });
+    let changes = 0;
+    const onChanged = (): void => {
+      changes += 1;
+    };
+
+    // WHEN a page load's installed list and catalog search, across several
+    // tabs, all read and schedule a revalidation at once
+    await Promise.all(
+      Array.from({ length: 6 }, () =>
+        readForDisplay("main", { fetch }, onChanged),
+      ),
+    );
+    release();
+    await settleRefresh();
+
+    // THEN there was one platform fetch and exactly one invalidation. One per
+    // joiner would make every client refetch both plugin queries six times.
+    expect(calls()).toBe(1);
+    expect(changes).toBe(1);
+  });
+
+  test("notifies a display joiner even when the install path started the refresh", async () => {
+    // GIVEN the authoritative read opened the refresh with no callback
+    const { fetch, calls, release } = platformFetch(["remote-only"], {
+      delayMs: 1,
+    });
+    let changes = 0;
+    const authoritative = getAuthoritativePluginCatalog("main", { fetch });
+
+    // WHEN a display read joins it and registers one
+    await readForDisplay("main", { fetch }, () => {
+      changes += 1;
+    });
+    release();
+    await authoritative;
+    await settleRefresh();
+
+    // THEN the shared refresh still tells clients the catalog moved
+    expect(calls()).toBe(1);
+    expect(changes).toBe(1);
+  });
+
   test("serves the cached copy within the TTL without refreshing", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const { fetch, calls } = platformFetch(["a"]);
