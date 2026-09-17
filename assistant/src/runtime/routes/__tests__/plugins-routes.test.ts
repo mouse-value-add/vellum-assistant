@@ -165,8 +165,11 @@ const getCatalogSpy = mock(
   },
 );
 
+// Both reads resolve to the same spy: the display read backs the list and
+// search handlers, the authoritative read backs install-by-name resolution.
 mock.module("../../../cli/lib/plugin-catalog-cache.js", () => ({
   getPluginCatalog: getCatalogSpy,
+  getAuthoritativePluginCatalog: getCatalogSpy,
 }));
 
 // Mock uninstallPlugin. The handler's error mapping is the wiring under
@@ -395,7 +398,7 @@ import {
 // static import evaluates before any `mock.module` runs and would capture the
 // real logger at module init (same reason as `request-logger.test.ts`).
 const {
-  loadCategoryMapBounded,
+  loadCategoryMap,
   normalizeMarketplaceCategory,
   ROUTES: PLUGINS_ROUTES,
 }: typeof import("../plugins-routes.js") = await import("../plugins-routes.js");
@@ -801,42 +804,7 @@ describe("GET /v1/plugins", () => {
     expect(result.totalCount).toBe(2);
   });
 
-  // The category lookup is bounded so a slow/hanging marketplace fetch (a cold
-  // cache stuck on GitHub) can't hold up the installed list — it degrades to an
-  // empty map exactly like the rejection path above. `loadCategoryMapBounded`
-  // takes an injectable timeout so we can prove the bound without waiting the
-  // full 1500ms production budget.
-  test("bounds the catalog lookup: a stall past the budget degrades to an empty map", async () => {
-    // GIVEN a catalog fetch that resolves only AFTER the (shortened) budget.
-    getCatalogSpy.mockImplementation(
-      (ref) =>
-        new Promise<PluginCatalog>((resolve) => {
-          setTimeout(
-            () =>
-              resolve(
-                catalog(ref, [
-                  {
-                    name: "alpha",
-                    path: "github:acme/alpha@v1",
-                    category: "productivity",
-                    source: { kind: "github", repo: "acme/alpha", ref: "v1" },
-                  },
-                ]),
-              ),
-            80,
-          );
-        }),
-    );
-
-    // WHEN the bound (10ms) elapses first, the timer wins the race.
-    const map = await loadCategoryMapBounded(10);
-
-    // THEN we fall back to an empty map, so every category resolves to null and
-    // the installed list returns immediately instead of blocking on GitHub.
-    expect(map.size).toBe(0);
-  });
-
-  test("returns the catalog category map when the lookup resolves within the budget", async () => {
+  test("returns the catalog category map", async () => {
     getCatalogSpy.mockImplementation(async (ref) =>
       catalog(ref, [
         {
@@ -848,7 +816,7 @@ describe("GET /v1/plugins", () => {
       ]),
     );
 
-    const map = await loadCategoryMapBounded();
+    const map = await loadCategoryMap();
     expect(map.get("alpha")).toBe("productivity");
   });
 

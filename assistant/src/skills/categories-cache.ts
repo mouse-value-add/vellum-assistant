@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { parse as parseYaml } from "yaml";
@@ -47,20 +47,52 @@ async function fetchCategories(): Promise<SkillCategoryDef[]> {
   );
 }
 
+/** Catalog filename, fixed under whichever `skills/` dir resolves. */
+const CATEGORY_CATALOG_FILENAME = "skill-categories-catalog.yaml";
+
+interface ParsedCatalogFile {
+  /** Nanosecond mtime of the file the entry was parsed from. */
+  readonly mtimeNs: bigint;
+  readonly size: bigint;
+  readonly categories: SkillCategoryDef[];
+}
+
+/**
+ * Parsed catalog per path, keyed by the file's mtime and size.
+ *
+ * The plugins list and search paths resolve the taxonomy on every request, so
+ * the read and the YAML parse are memoized: an unchanged file is parsed once
+ * per process. Nanosecond mtime is what distinguishes two writes inside the
+ * same millisecond, which a millisecond-truncated mtime cannot.
+ */
+const parsedCatalogs = new Map<string, ParsedCatalogFile>();
+
 function readLocalCategories(repoSkillsDir: string): SkillCategoryDef[] {
+  const path = join(repoSkillsDir, CATEGORY_CATALOG_FILENAME);
   try {
-    const raw = readFileSync(
-      join(repoSkillsDir, "skill-categories-catalog.yaml"),
-      "utf-8",
-    );
-    const parsed = parseYaml(raw) as { categories?: SkillCategoryDef[] };
-    if (!Array.isArray(parsed?.categories)) {
-      return [];
+    const stat = statSync(path, { bigint: true });
+    const cached = parsedCatalogs.get(path);
+    if (
+      cached &&
+      cached.mtimeNs === stat.mtimeNs &&
+      cached.size === stat.size
+    ) {
+      return cached.categories;
     }
-    return parsed.categories.filter(
-      (c): c is SkillCategoryDef =>
-        !!c && typeof c.slug === "string" && typeof c.label === "string",
-    );
+    const raw = readFileSync(path, "utf-8");
+    const parsed = parseYaml(raw) as { categories?: SkillCategoryDef[] };
+    const categories = Array.isArray(parsed?.categories)
+      ? parsed.categories.filter(
+          (c): c is SkillCategoryDef =>
+            !!c && typeof c.slug === "string" && typeof c.label === "string",
+        )
+      : [];
+    parsedCatalogs.set(path, {
+      mtimeNs: stat.mtimeNs,
+      size: stat.size,
+      categories,
+    });
+    return categories;
   } catch {
     return [];
   }
@@ -119,7 +151,8 @@ export function getCachedCategoriesSync(): SkillCategoryDef[] {
  * the remote path (e.g. the plugins list) get the shared taxonomy without
  * remote-fetch latency. Resolves the catalog across environments and degrades
  * to an empty set when it is unreachable — callers treat an empty set as
- * "everything is unknown" rather than failing.
+ * "everything is unknown" rather than failing. The file read and YAML parse
+ * are memoized on the file's mtime, so a per-request caller costs one `stat`.
  */
 export function getLocalCategorySlugs(): Set<string> {
   // Primary: getRepoSkillsDir() resolves the catalog for compiled binaries and
@@ -156,4 +189,5 @@ export function getLocalCategorySlugs(): Set<string> {
 export function invalidateCategoriesCache(): void {
   cachedCategories = null;
   cacheTimestamp = 0;
+  parsedCatalogs.clear();
 }

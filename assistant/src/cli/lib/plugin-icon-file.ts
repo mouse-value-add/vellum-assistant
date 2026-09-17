@@ -13,7 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { type BigIntStats, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /** Fixed icon filename in the plugin root — no author path, no traversal. */
@@ -84,6 +84,24 @@ export function validatePluginIconBytes(bytes: Buffer): ValidatedPluginIcon {
   return { hasIcon: true, iconVersion };
 }
 
+interface CachedIcon {
+  /** Nanosecond mtime of the file the result was computed from. */
+  readonly mtimeNs: bigint;
+  readonly size: bigint;
+  readonly result: ValidatedPluginIcon;
+}
+
+/**
+ * Validated icon per path, keyed by the file's mtime and size.
+ *
+ * The installed-plugins list validates every plugin's icon on every request,
+ * and validation hashes the whole file. Caching on identity keeps an unchanged
+ * icon at one `stat` per request. Nanosecond mtime is what distinguishes two
+ * writes inside the same millisecond, which a millisecond-truncated mtime
+ * cannot.
+ */
+const iconCache = new Map<string, CachedIcon>();
+
 /**
  * Read and validate `<pluginDir>/icon.png`. Returns `{ hasIcon: true }` with a
  * content-hash `iconVersion` and `path` only when the file is a PNG whose IHDR
@@ -96,18 +114,37 @@ export function readValidatedPluginIcon(
   const iconPath = join(pluginDir, ICON_FILENAME);
 
   let bytes: Buffer;
+  let stat: BigIntStats;
   try {
-    const stat = statSync(iconPath);
+    stat = statSync(iconPath, { bigint: true });
     // Size-gate before reading so an oversized file never enters memory.
     // A missing file throws here and is caught as "no icon".
-    if (!stat.isFile() || stat.size > MAX_ICON_BYTES) {
+    if (!stat.isFile() || stat.size > BigInt(MAX_ICON_BYTES)) {
+      iconCache.delete(iconPath);
       return { hasIcon: false };
+    }
+    const cached = iconCache.get(iconPath);
+    if (
+      cached &&
+      cached.mtimeNs === stat.mtimeNs &&
+      cached.size === stat.size
+    ) {
+      return cached.result;
     }
     bytes = readFileSync(iconPath);
   } catch {
+    iconCache.delete(iconPath);
     return { hasIcon: false };
   }
 
-  const result = validatePluginIconBytes(bytes);
-  return result.hasIcon ? { ...result, path: iconPath } : result;
+  const validated = validatePluginIconBytes(bytes);
+  const result: ValidatedPluginIcon = validated.hasIcon
+    ? { ...validated, path: iconPath }
+    : validated;
+  iconCache.set(iconPath, {
+    mtimeNs: stat.mtimeNs,
+    size: stat.size,
+    result,
+  });
+  return result;
 }

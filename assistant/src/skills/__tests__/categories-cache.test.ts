@@ -1,5 +1,7 @@
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 // Control what getRepoSkillsDir() returns per test. Mocked before the module
 // under test is imported so getLocalCategorySlugs() sees the override.
@@ -9,7 +11,8 @@ mock.module("../catalog-install.js", () => ({
   getRepoSkillsDir: () => repoSkillsDirOverride,
 }));
 
-const { getLocalCategorySlugs } = await import("../categories-cache.js");
+const { getLocalCategorySlugs, invalidateCategoriesCache } =
+  await import("../categories-cache.js");
 
 // Repo-root `skills/` relative to this test file
 // (assistant/src/skills/__tests__ -> repo root -> skills).
@@ -34,5 +37,60 @@ describe("getLocalCategorySlugs", () => {
     expect(slugs.size).toBeGreaterThan(0);
     expect(slugs.has("development")).toBe(true);
     expect(slugs.has("system")).toBe(true);
+  });
+});
+
+/**
+ * The catalog read and YAML parse are memoized on the file's mtime and size, so
+ * a per-request caller costs one `stat`. Both tests pin the mtime explicitly
+ * (`utimesSync`) so the cache key is under the test's control rather than the
+ * filesystem clock's.
+ */
+describe("getLocalCategorySlugs memoization", () => {
+  let skillsDir: string;
+  let catalogPath: string;
+  const PINNED_MTIME_S = 1_700_000_000;
+
+  /** A catalog whose byte length does not depend on the slug letters. */
+  function writeCatalog(slug: string, mtimeSeconds: number): void {
+    writeFileSync(
+      catalogPath,
+      `categories:\n  - slug: ${slug}\n    label: ${slug}\n`,
+    );
+    utimesSync(catalogPath, mtimeSeconds, mtimeSeconds);
+  }
+
+  beforeEach(() => {
+    skillsDir = mkdtempSync(join(tmpdir(), "skill-categories-"));
+    catalogPath = join(skillsDir, "skill-categories-catalog.yaml");
+    repoSkillsDirOverride = skillsDir;
+    invalidateCategoriesCache();
+  });
+
+  afterEach(() => {
+    rmSync(skillsDir, { recursive: true, force: true });
+    invalidateCategoriesCache();
+  });
+
+  test("parses the catalog once while its mtime and size are unchanged", () => {
+    writeCatalog("aaa", PINNED_MTIME_S);
+    expect(getLocalCategorySlugs().has("aaa")).toBe(true);
+
+    // Same length, same mtime: identity is unchanged, so the parse is skipped
+    // and the memoized slugs are served.
+    writeCatalog("bbb", PINNED_MTIME_S);
+    const slugs = getLocalCategorySlugs();
+    expect(slugs.has("aaa")).toBe(true);
+    expect(slugs.has("bbb")).toBe(false);
+  });
+
+  test("re-parses once the catalog's mtime moves", () => {
+    writeCatalog("aaa", PINNED_MTIME_S);
+    expect(getLocalCategorySlugs().has("aaa")).toBe(true);
+
+    writeCatalog("bbb", PINNED_MTIME_S + 1);
+    const slugs = getLocalCategorySlugs();
+    expect(slugs.has("bbb")).toBe(true);
+    expect(slugs.has("aaa")).toBe(false);
   });
 });

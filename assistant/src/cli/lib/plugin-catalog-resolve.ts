@@ -3,12 +3,14 @@
  *
  * The gated analogues of {@link ./plugin-marketplace}'s `resolveMarketplaceSource`
  * / GitHub `findMarketplaceEntry`: install-by-name and the detail lookup resolve
- * the SAME catalog `search` uses (platform-first via {@link ./plugin-catalog-cache}'s
- * `getPluginCatalog`, bundled offline) instead of a direct GitHub
- * `plugins/marketplace.json` fetch — so search, install, and details read one source.
+ * the SAME catalog `search` uses (platform-first via {@link ./plugin-catalog-cache},
+ * bundled offline) instead of a direct GitHub `plugins/marketplace.json` fetch, so
+ * search, install, and details read one source. These resolvers take the
+ * authoritative read: a pinned ref reaches the installer only from a catalog the
+ * platform currently publishes, never from the display path's stale copy.
  */
 
-import { getPluginCatalog } from "./plugin-catalog-cache.js";
+import { getAuthoritativePluginCatalog } from "./plugin-catalog-cache.js";
 import { DEFAULT_PLUGIN_REF } from "./plugin-constants.js";
 import {
   githubSourceSchema,
@@ -22,7 +24,7 @@ export async function findCatalogEntry(
   name: string,
   deps: SearchPluginsDeps,
 ): Promise<PluginSearchMatch | null> {
-  const catalog = await getPluginCatalog(DEFAULT_PLUGIN_REF, deps);
+  const catalog = await getAuthoritativePluginCatalog(DEFAULT_PLUGIN_REF, deps);
   return catalog.matches.find((m) => m.name === name) ?? null;
 }
 

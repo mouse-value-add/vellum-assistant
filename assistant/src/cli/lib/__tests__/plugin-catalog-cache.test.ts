@@ -1,10 +1,11 @@
 /**
- * Tests for {@link getPluginCatalog}.
+ * Tests for {@link getPluginCatalog} and {@link getAuthoritativePluginCatalog}.
  *
- * Exercises the gate between the platform fetcher and the bundled reader plus
- * the per-ref TTL cache. Platform paths drive a fake `deps.fetch` returning a
- * `/v1/plugins/` payload (no real network); the offline path reads the bundled
- * manifest and must touch the network zero times.
+ * Exercises the gate between the platform fetcher and the bundled reader, the
+ * per-ref TTL cache, and the split between the stale-while-revalidate display
+ * read and the authoritative install read. Platform paths drive a fake
+ * `deps.fetch` returning a `/v1/plugins/` payload (no real network); the offline
+ * path reads the bundled manifest and must touch the network zero times.
  */
 
 import {
@@ -18,10 +19,12 @@ import {
 
 import type { FetchLike } from "../fetch-like.js";
 import {
+  getAuthoritativePluginCatalog,
   getPluginCatalog,
   invalidatePluginCatalogCache,
   mergePlatformCatalogWithBundledLocals,
   PLUGIN_CATALOG_CACHE_TTL_MS,
+  PLUGIN_CATALOG_REFRESH_BACKOFF_MS,
 } from "../plugin-catalog-cache.js";
 import { readBundledPluginCatalog } from "../plugin-catalog-local.js";
 import type { SearchPluginsDeps } from "../search-plugins.js";
@@ -38,11 +41,16 @@ function githubNames(catalog: PluginCatalog): string[] {
 }
 
 /** A `deps.fetch` that serves a `/v1/plugins/` payload and counts its calls. */
-function platformFetch(names: string[]): {
+function platformFetch(
+  names: string[],
+  opts: { delayMs?: number } = {},
+): {
   fetch: FetchLike;
   calls: () => number;
+  release: () => void;
 } {
   let calls = 0;
+  let release = (): void => {};
   const body = JSON.stringify({
     plugins: names.map((name) => ({
       name,
@@ -50,11 +58,20 @@ function platformFetch(names: string[]): {
       ref: "0".repeat(40),
     })),
   });
+  const gate =
+    opts.delayMs === undefined
+      ? null
+      : new Promise<void>((resolve) => {
+          release = resolve;
+        });
   const fetch: FetchLike = (async () => {
     calls += 1;
+    if (gate) {
+      await gate;
+    }
     return new Response(body, { status: 200 });
   }) as never;
-  return { fetch, calls: () => calls };
+  return { fetch, calls: () => calls, release: () => release() };
 }
 
 /** A `deps.fetch` that always fails with a non-2xx (→ unavailable). */
@@ -65,6 +82,15 @@ function failingFetch(): { fetch: FetchLike; calls: () => number } {
     return new Response("", { status: 503 });
   }) as never;
   return { fetch, calls: () => calls };
+}
+
+/**
+ * Yield to the event loop so an in-flight background refresh settles. The fakes
+ * resolve without real I/O, so one turn is enough. `setSystemTime` moves the
+ * clock `Date.now()` reads, not the timer loop, so this waits real time.
+ */
+async function settleRefresh(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
 const ORIGINAL_ENV = {
@@ -91,68 +117,114 @@ describe("getPluginCatalog", () => {
     }
   });
 
-  test("fetches from the platform once, then serves cache within the TTL", async () => {
-    // GIVEN platform features enabled and a platform fetcher returning ["a"]
-    const { fetch, calls } = platformFetch(["a"]);
+  test("serves the bundled catalog immediately on a cold cache and refreshes behind it", async () => {
+    // GIVEN platform features enabled and a platform fetch that never settles
+    // while the caller is waiting.
+    const { fetch, calls, release } = platformFetch(["remote-only"], {
+      delayMs: 1,
+    });
     const deps: SearchPluginsDeps = { fetch };
 
-    // WHEN we request the same ref twice in quick succession
+    // WHEN the first read lands on a cold cache
     const first = await getPluginCatalog("main", deps);
-    const second = await getPluginCatalog("main", deps);
 
-    // THEN the platform is fetched exactly once — the second call is cached
-    expect(calls()).toBe(1);
-    expect(first).toBe(second);
-    expect(githubNames(first)).toEqual(["a"]);
+    // THEN it answers from the bundled manifest without waiting on the platform
+    expect(first.matches).toEqual(readBundledPluginCatalog().matches);
     expect(first.ref).toBe("main");
+    // ...and one background refresh is under way
+    expect(calls()).toBe(1);
+
+    // WHEN the refresh lands, the next read serves the platform copy
+    release();
+    await settleRefresh();
+    const second = await getPluginCatalog("main", deps);
+    expect(githubNames(second)).toEqual(["remote-only"]);
+    expect(calls()).toBe(1);
   });
 
-  test("refetches after invalidation", async () => {
-    // GIVEN a first successful load
-    const { fetch, calls } = platformFetch(["a"]);
-    const deps: SearchPluginsDeps = { fetch };
-    await getPluginCatalog("main", deps);
-
-    // WHEN the cache is invalidated and we request again
-    invalidatePluginCatalogCache();
-    await getPluginCatalog("main", deps);
-
-    // THEN the platform is fetched a second time
-    expect(calls()).toBe(2);
-  });
-
-  test("refetches after the TTL elapses", async () => {
-    // GIVEN a fresh load at t0
+  test("serves the cached copy within the TTL without refreshing", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const { fetch, calls } = platformFetch(["a"]);
     const deps: SearchPluginsDeps = { fetch };
-    await getPluginCatalog("main", deps);
 
-    // WHEN the TTL has elapsed and we request again
-    setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
+    // GIVEN a warm cache (first read kicks the refresh, which settles)
     await getPluginCatalog("main", deps);
+    await settleRefresh();
 
-    // THEN the platform is fetched again
-    expect(calls()).toBe(2);
+    // WHEN we read again inside the TTL
+    const warm = await getPluginCatalog("main", deps);
+
+    // THEN it is the cached copy and no second fetch is issued
+    expect(githubNames(warm)).toEqual(["a"]);
+    expect(calls()).toBe(1);
   });
 
-  test("fails hard on refresh failure — does NOT serve the stale cache", async () => {
-    // GIVEN a good catalog cached at t0
+  test("serves the stale copy past the TTL and triggers exactly one refresh for concurrent callers", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
-    const good = platformFetch(["good"]);
-    const cached = await getPluginCatalog("main", { fetch: good.fetch });
-    expect(githubNames(cached)).toEqual(["good"]);
+    const first = platformFetch(["stale"]);
+    await getPluginCatalog("main", { fetch: first.fetch });
+    await settleRefresh();
 
-    // WHEN the TTL has elapsed and the refresh fails
+    // GIVEN the cached copy is past its TTL
     setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
-    const failing = failingFetch();
-    const err = await getPluginCatalog("main", { fetch: failing.fetch }).catch(
-      (e: unknown) => e,
+    const next = platformFetch(["fresh"], { delayMs: 1 });
+
+    // WHEN five callers read at once
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        getPluginCatalog("main", { fetch: next.fetch }),
+      ),
     );
 
-    // THEN the failure propagates instead of serving the stale catalog
-    expect(err).toBeInstanceOf(Error);
+    // THEN every one of them is answered with the stale copy...
+    for (const result of results) {
+      expect(githubNames(result)).toEqual(["stale"]);
+    }
+    // ...and they share a single in-flight refresh
+    expect(next.calls()).toBe(1);
+
+    next.release();
+    await settleRefresh();
+    expect(
+      githubNames(await getPluginCatalog("main", { fetch: next.fetch })),
+    ).toEqual(["fresh"]);
+  });
+
+  test("keeps the last good copy when the refresh fails, and backs off", async () => {
+    setSystemTime(new Date(BASE_TIME_MS));
+    const good = platformFetch(["good"]);
+    await getPluginCatalog("main", { fetch: good.fetch });
+    await settleRefresh();
+
+    // GIVEN the TTL has elapsed and the platform is down
+    setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
+    const failing = failingFetch();
+
+    // WHEN we read while the refresh fails
+    const stale = await getPluginCatalog("main", { fetch: failing.fetch });
+    await settleRefresh();
+
+    // THEN the last good copy is served rather than an error or an empty grid
+    expect(githubNames(stale)).toEqual(["good"]);
     expect(failing.calls()).toBe(1);
+
+    // AND further reads inside the backoff window do not re-hammer the platform
+    await getPluginCatalog("main", { fetch: failing.fetch });
+    await settleRefresh();
+    expect(failing.calls()).toBe(1);
+
+    // ...until the backoff expires
+    setSystemTime(
+      new Date(
+        BASE_TIME_MS +
+          PLUGIN_CATALOG_CACHE_TTL_MS +
+          PLUGIN_CATALOG_REFRESH_BACKOFF_MS +
+          2,
+      ),
+    );
+    await getPluginCatalog("main", { fetch: failing.fetch });
+    await settleRefresh();
+    expect(failing.calls()).toBe(2);
   });
 
   test("reads the bundled catalog with zero network when platform is disabled", async () => {
@@ -172,6 +244,120 @@ describe("getPluginCatalog", () => {
     expect(result.matches).toEqual(bundled.matches);
     // The requested ref is echoed onto the wire contract.
     expect(result.ref).toBe("main");
+  });
+});
+
+describe("getAuthoritativePluginCatalog", () => {
+  beforeEach(() => {
+    invalidatePluginCatalogCache();
+    delete process.env.IS_PLATFORM;
+    delete process.env.VELLUM_DISABLE_PLATFORM;
+  });
+
+  afterEach(() => {
+    setSystemTime();
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  test("awaits the platform on a cold cache instead of serving the bundled copy", async () => {
+    const { fetch, calls } = platformFetch(["remote-only"]);
+
+    const catalog = await getAuthoritativePluginCatalog("main", { fetch });
+
+    expect(calls()).toBe(1);
+    expect(githubNames(catalog)).toEqual(["remote-only"]);
+  });
+
+  test("fetches once, then serves cache within the TTL", async () => {
+    setSystemTime(new Date(BASE_TIME_MS));
+    const { fetch, calls } = platformFetch(["a"]);
+    const deps: SearchPluginsDeps = { fetch };
+
+    const first = await getAuthoritativePluginCatalog("main", deps);
+    const second = await getAuthoritativePluginCatalog("main", deps);
+
+    expect(calls()).toBe(1);
+    expect(first).toBe(second);
+    expect(githubNames(first)).toEqual(["a"]);
+    expect(first.ref).toBe("main");
+  });
+
+  test("refetches after invalidation", async () => {
+    const { fetch, calls } = platformFetch(["a"]);
+    const deps: SearchPluginsDeps = { fetch };
+    await getAuthoritativePluginCatalog("main", deps);
+
+    invalidatePluginCatalogCache();
+    await getAuthoritativePluginCatalog("main", deps);
+
+    expect(calls()).toBe(2);
+  });
+
+  test("refetches after the TTL elapses", async () => {
+    setSystemTime(new Date(BASE_TIME_MS));
+    const { fetch, calls } = platformFetch(["a"]);
+    const deps: SearchPluginsDeps = { fetch };
+    await getAuthoritativePluginCatalog("main", deps);
+
+    setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
+    await getAuthoritativePluginCatalog("main", deps);
+
+    expect(calls()).toBe(2);
+  });
+
+  test("fails hard on refresh failure — does NOT serve the stale cache", async () => {
+    // GIVEN a good catalog cached at t0
+    setSystemTime(new Date(BASE_TIME_MS));
+    const good = platformFetch(["good"]);
+    const cached = await getAuthoritativePluginCatalog("main", {
+      fetch: good.fetch,
+    });
+    expect(githubNames(cached)).toEqual(["good"]);
+
+    // WHEN the TTL has elapsed and the refresh fails
+    setSystemTime(new Date(BASE_TIME_MS + PLUGIN_CATALOG_CACHE_TTL_MS + 1));
+    const failing = failingFetch();
+    const err = await getAuthoritativePluginCatalog("main", {
+      fetch: failing.fetch,
+    }).catch((e: unknown) => e);
+
+    // THEN the failure propagates instead of serving the stale catalog: an
+    // install must pin against a revision the platform currently publishes.
+    expect(err).toBeInstanceOf(Error);
+    expect(failing.calls()).toBe(1);
+  });
+
+  test("ignores the display path's backoff so an install still reaches the platform", async () => {
+    setSystemTime(new Date(BASE_TIME_MS));
+    const failing = failingFetch();
+    // A display read fails and arms the backoff.
+    await getPluginCatalog("main", { fetch: failing.fetch });
+    await settleRefresh();
+    expect(failing.calls()).toBe(1);
+
+    // The install read fetches anyway rather than inheriting the wait.
+    const good = platformFetch(["good"]);
+    const catalog = await getAuthoritativePluginCatalog("main", {
+      fetch: good.fetch,
+    });
+    expect(good.calls()).toBe(1);
+    expect(githubNames(catalog)).toEqual(["good"]);
+  });
+
+  test("reads the bundled catalog when platform features are disabled", async () => {
+    process.env.VELLUM_DISABLE_PLATFORM = "true";
+    const { fetch, calls } = platformFetch(["ignored"]);
+
+    const result = await getAuthoritativePluginCatalog("main", { fetch });
+
+    expect(calls()).toBe(0);
+    expect(result.matches).toEqual(readBundledPluginCatalog().matches);
   });
 });
 

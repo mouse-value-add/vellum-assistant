@@ -162,13 +162,19 @@ mock.module("../../lib/install-from-platform.js", () => ({
   },
 }));
 
+const fakeCatalog = async (): Promise<{
+  ref: string;
+  matches: typeof catalogMatches;
+}> => {
+  if (catalogError) {
+    throw catalogError;
+  }
+  return { ref: "main", matches: catalogMatches };
+};
+
 mock.module("../../lib/plugin-catalog-cache.js", () => ({
-  getPluginCatalog: async () => {
-    if (catalogError) {
-      throw catalogError;
-    }
-    return { ref: "main", matches: catalogMatches };
-  },
+  getPluginCatalog: fakeCatalog,
+  getAuthoritativePluginCatalog: fakeCatalog,
 }));
 
 mock.module("../../lib/inspect-plugin.js", () => ({

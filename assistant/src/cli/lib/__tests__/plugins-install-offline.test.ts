@@ -66,19 +66,22 @@ mock.module("../install-from-platform.js", () => ({
   },
 }));
 
+const platformCatalogFixture = async () => ({
+  ref: "main",
+  matches: [
+    {
+      name: BUNDLED_PLUGIN,
+      path: "fixture",
+      category: null,
+      source: platformCatalogSource,
+    },
+  ],
+});
+
 mock.module("../plugin-catalog-cache.js", () => ({
   ...realCatalogCache,
-  getPluginCatalog: async () => ({
-    ref: "main",
-    matches: [
-      {
-        name: BUNDLED_PLUGIN,
-        path: "fixture",
-        category: null,
-        source: platformCatalogSource,
-      },
-    ],
-  }),
+  getPluginCatalog: platformCatalogFixture,
+  getAuthoritativePluginCatalog: platformCatalogFixture,
 }));
 
 const { registerPluginsCommand } = await import("../../commands/plugins.js");

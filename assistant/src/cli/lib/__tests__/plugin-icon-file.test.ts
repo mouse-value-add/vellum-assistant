@@ -7,7 +7,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -41,6 +41,9 @@ function makePng(width: number, height: number, padBytes = 0): Buffer {
 function sha16(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex").slice(0, 16);
 }
+
+/** A fixed mtime (epoch seconds) for the cache-identity tests. */
+const PINNED_MTIME_S = 1_700_000_000;
 
 let pluginDir: string;
 
@@ -89,6 +92,39 @@ describe("readValidatedPluginIcon", () => {
     writeIcon(makePng(48, 48));
     const after = readValidatedPluginIcon(pluginDir).iconVersion;
     expect(before).not.toBe(after);
+  });
+
+  // The installed list validates every plugin's icon on every request, and
+  // validation hashes the whole file, so the result is cached on the file's
+  // mtime and size. Pinning the mtime puts the cache key under the test's
+  // control rather than the filesystem clock's.
+  test("reuses the validated result while mtime and size are unchanged", () => {
+    const iconPath = join(pluginDir, "icon.png");
+    const original = makePng(32, 32);
+    writeIcon(original);
+    utimesSync(iconPath, PINNED_MTIME_S, PINNED_MTIME_S);
+    const before = readValidatedPluginIcon(pluginDir).iconVersion;
+    expect(before).toBe(sha16(original));
+
+    // Same length, same mtime: identity is unchanged, so the file is not
+    // re-read or re-hashed.
+    writeIcon(makePng(48, 48));
+    utimesSync(iconPath, PINNED_MTIME_S, PINNED_MTIME_S);
+    expect(readValidatedPluginIcon(pluginDir).iconVersion).toBe(before);
+
+    // A moved mtime invalidates the entry.
+    utimesSync(iconPath, PINNED_MTIME_S + 1, PINNED_MTIME_S + 1);
+    expect(readValidatedPluginIcon(pluginDir).iconVersion).toBe(
+      sha16(makePng(48, 48)),
+    );
+  });
+
+  test("drops the cached result when the icon is removed", () => {
+    writeIcon(makePng(32, 32));
+    expect(readValidatedPluginIcon(pluginDir).hasIcon).toBe(true);
+
+    rmSync(join(pluginDir, "icon.png"));
+    expect(readValidatedPluginIcon(pluginDir)).toEqual({ hasIcon: false });
   });
 
   test("rejects a non-PNG file with wrong magic bytes (renamed JPEG/text)", () => {

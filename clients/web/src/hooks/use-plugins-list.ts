@@ -254,17 +254,17 @@ export function usePluginsList(
     ),
   );
 
-  // Self-heal timeout-degraded category counts. A cold catalog can make the
-  // daemon's bounded category lookup time out, so the installed read buckets
-  // every plugin under `system` and the client caches those counts as fresh. The
-  // catalog warms moments later (the daemon caches it), so a later server-side
-  // `?category=` request returns the real categories — leaving a stale `system`
-  // badge that no longer matches what the filter returns. The catalog query
-  // succeeding proves the daemon's catalog is warm: if it disagrees with the
-  // cached installed buckets (a plugin the catalog knows is non-`system` that the
-  // installed read bucketed `system`), refetch the unfiltered installed read once
-  // so the badges match the warmed server. One-shot per assistant — the refetch
-  // reads the warm catalog and clears the disagreement, so it can't loop.
+  // Self-heal category counts taken from a colder catalog. The daemon answers
+  // both reads from whichever catalog copy it holds and refreshes it in the
+  // background, so an installed read served before a refresh lands can bucket a
+  // plugin under `system` that the catalog read, served after, knows better. The
+  // client caches those counts as fresh, leaving a `system` badge that no longer
+  // matches what a server-side `?category=` request returns. When the catalog
+  // disagrees with the cached installed buckets (a plugin the catalog knows is
+  // non-`system` that the installed read bucketed `system`), refetch the
+  // unfiltered installed read once so the badges match. One-shot per assistant:
+  // the refetch reads the same warm catalog and clears the disagreement, so it
+  // can't loop.
   const queryClient = useQueryClient();
   const healedAssistant = useRef<string | null>(null);
   useEffect(() => {

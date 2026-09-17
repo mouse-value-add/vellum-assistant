@@ -29,6 +29,7 @@ const catalog = {
 
 mock.module("../../lib/plugin-catalog-cache.js", () => ({
   getPluginCatalog: async () => catalog,
+  getAuthoritativePluginCatalog: async () => catalog,
 }));
 
 const { registerPluginsCommand } = await import("../plugins.js");

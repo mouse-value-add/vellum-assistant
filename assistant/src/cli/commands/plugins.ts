@@ -241,7 +241,7 @@ export function registerPluginsCommand(program: Command): void {
                 let match;
                 try {
                   match = (
-                    await libs.catalogCache.getPluginCatalog(
+                    await libs.catalogCache.getAuthoritativePluginCatalog(
                       DEFAULT_PLUGIN_REF,
                       { fetch: globalThis.fetch.bind(globalThis) },
                     )
@@ -602,10 +602,14 @@ export function registerPluginsCommand(program: Command): void {
         async (query: string, opts: { json?: boolean }) => {
           try {
             libs.search.assertValidSearchPattern(query);
-            const catalog = await libs.catalogCache.getPluginCatalog(
-              DEFAULT_PLUGIN_REF,
-              { fetch: globalThis.fetch.bind(globalThis) },
-            );
+            // The CLI is a one-shot process, so there is no warm cache for a
+            // stale-while-revalidate read to serve: resolve the catalog the
+            // platform currently publishes and surface a failure.
+            const catalog =
+              await libs.catalogCache.getAuthoritativePluginCatalog(
+                DEFAULT_PLUGIN_REF,
+                { fetch: globalThis.fetch.bind(globalThis) },
+              );
             const matches = libs.search.filterPluginCatalog(catalog, query);
             const result = { query, ref: catalog.ref, matches };
 
