@@ -2705,6 +2705,52 @@ describe("transcript hygiene (teardown pass)", () => {
     expect(events).toContain("loadFromDb");
   });
 
+  test("a marker ending an earlier LLM call's row is stripped, not just the last row's", async () => {
+    const events: string[] = [];
+    const fake = makeFakeConversation({ processing: false, events });
+    fake.conversation.runAgentLoop = async (...args: unknown[]) => {
+      const { onEvent } = args[2] as { onEvent: (msg: unknown) => void };
+      // LLM call → tool → LLM call: each call reserves its own row.
+      for (const messageId of ["assistant-row-1", "assistant-row-2"]) {
+        onEvent({
+          type: "assistant_turn_start",
+          messageId,
+          conversationId: "conv-voice-bridge-test",
+        });
+      }
+    };
+    fakeConversation = fake.conversation;
+    getMessageByIdImpl = (messageId) =>
+      messageId === "assistant-row-1"
+        ? {
+            ...makeRow(""),
+            content: [
+              {
+                type: "text",
+                text: "Pulling up your screen. [LOOK:SCREEN]",
+              },
+              { type: "tool_use", id: "tool-1", name: "file_read", input: {} },
+            ],
+          }
+        : { ...makeRow("Found the line."), id: messageId };
+
+    await startVoiceTurn(makeTurnOptions());
+    await flushMicrotasks();
+
+    expect(crudLog.reads).toEqual(["assistant-row-1", "assistant-row-2"]);
+    expect(crudLog.updates).toEqual([
+      {
+        messageId: "assistant-row-1",
+        content: JSON.stringify([
+          { type: "text", text: "Pulling up your screen." },
+          { type: "tool_use", id: "tool-1", name: "file_read", input: {} },
+        ]),
+      },
+    ]);
+    expect(crudLog.deletes).toHaveLength(0);
+    expect(events).toContain("loadFromDb");
+  });
+
   test("a main-leg row without the minimize marker is never rewritten", async () => {
     const { events } = makeReservedRowConversation();
     getMessageByIdImpl = () => makeRow("Done, take a look.");
