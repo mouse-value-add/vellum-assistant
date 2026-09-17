@@ -485,21 +485,7 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
         }
 
         let role = getStringAttribute(element, kAXRoleAttribute as CFString) ?? ""
-        // Emptiness, not nil, is what makes an attribute worth falling past:
-        // icon-only controls routinely carry `AXTitle` as "" and keep the name
-        // a user would say in `AXDescription` or the tooltip. Chained through
-        // `??` so an element that answers on its title costs one read: each of
-        // these is synchronous IPC into the target app, run per element.
-        //
-        // Only for a control. Text on screen is read out of its value, and a
-        // description or a tooltip standing in as its title would be reported
-        // in place of the words the user is actually looking at.
-        let namesAControl = !Self.textRoles.contains(role)
-        let title = AXLabel.nonBlank(getStringAttribute(element, kAXTitleAttribute as CFString))
-            ?? (namesAControl
-                ? AXLabel.nonBlank(getStringAttribute(element, kAXDescriptionAttribute as CFString))
-                    ?? AXLabel.nonBlank(getStringAttribute(element, kAXHelpAttribute as CFString))
-                : nil)
+        let title = Self.label(of: element, role: role)
         let value = getValueAttribute(element)
         let roleDescription = getStringAttribute(element, kAXRoleDescriptionAttribute as CFString)
         let identifier = getStringAttribute(element, kAXIdentifierAttribute as CFString)
@@ -621,9 +607,93 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
         return childElements
     }
 
+    /// The name `element` goes by in the tree.
+    ///
+    /// Emptiness, not nil, is what makes an attribute worth falling past:
+    /// icon-only controls routinely carry `AXTitle` as "" and keep the name a
+    /// user would say in `AXDescription` or the tooltip. Chained through `??`
+    /// so an element that answers on its title costs one read: each of these
+    /// is synchronous IPC into the target app, run per element.
+    ///
+    /// Only for a control. Text on screen is read out of its value, and a
+    /// description or a tooltip standing in as its title would be reported in
+    /// place of the words the user is actually looking at.
+    static func label(of element: AXUIElement, role: String) -> String? {
+        let namesAControl = !textRoles.contains(role)
+        return AXLabel.nonBlank(stringAttribute(element, kAXTitleAttribute as CFString))
+            ?? (namesAControl
+                ? AXLabel.nonBlank(stringAttribute(element, kAXDescriptionAttribute as CFString))
+                    ?? AXLabel.nonBlank(stringAttribute(element, kAXHelpAttribute as CFString))
+                : nil)
+    }
+
+    // MARK: - Hit Test
+
+    /// Per-call timeout for the hit test and the reads up its ancestors. Short,
+    /// because it runs before every click by element ID, and an app too slow
+    /// to answer in time leaves the click to go ahead as it would have anyway.
+    static let hitTestTimeoutSeconds: Float = 0.5
+
+    /// How many elements up from the hit the chain reads. Enough to climb from
+    /// a link's text or a button's icon to the control, and past a cell or row
+    /// wrapper, without walking the whole window.
+    static let hitChainLimit = 8
+
+    /// The element under `point` and its ancestors up to the window, as
+    /// `AXClickTarget` compares them. Nil when accessibility does not answer,
+    /// or when the point is over this helper or the host app: their windows
+    /// sit over the target app (the companion, the cursor overlay) and are
+    /// click-through, so they say nothing about where a click lands.
+    ///
+    /// Runs the synchronous IPC on a detached task, as the tree walk does.
+    static func hitChain(at point: CGPoint) async -> [AXClickTarget.Element]? {
+        await Task.detached {
+            hitChainSync(at: point)
+        }.value
+    }
+
+    private static func hitChainSync(at point: CGPoint) -> [AXClickTarget.Element]? {
+        let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, hitTestTimeoutSeconds)
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hit) == .success,
+              var current = hit
+        else { return nil }
+
+        var pid: pid_t = 0
+        if AXUIElementGetPid(current, &pid) == .success,
+           pid == ProcessInfo.processInfo.processIdentifier || pid == hostAppPid {
+            return nil
+        }
+
+        var chain: [AXClickTarget.Element] = []
+        for _ in 0..<hitChainLimit {
+            AXUIElementSetMessagingTimeout(current, hitTestTimeoutSeconds)
+            let role = stringAttribute(current, kAXRoleAttribute as CFString) ?? ""
+            if role == kAXWindowRole || role == kAXApplicationRole { break }
+            chain.append(AXClickTarget.Element(
+                role: role,
+                label: label(of: current, role: role),
+                frame: frameAttribute(current),
+                actionable: interactiveRoles.contains(role)
+            ))
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parentRef) == .success,
+                  let parentValue = parentRef,
+                  CFGetTypeID(parentValue) == AXUIElementGetTypeID()
+            else { break }
+            current = parentValue as! AXUIElement
+        }
+        return chain
+    }
+
     // MARK: - AX Attribute Helpers
 
     private func getStringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        Self.stringAttribute(element, attribute)
+    }
+
+    private static func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
         return value as? String
@@ -644,6 +714,10 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
     }
 
     private func getFrameAttribute(_ element: AXUIElement) -> CGRect {
+        Self.frameAttribute(element)
+    }
+
+    private static func frameAttribute(_ element: AXUIElement) -> CGRect {
         var positionValue: CFTypeRef?
         var sizeValue: CFTypeRef?
 
@@ -809,7 +883,7 @@ final class AccessibilityTreeEnumerator: AccessibilityTreeProviding, @unchecked 
         }
     }
 
-    private static func cleanRole(_ role: String) -> String {
+    static func cleanRole(_ role: String) -> String {
         var cleaned = role
         if cleaned.hasPrefix("AX") {
             cleaned = String(cleaned.dropFirst(2))
