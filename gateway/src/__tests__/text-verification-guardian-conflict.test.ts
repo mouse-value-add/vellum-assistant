@@ -1,12 +1,10 @@
 /**
- * A guardian code on a channel someone else already guards.
+ * A guardian code on a channel that already has a guardian replaces them.
  *
- * Who the code was issued to decides, as it does for phone: a code the
- * guardian issued to a specific identity is a deliberate rebind to that
- * identity, and a code any holder could redeem is refused, so a leaked code
- * neither takes the channel over nor buys its holder any access. The gateway
- * DB and session store are real; the assistant mirror IPC is acknowledged and
- * otherwise inert.
+ * Every guardian mint refuses a guarded channel unless the guardian asked to
+ * rebind, so a guardian code redeemed there is a rebind the guardian
+ * requested, whichever kind of code it is. The gateway DB and session store
+ * are real; the assistant mirror IPC is acknowledged and otherwise inert.
  */
 
 import {
@@ -91,11 +89,11 @@ function channelOf(address: string) {
     .find((c) => c.type === CHANNEL && c.address === address);
 }
 
-function redeemFromNewHandle() {
+function redeemFromNewHandle(code: string) {
   // No callback URL: the reply comes back as text, as it does for email.
   return tryTextVerificationIntercept({
     sourceChannel: CHANNEL,
-    messageContent: CODE,
+    messageContent: code,
     actorExternalUserId: NEW_HANDLE,
     actorChatId: NEW_HANDLE,
     isDirectMessage: true,
@@ -117,8 +115,18 @@ afterAll(() => {
   resetGatewayDb();
 });
 
-describe("a guardian code on a channel someone else guards", () => {
-  test("issued by the guardian to the new handle: rebinds the guardian to it", async () => {
+function expectGuardianMovedToNewHandle(): void {
+  expect(channelOf(NEW_HANDLE)).toMatchObject({
+    contactId: "guardian",
+    status: "active",
+  });
+  // The guardian contact holds one binding per channel: the old handle no
+  // longer has an active one.
+  expect(channelOf(OLD_HANDLE)?.status).not.toBe("active");
+}
+
+describe("a guardian code on a channel that already has a guardian", () => {
+  test("a code sent to the new handle moves the guardian to it", async () => {
     createOutboundSession({
       id: "session-1",
       channel: CHANNEL,
@@ -131,7 +139,7 @@ describe("a guardian code on a channel someone else guards", () => {
       verificationPurpose: "guardian",
     });
 
-    const result = await redeemFromNewHandle();
+    const result = await redeemFromNewHandle(CODE);
 
     expect(result).toMatchObject({
       outcome: "verified",
@@ -139,16 +147,10 @@ describe("a guardian code on a channel someone else guards", () => {
       pendingReplyText:
         "Verification successful. You are now set as the guardian for this channel.",
     });
-    expect(channelOf(NEW_HANDLE)).toMatchObject({
-      contactId: "guardian",
-      status: "active",
-    });
-    // The guardian contact holds one binding per channel: the old handle no
-    // longer has an active one.
-    expect(channelOf(OLD_HANDLE)?.status).not.toBe("active");
+    expectGuardianMovedToNewHandle();
   });
 
-  test("redeemable by anyone holding it: refused, and the holder gets no access", async () => {
+  test("an inbound challenge redeemed from the new handle moves the guardian to it", async () => {
     const secret = "a".repeat(64);
     createInboundSession({
       id: "session-1",
@@ -157,19 +159,12 @@ describe("a guardian code on a channel someone else guards", () => {
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
 
-    const result = await tryTextVerificationIntercept({
-      sourceChannel: CHANNEL,
-      messageContent: secret,
-      actorExternalUserId: NEW_HANDLE,
-      actorChatId: NEW_HANDLE,
-      isDirectMessage: true,
-    });
+    const result = await redeemFromNewHandle(secret);
 
     expect(result).toMatchObject({
-      outcome: "failed",
-      pendingReplyText: "The verification code is invalid or has expired.",
+      outcome: "verified",
+      trustClass: "guardian",
     });
-    expect(channelOf(NEW_HANDLE)?.status).not.toBe("active");
-    expect(channelOf(OLD_HANDLE)?.status).toBe("active");
+    expectGuardianMovedToNewHandle();
   });
 });

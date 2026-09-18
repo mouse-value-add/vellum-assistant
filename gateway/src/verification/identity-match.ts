@@ -28,21 +28,6 @@ export type IdentityMatchSession = IdentityBoundSession & {
 };
 
 /**
- * The one identity a session's code was issued to, or null when any holder
- * of the code may redeem it: a session bound to no identity (an inbound
- * challenge, which relies on code secrecy alone), or one whose binding is not
- * yet final (`pending_bootstrap`, where the bootstrap path does the binding).
- */
-export function boundRedeemer(
-  session: IdentityMatchSession,
-): ReturnType<typeof boundIdentity> {
-  const identity = boundIdentity(session);
-  return identity !== null && session.identityBindingStatus === "bound"
-    ? identity
-    : null;
-}
-
-/**
  * Check whether the actor submitting a code matches the session's bound
  * identity.
  *
@@ -58,8 +43,8 @@ export function checkIdentityMatch(
   actorExternalUserId: string,
   actorChatId: string,
 ): boolean {
-  const identity = boundRedeemer(session);
-  if (identity === null) {
+  const identity = boundIdentity(session);
+  if (identity === null || session.identityBindingStatus !== "bound") {
     return true;
   }
   return identity.field === "chatId"

@@ -41,7 +41,7 @@ import {
   upsertVerifiedContactChannel,
 } from "./contact-helpers.js";
 import { canonicalizeInboundIdentity } from "./identity.js";
-import { boundRedeemer, checkIdentityMatch } from "./identity-match.js";
+import { checkIdentityMatch } from "./identity-match.js";
 import {
   isRateLimited,
   recordInvalidAttempt,
@@ -262,7 +262,6 @@ export async function tryTextVerificationIntercept(
           actorChatId,
           actorDisplayName,
           actorUsername,
-          issuedToSender: boundRedeemer(session) !== null,
         })
       : await applyTrustedContactSideEffects({
           sourceChannel,
@@ -275,7 +274,7 @@ export async function tryTextVerificationIntercept(
   if (!sideEffectsVerified) {
     log.warn(
       { sourceChannel, actorExternalUserId: canonicalUserId, trustClass },
-      "Verification rejected after consume: no access granted",
+      "Verification rejected: authoritative gateway channel is blocked/revoked",
     );
     const pendingReplyText = await replyWithFailure(
       replyCallbackUrl,
@@ -331,12 +330,11 @@ export async function tryTextVerificationIntercept(
  * Guardian side effect for a consumed guardian code. Returns false when no
  * binding was made.
  *
- * When another sender already guards the channel, who the code was issued to
- * decides, as it does for phone (the outbound binding in session-service.ts).
- * A code the guardian issued to this sender's identity is a deliberate
- * rebind: the current binding is revoked and this sender bound. A code any
- * holder could redeem is refused, so a leaked code cannot take the channel
- * over or buy its holder any access.
+ * When another sender already guards the channel, the code replaces them.
+ * The guardian's intent was settled when the code was minted: every guardian
+ * mint refuses a guarded channel unless the guardian asked to rebind
+ * (`already_bound` in the daemon's verification control plane), so a guardian
+ * code on a guarded channel is a rebind the guardian requested.
  */
 async function applyGuardianSideEffects(params: {
   sourceChannel: string;
@@ -344,8 +342,6 @@ async function applyGuardianSideEffects(params: {
   actorChatId: string;
   actorDisplayName?: string;
   actorUsername?: string;
-  /** Whether the session's code was issued to this sender's identity. */
-  issuedToSender: boolean;
 }): Promise<boolean> {
   const {
     sourceChannel,
@@ -353,29 +349,17 @@ async function applyGuardianSideEffects(params: {
     actorChatId,
     actorDisplayName,
     actorUsername,
-    issuedToSender,
   } = params;
 
   const existing = getExistingGuardianBinding(sourceChannel);
   if (existing?.address && existing.address !== canonicalUserId) {
-    if (!issuedToSender) {
-      log.warn(
-        {
-          sourceChannel,
-          existingGuardian: existing.address,
-          newActor: canonicalUserId,
-        },
-        "Guardian code refused: another user guards this channel and the code was not issued to this sender",
-      );
-      return false;
-    }
     log.info(
       {
         sourceChannel,
         existingGuardian: existing.address,
         newActor: canonicalUserId,
       },
-      "Rebinding guardian: the code was issued to this sender",
+      "Rebinding guardian: the code replaces the channel's current guardian",
     );
   }
 
