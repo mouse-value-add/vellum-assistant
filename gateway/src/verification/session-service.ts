@@ -47,7 +47,6 @@ import {
   createOutboundSession as storeCreateOutboundSession,
   findActiveSession,
   findPendingSessionByHash,
-  updateSessionStatus,
 } from "../db/session-store.js";
 import { getLogger } from "../logger.js";
 import {
@@ -273,9 +272,9 @@ const CONSUME_FAILURE: ValidateConsumeSessionResult = {
  *   the code spent (mirrors the text guardian path).
  * - trusted_contact purpose: upsert the verified contact channel; a
  *   blocked/revoked authoritative gateway row rejects the verification even
- *   though the code matched (mirrors text-verification). The upsert spans
- *   assistant-IPC IO so it cannot share the consume's transaction; a thrown
- *   side effect instead restores the session for retry.
+ *   though the code matched (mirrors text-verification). The assistant
+ *   mirror around the upsert is best-effort, so a daemon that cannot answer
+ *   never leaves a spent code without its channel.
  *
  * On failure the invalid-attempt counter is incremented; after exceeding the
  * threshold the actor is locked out for a cooldown. Success resets it.
@@ -401,25 +400,11 @@ export async function validateAndConsumeSession(
     // Mirrors text-verification: a blocked/revoked authoritative gateway row
     // rejects the verification — the actor must not regain trusted status
     // even though the code matched and the session is consumed.
-    let verified: boolean;
-    try {
-      verified = await applyTrustedContactSideEffects({
-        sourceChannel: channel,
-        canonicalUserId: actorExternalUserId,
-        actorChatId,
-      });
-    } catch (err) {
-      // The upsert spans assistant-IPC IO, so it cannot share the consume's
-      // transaction. Compensate: restore the session's pre-consume status so
-      // a transient side-effect failure never strands a spent code without
-      // its channel upsert (the retry re-runs the idempotent upsert).
-      updateSessionStatus(session.id, session.status);
-      log.warn(
-        { err, sessionId: session.id },
-        "Trusted-contact side effect failed; session restored for retry",
-      );
-      throw err;
-    }
+    const verified = await applyTrustedContactSideEffects({
+      sourceChannel: channel,
+      canonicalUserId: actorExternalUserId,
+      actorChatId,
+    });
     if (!verified) {
       log.warn(
         { channel, actorExternalUserId },

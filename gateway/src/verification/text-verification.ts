@@ -36,6 +36,7 @@ import {
   hashVerificationSecret,
 } from "./code-parsing.js";
 import {
+  type ContactChannelRow,
   findContactChannelByAddress,
   gatewayChannelStatus,
   upsertVerifiedContactChannel,
@@ -360,6 +361,7 @@ async function applyGuardianSideEffects(params: {
       externalChatId: actorChatId,
       displayName: actorDisplayName,
       username: actorUsername,
+      softMirrorFailures: true,
     });
     return verified;
   }
@@ -378,20 +380,15 @@ async function applyGuardianSideEffects(params: {
     return false;
   }
 
+  // Read before the revoke, so nothing awaits between the revoke and the
+  // binding that replaces it.
+  const displayName = await preservedDisplayName(params);
+
   // Revoke existing binding (same-user re-verification)
   revokeExistingChannelGuardian(sourceChannel);
 
   // Resolve canonical principal — unify all channel bindings
   const canonicalPrincipal = resolveCanonicalPrincipal(canonicalUserId);
-
-  // Determine display name — preserve existing if user is re-verifying
-  const existingContact = await findContactChannelByAddress(
-    sourceChannel,
-    canonicalUserId,
-  );
-  const displayName = existingContact?.displayName?.trim().length
-    ? existingContact.displayName
-    : (actorDisplayName ?? actorUsername ?? canonicalUserId);
 
   // Create guardian binding (dual-writes to both DBs)
   await createGuardianBinding({
@@ -419,31 +416,48 @@ export async function applyTrustedContactSideEffects(params: {
   actorDisplayName?: string;
   actorUsername?: string;
 }): Promise<boolean> {
-  const {
-    sourceChannel,
-    canonicalUserId,
-    actorChatId,
-    actorDisplayName,
-    actorUsername,
-  } = params;
-
-  // Preserve existing display name if available
-  const existingContact = await findContactChannelByAddress(
-    sourceChannel,
-    canonicalUserId,
-  );
-  const displayName = existingContact?.displayName?.trim().length
-    ? existingContact.displayName
-    : (actorDisplayName ?? actorUsername ?? canonicalUserId);
+  const { sourceChannel, canonicalUserId, actorChatId, actorUsername } = params;
 
   const { verified } = await upsertVerifiedContactChannel({
     sourceChannel,
     externalUserId: canonicalUserId,
     externalChatId: actorChatId,
-    displayName,
+    displayName: await preservedDisplayName(params),
     username: actorUsername,
+    softMirrorFailures: true,
   });
   return verified;
+}
+
+/**
+ * The name a verified sender is recorded under: the assistant mirror's
+ * curated name when the channel already has one, otherwise the platform's.
+ * The mirror is informational, so a daemon that cannot answer costs only
+ * the curated name, never the verification.
+ */
+async function preservedDisplayName(params: {
+  sourceChannel: string;
+  canonicalUserId: string;
+  actorDisplayName?: string;
+  actorUsername?: string;
+}): Promise<string> {
+  const { sourceChannel, canonicalUserId, actorDisplayName, actorUsername } =
+    params;
+  let existing: ContactChannelRow | null = null;
+  try {
+    existing = await findContactChannelByAddress(
+      sourceChannel,
+      canonicalUserId,
+    );
+  } catch (err) {
+    log.warn(
+      { err, sourceChannel },
+      "Assistant mirror lookup failed (soft); using the platform display name",
+    );
+  }
+  return existing?.displayName?.trim().length
+    ? existing.displayName
+    : (actorDisplayName ?? actorUsername ?? canonicalUserId);
 }
 
 // ---------------------------------------------------------------------------

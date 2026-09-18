@@ -717,30 +717,21 @@ describe("trusted-contact consume — verified channel upsert", () => {
     expect(rows[0].status).toBe("active");
   });
 
-  test("side-effect failure restores the session: the code stays redeemable", async () => {
+  test("a daemon that cannot answer does not stop the grant", async () => {
     const { sessionId, secret } = createPhoneTrustedContactSession();
-
-    // Induce an assistant-IPC failure in the upsert's decision path (the
-    // trusted-contact side effect spans real IO, so it compensates by
-    // restoring the session instead of sharing the consume's transaction).
     lookupContactChannelIdentityImpl = async () => {
       throw new Error("assistant IPC unavailable");
     };
-    await expect(
-      validateAndConsumeSession("phone", secret, PHONE, PHONE),
-    ).rejects.toThrow("assistant IPC unavailable");
-    lookupContactChannelIdentityImpl = async () => null;
 
-    expect(sessionRow(sessionId)?.status).toBe("awaiting_response");
-
-    // After recovery the same code redeems normally.
-    const retry = await validateAndConsumeSession(
+    const result = await validateAndConsumeSession(
       "phone",
       secret,
       PHONE,
       PHONE,
     );
-    expect(retry).toEqual({
+    lookupContactChannelIdentityImpl = async () => null;
+
+    expect(result).toEqual({
       success: true,
       verificationType: "trusted_contact",
     });
