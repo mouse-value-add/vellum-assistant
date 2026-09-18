@@ -254,7 +254,9 @@ export async function tryTextVerificationIntercept(
   // 7. Apply side effects. A blocked/revoked authoritative gateway row rejects
   //    the verification: the actor must not regain trusted status nor see a
   //    success reply, even though the code matched and the session consumed.
-  const sideEffectsVerified =
+  //    The reply names the role actually granted, which for a guardian code
+  //    can be a contact's (see applyGuardianSideEffects).
+  const grantedRole =
     trustClass === "guardian"
       ? await applyGuardianSideEffects({
           sourceChannel,
@@ -263,15 +265,17 @@ export async function tryTextVerificationIntercept(
           actorDisplayName,
           actorUsername,
         })
-      : await applyTrustedContactSideEffects({
-          sourceChannel,
-          canonicalUserId,
-          actorChatId,
-          actorDisplayName,
-          actorUsername,
-        });
+      : (await applyTrustedContactSideEffects({
+            sourceChannel,
+            canonicalUserId,
+            actorChatId,
+            actorDisplayName,
+            actorUsername,
+          }))
+        ? "trusted_contact"
+        : null;
 
-  if (!sideEffectsVerified) {
+  if (!grantedRole) {
     log.warn(
       { sourceChannel, actorExternalUserId: canonicalUserId, trustClass },
       "Verification rejected: authoritative gateway channel is blocked/revoked",
@@ -291,7 +295,7 @@ export async function tryTextVerificationIntercept(
   }
 
   // 8. Deliver success reply
-  const successReplyText = composeVerificationSuccessReply(trustClass);
+  const successReplyText = composeVerificationSuccessReply(grantedRole);
   let pendingReplyText: string | undefined;
   if (replyCallbackUrl) {
     await deliverVerificationReply({
@@ -308,7 +312,7 @@ export async function tryTextVerificationIntercept(
     {
       sourceChannel,
       actorExternalUserId: canonicalUserId,
-      trustClass,
+      trustClass: grantedRole,
       sessionId: session.id,
     },
     "Text verification succeeded",
@@ -317,7 +321,7 @@ export async function tryTextVerificationIntercept(
   return {
     intercepted: true,
     outcome: "verified",
-    trustClass,
+    trustClass: grantedRole,
     pendingReplyText,
   };
 }
@@ -326,13 +330,19 @@ export async function tryTextVerificationIntercept(
 // Side effects
 // ---------------------------------------------------------------------------
 
+/**
+ * Guardian side effect for a consumed guardian code. Returns the role the
+ * sender was granted: `guardian`, or `trusted_contact` when another sender
+ * already guards the channel; null when the authoritative gateway row is
+ * blocked/revoked.
+ */
 async function applyGuardianSideEffects(params: {
   sourceChannel: string;
   canonicalUserId: string;
   actorChatId: string;
   actorDisplayName?: string;
   actorUsername?: string;
-}): Promise<boolean> {
+}): Promise<"guardian" | "trusted_contact" | null> {
   const {
     sourceChannel,
     canonicalUserId,
@@ -361,7 +371,7 @@ async function applyGuardianSideEffects(params: {
       displayName: actorDisplayName,
       username: actorUsername,
     });
-    return verified;
+    return verified ? "trusted_contact" : null;
   }
 
   // The gateway is the source of truth: a blocked/revoked gateway row rejects
@@ -375,7 +385,7 @@ async function applyGuardianSideEffects(params: {
       { sourceChannel, address: canonicalUserId, status: gwStatus },
       "Skipping guardian binding: authoritative gateway channel is blocked or revoked",
     );
-    return false;
+    return null;
   }
 
   // Revoke existing binding (same-user re-verification)
@@ -403,7 +413,7 @@ async function applyGuardianSideEffects(params: {
     verifiedVia: "challenge",
     reactivateRevoked: true,
   });
-  return true;
+  return "guardian";
 }
 
 /**
