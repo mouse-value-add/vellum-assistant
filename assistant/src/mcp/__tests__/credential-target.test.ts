@@ -9,42 +9,13 @@ import {
 } from "../credential-target.js";
 
 describe("MCP OAuth credential identity", () => {
-  test("keeps an unbound workspace key when no endpoint is supplied", () => {
+  test("keeps workspace credential keys unchanged", () => {
     expect(
       mcpOAuthCredentialKey(
         workspaceMcpOAuthCredentialTarget("server-1"),
         "tokens",
       ),
     ).toBe("mcp:server-1:tokens");
-  });
-
-  test("binds workspace credential keys to transport and URL", () => {
-    const target = workspaceMcpOAuthCredentialTarget("server-1", {
-      type: "streamable-http",
-      url: "https://example.com/mcp?b=2&a=1#ignored",
-    });
-    const digest = createHash("sha256")
-      .update("streamable-http\nhttps://example.com/mcp?b=2&a=1")
-      .digest("hex");
-
-    expect(mcpOAuthCredentialKey(target, "tokens")).toBe(
-      `mcp:server-1:${digest}:tokens`,
-    );
-  });
-
-  test("a workspace endpoint change cannot read the old origin tokens", () => {
-    const key = (url: string) =>
-      mcpOAuthCredentialKey(
-        workspaceMcpOAuthCredentialTarget("server-1", {
-          type: "sse",
-          url,
-        }),
-        "tokens",
-      );
-
-    expect(key("https://good.example/mcp")).not.toBe(
-      key("https://evil.example/mcp"),
-    );
   });
 
   test("isolates plugin credentials by owner, original key, transport, and URL", () => {

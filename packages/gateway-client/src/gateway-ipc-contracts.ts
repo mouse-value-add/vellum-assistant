@@ -503,11 +503,6 @@ export const ClassifyRiskFileContextSchema = z.object({
   workflowsDir: z.string().optional(),
   /** Monitoring data dir: the sentinel lives here, writes are code-injection risk. */
   monitoringDir: z.string().optional(),
-  /**
-   * Canonical workspace config files the daemon hot-reloads and then
-   * executes from (`config.json`, `mcp.json`). Writes are High.
-   */
-  controlPlaneConfigFiles: z.array(z.string()).optional(),
   actorTokenSigningKeyPath: z.string(),
   skillSourceDirs: z.array(z.string()),
 });

@@ -25,8 +25,6 @@ const MOCK_TOOLS_DIR = join(MOCK_WORKSPACE_DIR, "tools");
 const MOCK_ROUTES_DIR = join(MOCK_WORKSPACE_DIR, "routes");
 const MOCK_WORKFLOWS_DIR = join(MOCK_WORKSPACE_DIR, "workflows");
 const MOCK_MONITORING_DIR = join(MOCK_WORKSPACE_DIR, "data", "monitoring");
-const MOCK_CONFIG_JSON = join(MOCK_WORKSPACE_DIR, "config.json");
-const MOCK_MCP_JSON = join(MOCK_WORKSPACE_DIR, "mcp.json");
 
 /** Skill source paths managed per-test via the context's skillSourceDirs. */
 let testSkillSourceDirs: string[] = [];
@@ -41,7 +39,6 @@ function makeContext(): FileClassificationContext {
     routesDir: MOCK_ROUTES_DIR,
     workflowsDir: MOCK_WORKFLOWS_DIR,
     monitoringDir: MOCK_MONITORING_DIR,
-    controlPlaneConfigFiles: [MOCK_CONFIG_JSON, MOCK_MCP_JSON],
     skillSourceDirs: testSkillSourceDirs,
   };
 }
@@ -247,38 +244,6 @@ describe("FileRiskClassifier", () => {
       });
       expect(result.riskLevel).toBe("high");
       expect(result.reason).toBe("Writes to hooks directory");
-    });
-
-    test("workspace config.json is high", async () => {
-      testSkillSourceDirs = [];
-      const result = await classifyInput({
-        toolName: "file_write",
-        filePath: MOCK_CONFIG_JSON,
-        workingDir: "/",
-      });
-      expect(result.riskLevel).toBe("high");
-      expect(result.reason).toBe("Writes to control-plane config");
-    });
-
-    test("workspace mcp.json is high", async () => {
-      testSkillSourceDirs = [];
-      const result = await classifyInput({
-        toolName: "file_edit",
-        filePath: MOCK_MCP_JSON,
-        workingDir: "/",
-      });
-      expect(result.riskLevel).toBe("high");
-      expect(result.reason).toBe("Writes to control-plane config");
-    });
-
-    test("a nested file named config.json is low", async () => {
-      testSkillSourceDirs = [];
-      const result = await classifyInput({
-        toolName: "file_write",
-        filePath: join(MOCK_WORKSPACE_DIR, "notes", "config.json"),
-        workingDir: "/",
-      });
-      expect(result.riskLevel).toBe("low");
     });
 
     // Plugins directory escalation. The external plugin loader auto-imports

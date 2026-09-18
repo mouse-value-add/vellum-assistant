@@ -270,9 +270,7 @@ async function handleMcpList(_args: {
           : "error";
       const hasOAuth =
         config.transport.type !== "stdio"
-          ? await hasMcpOAuthTokens(
-              workspaceMcpOAuthCredentialTarget(id, config.transport),
-            )
+          ? await hasMcpOAuthTokens(workspaceMcpOAuthCredentialTarget(id))
           : false;
 
       // Check credential store for stored static auth headers

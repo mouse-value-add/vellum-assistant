@@ -370,27 +370,6 @@ describe("file classification", () => {
     expect(result.reason).toContain("routes");
   });
 
-  test("file_write to workspace config.json is high risk", async () => {
-    const result = await classify({
-      tool: "file_write",
-      path: "/workspace/config.json",
-      workingDir: "/workspace",
-      fileContext: {
-        protectedDir: "/workspace/.vellum/protected",
-        hooksDir: "/workspace/.hooks",
-        controlPlaneConfigFiles: [
-          "/workspace/config.json",
-          "/workspace/mcp.json",
-        ],
-        actorTokenSigningKeyPath:
-          "/workspace/.vellum/protected/actor-token-signing-key",
-        skillSourceDirs: ["/workspace/.vellum/skills"],
-      },
-    });
-    expect(result.risk).toBe("high");
-    expect(result.reason).toContain("control-plane config");
-  });
-
   test("file_write to workflows dir is high risk", async () => {
     const result = await classify({
       tool: "file_write",

@@ -55,8 +55,7 @@ export async function orchestrateMcpOAuthConnect(args: {
 }): Promise<OrchestrateMcpOAuthConnectResult> {
   const { serverId, transport } = args;
   const credentialTarget =
-    args.credentialTarget ??
-    workspaceMcpOAuthCredentialTarget(serverId, transport);
+    args.credentialTarget ?? workspaceMcpOAuthCredentialTarget(serverId);
   const targetKey = mcpOAuthCredentialKey(credentialTarget, "tokens");
 
   let capturedAuthUrl: string | undefined;

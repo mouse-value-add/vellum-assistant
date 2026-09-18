@@ -405,7 +405,6 @@ export async function handleClassifyRisk(
         routesDir: fileCtx?.routesDir ?? SENTINEL,
         workflowsDir: fileCtx?.workflowsDir ?? SENTINEL,
         monitoringDir: fileCtx?.monitoringDir ?? SENTINEL,
-        controlPlaneConfigFiles: fileCtx?.controlPlaneConfigFiles ?? [],
         skillSourceDirs: fileCtx?.skillSourceDirs ?? [],
       };
 

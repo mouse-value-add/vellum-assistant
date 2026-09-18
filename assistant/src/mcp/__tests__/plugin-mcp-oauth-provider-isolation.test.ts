@@ -60,30 +60,6 @@ describe("McpOAuthProvider plugin credential isolation", () => {
     expect(await provider("plugin-a", url, workspace).tokens()).toBeUndefined();
   });
 
-  test("a workspace endpoint change cannot read the old origin tokens", async () => {
-    const oldUrl = "https://mcp.example.com/a";
-    const newUrl = "https://mcp.example.com/b";
-    const oldTarget = workspaceMcpOAuthCredentialTarget("workspace-server", {
-      type: "streamable-http",
-      url: oldUrl,
-    });
-    const newTarget = workspaceMcpOAuthCredentialTarget("workspace-server", {
-      type: "streamable-http",
-      url: newUrl,
-    });
-    await provider("workspace-server", oldUrl, oldTarget).saveTokens({
-      access_token: "old-workspace-token",
-      token_type: "bearer",
-    });
-
-    expect(
-      await provider("workspace-server", newUrl, newTarget).tokens(),
-    ).toBeUndefined();
-    expect(
-      await provider("workspace-server", oldUrl, oldTarget).tokens(),
-    ).toMatchObject({ access_token: "old-workspace-token" });
-  });
-
   test("an endpoint change cannot read or invalidate the old endpoint tokens", async () => {
     const oldUrl = "https://mcp.example.com/a";
     const newUrl = "https://mcp.example.com/b";

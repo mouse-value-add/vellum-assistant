@@ -92,11 +92,7 @@ describe("plugin-declared MCP servers", () => {
     });
 
     expect(getMcpHeaders).toHaveBeenCalledWith("from-workspace");
-    expect(getSecureKeyAsync).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^mcp:from-workspace:[a-f0-9]{64}:tokens$/,
-      ),
-    );
+    expect(getSecureKeyAsync).toHaveBeenCalledWith("mcp:from-workspace:tokens");
   });
 
   test("isolation is per-server, not per-start", async () => {
