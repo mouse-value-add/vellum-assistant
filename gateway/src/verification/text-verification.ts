@@ -296,7 +296,7 @@ export async function tryTextVerificationIntercept(
   let pendingReplyText: string | undefined;
   if (replyCallbackUrl) {
     await deliverVerificationReply({
-      replyCallbackUrl,
+      callbackUrl: replyCallbackUrl,
       chatId: actorChatId,
       text: successReplyText,
       assistantId,
@@ -474,7 +474,7 @@ async function replyWithFailure(
   const text = composeVerificationFailureReply(reason);
   if (!replyCallbackUrl) return text;
   await deliverVerificationReply({
-    replyCallbackUrl,
+    callbackUrl: replyCallbackUrl,
     chatId,
     text,
     assistantId,
