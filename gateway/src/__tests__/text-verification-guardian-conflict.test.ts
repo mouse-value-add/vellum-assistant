@@ -115,6 +115,21 @@ afterAll(() => {
   resetGatewayDb();
 });
 
+/** The code a guardian's rebind to the new handle sends it. */
+function mintCodeForNewHandle(): void {
+  createOutboundSession({
+    id: "session-1",
+    channel: CHANNEL,
+    challengeHash: hashVerificationSecret(CODE),
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    status: "awaiting_response",
+    expectedExternalUserId: NEW_HANDLE,
+    identityBindingStatus: "bound",
+    destinationAddress: NEW_HANDLE,
+    verificationPurpose: "guardian",
+  });
+}
+
 function expectGuardianMovedToNewHandle(): void {
   expect(channelOf(NEW_HANDLE)).toMatchObject({
     contactId: "guardian",
@@ -127,17 +142,7 @@ function expectGuardianMovedToNewHandle(): void {
 
 describe("a guardian code on a channel that already has a guardian", () => {
   test("a code sent to the new handle moves the guardian to it", async () => {
-    createOutboundSession({
-      id: "session-1",
-      channel: CHANNEL,
-      challengeHash: hashVerificationSecret(CODE),
-      expiresAt: Date.now() + 10 * 60 * 1000,
-      status: "awaiting_response",
-      expectedExternalUserId: NEW_HANDLE,
-      identityBindingStatus: "bound",
-      destinationAddress: NEW_HANDLE,
-      verificationPurpose: "guardian",
-    });
+    mintCodeForNewHandle();
 
     const result = await redeemFromNewHandle(CODE);
 
@@ -166,5 +171,65 @@ describe("a guardian code on a channel that already has a guardian", () => {
       trustClass: "guardian",
     });
     expectGuardianMovedToNewHandle();
+  });
+
+  test("a binding write that fails leaves the current guardian in place", async () => {
+    mintCodeForNewHandle();
+    const db = getGatewayDb();
+    db.run(
+      `CREATE TRIGGER fail_new_handle_insert BEFORE INSERT ON contact_channels WHEN NEW.address = '${NEW_HANDLE}' BEGIN SELECT RAISE(ABORT, 'binding write failed'); END`,
+    );
+    db.run(
+      `CREATE TRIGGER fail_new_handle_update BEFORE UPDATE ON contact_channels WHEN NEW.address = '${NEW_HANDLE}' BEGIN SELECT RAISE(ABORT, 'binding write failed'); END`,
+    );
+    try {
+      await expect(redeemFromNewHandle(CODE)).rejects.toThrow(
+        "binding write failed",
+      );
+    } finally {
+      db.run("DROP TRIGGER fail_new_handle_insert");
+      db.run("DROP TRIGGER fail_new_handle_update");
+    }
+
+    // The revoke rolled back with the failed binding.
+    expect(channelOf(OLD_HANDLE)?.status).toBe("active");
+  });
+
+  test("a handle whose channel was revoked can be bound again", async () => {
+    const now = Date.now();
+    getGatewayDb()
+      .insert(contacts)
+      .values({
+        id: "former",
+        displayName: "Former",
+        role: "contact",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    getGatewayDb()
+      .insert(contactChannels)
+      .values({
+        id: "former-channel",
+        contactId: "former",
+        type: CHANNEL,
+        address: NEW_HANDLE,
+        externalChatId: NEW_HANDLE,
+        status: "revoked",
+        policy: "deny",
+        interactionCount: 0,
+        createdAt: now,
+      })
+      .run();
+    mintCodeForNewHandle();
+
+    const result = await redeemFromNewHandle(CODE);
+
+    expect(result).toMatchObject({
+      outcome: "verified",
+      trustClass: "guardian",
+    });
+    expect(channelOf(NEW_HANDLE)?.status).toBe("active");
+    expect(channelOf(OLD_HANDLE)?.status).not.toBe("active");
   });
 });
