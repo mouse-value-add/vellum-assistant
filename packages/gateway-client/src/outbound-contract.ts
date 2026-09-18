@@ -5,7 +5,9 @@
  * payloads in `deliverChannelReply()` and `deliverApprovalPrompt()` and hands
  * them to the channel transport its callback URL names
  * (`messaging/providers`). `/deliver/{channel}` survives only as that
- * callback URL's addressing form: no service serves it.
+ * callback URL's addressing form: no service serves it. A callback URL no
+ * transport owns (a managed callback carrying a `callback_token`) is POSTed
+ * over HTTP by `http-delivery.ts` instead.
  *
  * The gateway sends through the same transports, never to a provider itself:
  * a reply it composes for a message it answered at ingress goes to the daemon
