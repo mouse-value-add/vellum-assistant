@@ -553,6 +553,14 @@
       "defaultEnabled": false
     },
     {
+      "id": "sidebar-done",
+      "scope": "both",
+      "key": "sidebar-done",
+      "label": "Sidebar Done check",
+      "description": "Replaces Archive with a Done check in the chat sidebar and adds the Old chats page.",
+      "defaultEnabled": false
+    },
+    {
       "id": "assistant-inbox",
       "scope": "client",
       "key": "assistant-inbox",

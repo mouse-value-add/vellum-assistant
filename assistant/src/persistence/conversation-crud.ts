@@ -31,6 +31,7 @@ import type { ChannelId, InterfaceId } from "../channels/types.js";
 import { parseChannelId, parseInterfaceId } from "../channels/types.js";
 import { CHANNEL_IDS, isChannelId } from "../channels/types.js";
 import { getConfig } from "../config/loader.js";
+import { isSidebarDoneEnabled } from "../config/sidebar-done-gate.js";
 import { findDisplayTurnEndIndex } from "../conversations/message-consolidation.js";
 import { findConversation } from "../daemon/conversation-registry.js";
 import { conversationMetadataSyncTag } from "../daemon/message-types/sync.js";
@@ -47,6 +48,7 @@ import { indexMessageNow } from "../plugins/defaults/memory/indexer.js";
 import { runHook } from "../plugins/pipeline.js";
 import type { ContentBlock } from "../providers/types.js";
 import { getCurrentSeq } from "../runtime/assistant-stream-state.js";
+import { publishConversationListAndMetadataChanged } from "../runtime/sync/resource-sync-events.js";
 import { publishSyncInvalidation } from "../runtime/sync/sync-publisher.js";
 import { trustClassSchema } from "../runtime/trust-class.js";
 import { UserError } from "../util/errors.js";
@@ -100,6 +102,7 @@ import {
   computerUseScreenshotAttachmentIdsFromMetadata,
   type ConversationCreateType,
   type ConversationOrigin,
+  isBackgroundEventMetadata,
   isHiddenMessageMetadata,
   isNoResponseMetadata,
   isReactionMessageMetadata,
@@ -1054,7 +1057,7 @@ async function insertMessageCore(
 
   // The timestamp is recomputed each attempt so a late retry doesn't persist a
   // stale `updatedAt`.
-  return withSqliteRetry(
+  const inserted = await withSqliteRetry(
     (): InsertedMessage => {
       // Asked at the top of EVERY attempt, and synchronously, because that is
       // the scope the answer holds for. Contention retries this function after
@@ -1179,6 +1182,30 @@ async function insertMessageCore(
     },
     { op: "insertMessageCore", context: { conversationId } },
   );
+
+  // A message the user reads brings a Done conversation back to the list. Two
+  // kinds of row are not that: a hidden machine signal, and the
+  // `<background_event>` trigger a wake persists ahead of its run — clients
+  // drop both from the transcript, so resurfacing on either would put the
+  // conversation back for work that has produced nothing yet. A deduplicated
+  // insert wrote no row at all. Best-effort: a failure here must not escalate
+  // into a failed message persist.
+  if (
+    !inserted.deduplicated &&
+    !isHiddenMessageMetadata(metadata) &&
+    !isBackgroundEventMetadata(metadata)
+  ) {
+    try {
+      resurfaceArchivedConversation(conversationId);
+    } catch (err) {
+      log.warn(
+        { err, conversationId, messageId: inserted.id },
+        "Failed to resurface Done conversation after message insert",
+      );
+    }
+  }
+
+  return inserted;
 }
 
 /**
@@ -3517,6 +3544,46 @@ export function unarchiveConversation(id: string): boolean {
     "UPDATE conversations SET archived_at = NULL, updated_at = ? WHERE id = ?",
     now,
     id,
+  );
+  return true;
+}
+
+/**
+ * Bring a Done conversation back to the list because a user-visible message
+ * landed in it.
+ *
+ * Under the `sidebar-done` gate "Done" is a completion mark, not a deletion:
+ * the conversation keeps its schedules and its channel threads, so anything
+ * the user would read arriving in it has to be reachable again. Called from
+ * {@link insertMessageCore}, the one seam every message append funnels
+ * through, so the rule holds for each ingest path (channel inbound, scheduled
+ * run output, assistant-initiated notification body, web and CLI sends)
+ * without a per-provider hook.
+ *
+ * Rows the user never reads do not resurface anything: hidden machine signals
+ * and the `<background_event>` trigger each wake persists are both excluded by
+ * the caller. Retrospectives and memory consolidation are excluded by
+ * construction — they run in a fork or in a conversation of their own and
+ * never append to the conversation under review.
+ *
+ * No-ops when the gate is off, which is the shipped behavior: nothing but the
+ * unarchive route clears `archived_at`.
+ */
+export function resurfaceArchivedConversation(conversationId: string): boolean {
+  if (!isSidebarDoneEnabled(getConfig())) {
+    return false;
+  }
+  const conv = getConversation(conversationId);
+  if (!conv || conv.archivedAt == null) {
+    return false;
+  }
+  if (!unarchiveConversation(conversationId)) {
+    return false;
+  }
+  publishConversationListAndMetadataChanged("reordered", conversationId);
+  log.info(
+    { conversationId },
+    "Resurfaced Done conversation on user-visible activity",
   );
   return true;
 }
