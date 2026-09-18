@@ -41,7 +41,7 @@ import {
   upsertVerifiedContactChannel,
 } from "./contact-helpers.js";
 import { canonicalizeInboundIdentity } from "./identity.js";
-import { checkIdentityMatch } from "./identity-match.js";
+import { boundRedeemer, checkIdentityMatch } from "./identity-match.js";
 import {
   isRateLimited,
   recordInvalidAttempt,
@@ -262,6 +262,7 @@ export async function tryTextVerificationIntercept(
           actorChatId,
           actorDisplayName,
           actorUsername,
+          issuedToSender: boundRedeemer(session) !== null,
         })
       : await applyTrustedContactSideEffects({
           sourceChannel,
@@ -274,7 +275,7 @@ export async function tryTextVerificationIntercept(
   if (!sideEffectsVerified) {
     log.warn(
       { sourceChannel, actorExternalUserId: canonicalUserId, trustClass },
-      "Verification rejected: authoritative gateway channel is blocked/revoked",
+      "Verification rejected after consume: no access granted",
     );
     const pendingReplyText = await replyWithFailure(
       replyCallbackUrl,
@@ -326,12 +327,25 @@ export async function tryTextVerificationIntercept(
 // Side effects
 // ---------------------------------------------------------------------------
 
+/**
+ * Guardian side effect for a consumed guardian code. Returns false when no
+ * binding was made.
+ *
+ * When another sender already guards the channel, who the code was issued to
+ * decides, as it does for phone (the outbound binding in session-service.ts).
+ * A code the guardian issued to this sender's identity is a deliberate
+ * rebind: the current binding is revoked and this sender bound. A code any
+ * holder could redeem is refused, so a leaked code cannot take the channel
+ * over or buy its holder any access.
+ */
 async function applyGuardianSideEffects(params: {
   sourceChannel: string;
   canonicalUserId: string;
   actorChatId: string;
   actorDisplayName?: string;
   actorUsername?: string;
+  /** Whether the session's code was issued to this sender's identity. */
+  issuedToSender: boolean;
 }): Promise<boolean> {
   const {
     sourceChannel,
@@ -339,29 +353,30 @@ async function applyGuardianSideEffects(params: {
     actorChatId,
     actorDisplayName,
     actorUsername,
+    issuedToSender,
   } = params;
 
-  // Check for binding conflict — another user already holds guardian
   const existing = getExistingGuardianBinding(sourceChannel);
   if (existing?.address && existing.address !== canonicalUserId) {
-    log.warn(
+    if (!issuedToSender) {
+      log.warn(
+        {
+          sourceChannel,
+          existingGuardian: existing.address,
+          newActor: canonicalUserId,
+        },
+        "Guardian code refused: another user guards this channel and the code was not issued to this sender",
+      );
+      return false;
+    }
+    log.info(
       {
         sourceChannel,
         existingGuardian: existing.address,
         newActor: canonicalUserId,
       },
-      "Guardian binding conflict: another user already holds this channel",
+      "Rebinding guardian: the code was issued to this sender",
     );
-    // Still upsert the contact channel so the sender is a known contact,
-    // but skip guardian binding creation.
-    const { verified } = await upsertVerifiedContactChannel({
-      sourceChannel,
-      externalUserId: canonicalUserId,
-      externalChatId: actorChatId,
-      displayName: actorDisplayName,
-      username: actorUsername,
-    });
-    return verified;
   }
 
   // The gateway is the source of truth: a blocked/revoked gateway row rejects
@@ -378,7 +393,8 @@ async function applyGuardianSideEffects(params: {
     return false;
   }
 
-  // Revoke existing binding (same-user re-verification)
+  // Revoke the existing binding: a same-user re-verification, or the rebind
+  // above.
   revokeExistingChannelGuardian(sourceChannel);
 
   // Resolve canonical principal — unify all channel bindings
