@@ -342,6 +342,11 @@ async function applyGuardianSideEffects(params: {
     actorUsername,
   } = params;
 
+  // Read before any decision below, so nothing awaits between the conflict
+  // check, the revoke, and the binding that replaces it: a guardian bound
+  // concurrently is then either seen by the check or not bound yet.
+  const displayName = await preservedDisplayName(params);
+
   // Check for binding conflict — another user already holds guardian
   const existing = getExistingGuardianBinding(sourceChannel);
   if (existing?.address && existing.address !== canonicalUserId) {
@@ -379,10 +384,6 @@ async function applyGuardianSideEffects(params: {
     );
     return false;
   }
-
-  // Read before the revoke, so nothing awaits between the revoke and the
-  // binding that replaces it.
-  const displayName = await preservedDisplayName(params);
 
   // Revoke existing binding (same-user re-verification)
   revokeExistingChannelGuardian(sourceChannel);

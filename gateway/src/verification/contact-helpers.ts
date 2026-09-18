@@ -808,9 +808,10 @@ export async function upsertVerifiedContactChannel(params: {
   // Resolve the existing channel's identity (id, parent contact) only. The
   // ACL/status decision is owned by the gateway pre-check in the writes core;
   // the most recently updated mirror row is preferred (the typed lookup
-  // orders by updated_at DESC). In soft mode a failed lookup falls through to
-  // the create path: the gateway write resolves by logical key either way,
-  // and the mirror writes below are soft too.
+  // orders by updated_at DESC). In soft mode a failed lookup takes the
+  // identity from the gateway's own row instead: taking the create path there
+  // would mint a new parent contact while the logical-key write activates the
+  // existing channel under its old one, leaving the new contact channel-less.
   let existing: { channelId: string; contactId: string } | null;
   try {
     const channel = await lookupContactChannelIdentity({
@@ -828,7 +829,10 @@ export async function upsertVerifiedContactChannel(params: {
       { err: mirrorErr, sourceChannel },
       "Assistant mirror lookup failed (soft); proceeding gateway-only",
     );
-    existing = null;
+    const gatewayRow = getGatewayChannelByKey(sourceChannel, address);
+    existing = gatewayRow
+      ? { channelId: gatewayRow.id, contactId: gatewayRow.contactId }
+      : null;
   }
 
   // Gateway is source of truth: write it FIRST, then activate the assistant

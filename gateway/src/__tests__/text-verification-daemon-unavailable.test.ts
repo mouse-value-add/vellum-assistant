@@ -8,7 +8,8 @@
  * and the provider's retry then finds the code already spent.
  *
  * The gateway DB and session store are real; the assistant IPC socket is the
- * boundary, scripted as a daemon that is down or failing its mirror writes.
+ * boundary, scripted as a daemon that is down or failing its mirror writes,
+ * or as one whose lookup is still in flight when another guardian binds.
  */
 
 import {
@@ -25,6 +26,8 @@ import { hashVerificationSecret } from "@vellumai/gateway-client";
 
 type Daemon = "up" | "down" | "mirror-failing";
 let daemon: Daemon = "up";
+/** Runs while the daemon is answering a mirror lookup, then clears. */
+let duringLookup: (() => void) | undefined;
 
 // Spread the actual module so untouched exports stay importable by
 // later-loaded files when suites share a bun process.
@@ -33,6 +36,11 @@ const { IpcHandlerError, IpcTransportError } = actualAssistantClient;
 mock.module("../ipc/assistant-client.js", () => ({
   ...actualAssistantClient,
   ipcCallAssistant: async (method: string) => {
+    if (method === "contact_channel_identity_lookup" && duringLookup) {
+      const run = duringLookup;
+      duringLookup = undefined;
+      run();
+    }
     if (daemon === "down") {
       throw new IpcTransportError("connect ECONNREFUSED");
     }
@@ -82,20 +90,55 @@ function redeem() {
   });
 }
 
-function actorChannel() {
+function channelOf(address: string) {
   return getGatewayDb()
     .select()
     .from(contactChannels)
     .all()
-    .find((c) => c.address === ACTOR);
+    .find((c) => c.address === address);
+}
+
+function actorChannel() {
+  return channelOf(ACTOR);
 }
 
 beforeAll(async () => {
   await initGatewayDb();
 });
 
+/** Seed an active guardian bound to `address` on this channel. */
+function seedGuardian(address: string): void {
+  const now = Date.now();
+  getGatewayDb()
+    .insert(contacts)
+    .values({
+      id: `guardian-${address}`,
+      displayName: "Guardian",
+      role: "guardian",
+      principalId: `principal-${address}`,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  getGatewayDb()
+    .insert(contactChannels)
+    .values({
+      id: `channel-${address}`,
+      contactId: `guardian-${address}`,
+      type: CHANNEL,
+      address,
+      externalChatId: address,
+      status: "active",
+      policy: "allow",
+      interactionCount: 0,
+      createdAt: now,
+    })
+    .run();
+}
+
 beforeEach(() => {
   daemon = "up";
+  duringLookup = undefined;
   getGatewayDb().delete(channelVerificationSessions).run();
   getGatewayDb().delete(contactChannels).run();
   getGatewayDb().delete(contacts).run();
@@ -139,3 +182,63 @@ describe.each(["down", "mirror-failing"] as const)(
     });
   },
 );
+
+describe("a code redeemed while the daemon is down, for a sender the gateway already knows", () => {
+  test("activates the sender's existing channel under the contact it already has", async () => {
+    // Ingress seeds an unverified contact for a first-time sender before the
+    // code is ever typed.
+    const now = Date.now();
+    getGatewayDb()
+      .insert(contacts)
+      .values({
+        id: "seeded",
+        displayName: "Seeded",
+        role: "contact",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    getGatewayDb()
+      .insert(contactChannels)
+      .values({
+        id: "seeded-channel",
+        contactId: "seeded",
+        type: CHANNEL,
+        address: ACTOR,
+        externalChatId: ACTOR,
+        status: "unverified",
+        policy: "allow",
+        interactionCount: 0,
+        createdAt: now,
+      })
+      .run();
+    seedSession("trusted_contact");
+    daemon = "down";
+
+    await redeem();
+
+    expect(actorChannel()).toMatchObject({
+      contactId: "seeded",
+      status: "active",
+    });
+    expect(getGatewayDb().select().from(contacts).all()).toHaveLength(1);
+  });
+});
+
+describe("a guardian code whose mirror lookup is in flight when another guardian binds", () => {
+  test("does not revoke the guardian that bound meanwhile", async () => {
+    seedSession("guardian");
+    duringLookup = () => seedGuardian("OTHER");
+
+    await redeem();
+
+    // The guardian bound meanwhile keeps the channel; the sender is a contact.
+    expect(channelOf("OTHER")?.status).toBe("active");
+    const senderContact = getGatewayDb()
+      .select()
+      .from(contacts)
+      .all()
+      .find((c) => c.id === actorChannel()?.contactId);
+    expect(senderContact?.role).toBe("contact");
+  });
+});
