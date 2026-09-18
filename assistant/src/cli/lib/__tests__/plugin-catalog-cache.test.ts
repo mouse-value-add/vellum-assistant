@@ -366,6 +366,27 @@ describe("getPluginCatalog", () => {
     expect(deferred.calls()).toBe(1);
   });
 
+  test("a display read that joins a fresh read's refresh still gets its one notification", async () => {
+    const deferred = deferredPlatformFetch(["a"]);
+    const deps: SearchPluginsDeps = { fetch: deferred.fetch };
+
+    // GIVEN a fresh read that started the refresh with no callback
+    const fresh = getPluginCatalog("main", deps, { fresh: true });
+
+    // WHEN two display reads join it, each offering a callback
+    let first = 0;
+    let second = 0;
+    await getPluginCatalog("main", deps, { onChanged: () => (first += 1) });
+    await getPluginCatalog("main", deps, { onChanged: () => (second += 1) });
+    deferred.release();
+    await fresh;
+
+    // THEN the one fetch fires the first callback offered, once
+    expect(deferred.calls()).toBe(1);
+    expect(first).toBe(1);
+    expect(second).toBe(0);
+  });
+
   test("a display read within the TTL makes no fetch", async () => {
     setSystemTime(new Date(BASE_TIME_MS));
     const { fetch, calls } = platformFetch(["a"]);

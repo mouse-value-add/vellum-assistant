@@ -35,7 +35,14 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<PluginCatalog>>();
+
+interface InFlightRefresh {
+  promise: Promise<PluginCatalog>;
+  /** The one change callback this refresh fires; the first reader to offer one fills it. */
+  onChanged?: () => void;
+}
+
+const inFlight = new Map<string, InFlightRefresh>();
 const lastFailureAt = new Map<string, number>();
 
 /** Add bundled local packages without overriding platform-authoritative rows. */
@@ -59,7 +66,10 @@ export interface GetPluginCatalogOptions {
    * propagate its failure. Install and one-shot CLI reads.
    */
   fresh?: boolean;
-  /** Called once if a refresh this call started changes what the ref serves. */
+  /**
+   * Called if the refresh this read starts or joins changes what the ref
+   * serves. A refresh keeps the first callback it is offered and fires it once.
+   */
   onChanged?: () => void;
 }
 
@@ -70,25 +80,25 @@ function sameMatches(a: PluginCatalog, b: PluginCatalog): boolean {
 /**
  * Start the single refresh for {@link ref} and register it as in flight.
  *
- * `served` is what the ref answered with before the refresh, so the callback
- * that started it fires only on a real change. A caller that joins the
- * in-flight promise contributes no callback, which is what keeps one fetch to
- * at most one notification.
+ * `served` is what the ref answered with before the refresh, so the change
+ * callback fires only on a real change. The record holds a single callback
+ * slot, which is what keeps one fetch to at most one notification.
  */
 function startRefresh(
   ref: string,
   deps: SearchPluginsDeps,
   served: PluginCatalog,
   onChanged: (() => void) | undefined,
-): Promise<PluginCatalog> {
-  const refresh = fetchPluginCatalogFromPlatform(deps, { ref })
+): InFlightRefresh {
+  const slot: Pick<InFlightRefresh, "onChanged"> = { onChanged };
+  const promise = fetchPluginCatalogFromPlatform(deps, { ref })
     .then((catalog) => {
       const merged = mergePlatformCatalogWithBundledLocals(catalog);
       cache.set(ref, { catalog: merged, timestamp: Date.now() });
       lastFailureAt.delete(ref);
-      if (onChanged && !sameMatches(served, merged)) {
+      if (slot.onChanged && !sameMatches(served, merged)) {
         try {
-          onChanged();
+          slot.onChanged();
         } catch (err) {
           log.warn({ err, ref }, "Plugin catalog change callback threw");
         }
@@ -103,6 +113,9 @@ function startRefresh(
     .finally(() => {
       inFlight.delete(ref);
     });
+  // Same object as `slot`, so a reader that joins later fills the slot the
+  // promise reads when it settles.
+  const refresh: InFlightRefresh = Object.assign(slot, { promise });
   inFlight.set(ref, refresh);
   return refresh;
 }
@@ -147,14 +160,16 @@ export async function getPluginCatalog(
       return served;
     }
     refresh = startRefresh(ref, deps, served, options.onChanged);
+  } else {
+    refresh.onChanged ??= options.onChanged;
   }
 
   if (options.fresh) {
-    return refresh;
+    return refresh.promise;
   }
   // A background refresh has no caller to reject to; its failure is logged
   // where it is recorded.
-  refresh.catch(() => {});
+  refresh.promise.catch(() => {});
   return served;
 }
 
