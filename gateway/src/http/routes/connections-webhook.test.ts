@@ -121,9 +121,10 @@ function signedRequest(body: string, secret = WEBHOOK_SECRET): Request {
   });
 }
 
-function makeHandler(secret: string | undefined = WEBHOOK_SECRET) {
+/** `null` stores no webhook secret. */
+function makeHandler(secret: string | null = WEBHOOK_SECRET) {
   return createConnectionsWebhookHandler(config, {
-    credentials: new StubCredentialCache(secret),
+    credentials: new StubCredentialCache(secret ?? undefined),
   }).handler;
 }
 
@@ -144,10 +145,11 @@ describe("connections webhook", () => {
   });
 
   test("fails closed when no webhook secret is configured", async () => {
-    const res = await makeHandler(undefined)(signedRequest(deliveryBody()));
+    const res = await makeHandler(null)(signedRequest(deliveryBody()));
 
     expect(res.status).toBe(409);
     expect(forwarded).toHaveLength(0);
+    expect(seededContacts).toHaveLength(0);
   });
 
   test("rejects a delivery signed with another secret", async () => {
@@ -156,6 +158,7 @@ describe("connections webhook", () => {
     );
 
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Forbidden" });
     expect(forwarded).toHaveLength(0);
     expect(seededContacts).toHaveLength(0);
   });
@@ -166,7 +169,9 @@ describe("connections webhook", () => {
     );
 
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Stale delivery" });
     expect(forwarded).toHaveLength(0);
+    expect(seededContacts).toHaveLength(0);
   });
 
   test("rejects a signed delivery missing a keyed field", async () => {
@@ -175,7 +180,9 @@ describe("connections webhook", () => {
     );
 
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid delivery" });
     expect(forwarded).toHaveLength(0);
+    expect(seededContacts).toHaveLength(0);
   });
 
   test("seeds the sender and forwards through the channel gate with no reply callback", async () => {
