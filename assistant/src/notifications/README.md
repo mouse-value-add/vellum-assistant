@@ -182,7 +182,7 @@ Reminder. Take out the trash. Action required.
 
 ## Conversation Surfacing via `notification_conversation_created` Event (Creation-Only)
 
-The `notification_conversation_created` SSE event is emitted **only when a brand-new conversation is actually created** by the broadcaster. Reused conversations do not trigger this event — the macOS client already knows about the conversation from the original creation.
+The `notification_conversation_created` SSE event is emitted **only when a brand-new conversation is actually created** by the broadcaster. Reused conversations do not trigger it.
 
 This is enforced in `broadcaster.ts` by gating the event emission on `pairing.createdNewConversation === true`:
 
@@ -198,18 +198,9 @@ if (
 }
 ```
 
-When a vellum notification conversation **is** newly created (strategy `start_new_conversation`), the broadcaster emits the SSE event **immediately**, before waiting for slower channel deliveries (e.g. Telegram). This avoids a race where a slow Telegram delivery delays the broadcast past the macOS deep-link retry window.
+When a vellum notification conversation **is** newly created (strategy `start_new_conversation`), the broadcaster emits the SSE event **immediately**, before slower channel deliveries such as Telegram, so a slow channel send cannot delay it.
 
-The SSE event payload:
-
-```ts
-{
-  type: 'notification_conversation_created',
-  conversationId: string,
-  title: string,
-  sourceEventName: string,
-}
-```
+The payload is `NotificationConversationCreatedEventSchema` in `api/events/notification-conversation-created.ts`.
 
 No first-party client acts on this event today: the shared web renderer (browser, desktop app, mobile apps) lists it as a no-op in `use-stream-event-handler.ts`.
 
@@ -220,7 +211,7 @@ No first-party client acts on this event today: the shared web renderer (browser
 **Important distinction between the two callbacks:**
 
 - **Per-dispatch `options.onConversationCreated`**: Fires for **both** new and reused vellum conversation pairings. Callers like `dispatchGuardianQuestion` rely on this to create delivery bookkeeping rows before `emitNotificationSignal()` returns, regardless of whether the conversation was newly created or reused.
-- **Class-level `this.onConversationCreated` (SSE broadcast)**: Fires **only** when a brand-new conversation is created (`createdNewConversation === true && strategy === 'start_new_conversation'`). This emits the `notification_conversation_created` SSE event so macOS clients surface the new conversation in the sidebar. Reused conversations do not trigger this event because the client already knows about the conversation.
+- **Class-level `this.onConversationCreated` (SSE broadcast)**: Fires **only** when a brand-new conversation is created (`createdNewConversation === true && strategy === 'start_new_conversation'`). This emits the `notification_conversation_created` SSE event. Reused conversations do not trigger it.
 
 ## Schedule Routing Metadata and Trigger-Time Enforcement
 
@@ -397,7 +388,7 @@ Every guardian reply, typed in the app or on a channel, goes through `routeGuard
 4. An explicit approve or reject phrase, when exactly one request is pending.
 5. Natural-language classification, on channels that enable it (app sessions do not).
 
-When several requests are pending and the reply names none of them, the router answers with `composeDisambiguationReply()`, listing each request's code and how to reply to it. Every decision applies through `applyGuardianDecision()`. The end-to-end map is [docs/guardian-request-flow.md](../../docs/guardian-request-flow.md).
+When several requests are pending and the reply names none of them, the router answers with `composeDisambiguationReply()`, listing each request's code and how to reply to it, in two cases: the reply is an explicit approve or reject phrase, or natural-language classification reached a decision without identifying which request it answers. Any other reply that names no request falls through to the normal message pipeline. Every decision applies through `applyGuardianDecision()`. The end-to-end map is [docs/guardian-request-flow.md](../../docs/guardian-request-flow.md).
 
 ## Key Files
 
@@ -486,17 +477,17 @@ For vellum deliveries, the audit trail extends past the SSE broadcast to the OS 
 
 The ack populates three columns on `notification_deliveries`:
 
-| Column                   | Type    | Description                                                                    |
-| ------------------------ | ------- | ------------------------------------------------------------------------------ |
-| `client_delivery_status` | TEXT    | `'delivered'` if the OS accepted the notification, `'client_failed'` otherwise |
-| `client_delivery_error`  | TEXT    | Error description when the post failed (e.g. authorization denied)             |
-| `client_delivery_at`     | INTEGER | Epoch ms timestamp of when the client reported the outcome                     |
+| Column                   | Type    | Description                                                                 |
+| ------------------------ | ------- | --------------------------------------------------------------------------- |
+| `client_delivery_status` | TEXT    | `'delivered'` if the client handled the intent, `'client_failed'` otherwise |
+| `client_delivery_error`  | TEXT    | Error description when the post failed (e.g. authorization denied)          |
+| `client_delivery_at`     | INTEGER | Epoch ms timestamp of when the client reported the outcome                  |
 
-This means the audit trail can now answer three questions for each vellum delivery:
+`'delivered'` covers two outcomes the column cannot tell apart: the OS accepted a posted banner, or the client deliberately showed none (the user was already watching that conversation, or the sending assistant predates guardian targeting and the intent was guardian-scoped). So the audit trail answers three questions for each vellum delivery:
 
 1. **Was the intent broadcast?** -- existing `status` column (`sent`)
-2. **Did the client attempt to post?** -- `client_delivery_status` is non-null
-3. **Did the OS post succeed or fail, and why?** -- `client_delivery_status` + `client_delivery_error`
+2. **Did a client handle it?** -- `client_delivery_status` is non-null
+3. **Did handling fail, and why?** -- `client_delivery_status = 'client_failed'` + `client_delivery_error`
 
 Query examples:
 
