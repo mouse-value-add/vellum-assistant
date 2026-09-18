@@ -38,27 +38,24 @@ export function SkillLoadOutput({
   // A skill whose body is nothing but the header and its tool manifest parses
   // to empty instructions. The verbatim result is then the whole output, and
   // hiding it behind a disclosure would leave the section looking empty.
-  if (instructions === "") {
-    return (
-      <div>
-        <SectionLabel>{t("toolDetailPanel.output")}</SectionLabel>
-        <CodeBlock text={raw} />
-      </div>
-    );
-  }
+  const readable = instructions !== "";
 
   return (
     <>
       <div>
         <SectionLabel>{t("toolDetailPanel.output")}</SectionLabel>
-        <DetailBlock variant="filled">
-          <ChatMarkdownMessage
-            content={instructions}
-            assistantId={assistantId}
-          />
-        </DetailBlock>
+        {readable ? (
+          <DetailBlock variant="filled">
+            <ChatMarkdownMessage
+              content={instructions}
+              assistantId={assistantId}
+            />
+          </DetailBlock>
+        ) : (
+          <CodeBlock text={raw} />
+        )}
       </div>
-      {raw !== "" && (
+      {readable && raw !== "" && (
         <RawDisclosure
           label={t("toolOutputSection.rawOutput")}
           text={() => raw}
