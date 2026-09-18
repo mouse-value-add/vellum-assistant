@@ -13,12 +13,18 @@ import {
   type GatewayReplyRequest,
 } from "@vellumai/gateway-client";
 
-import { ipcCallAssistant } from "../ipc/assistant-client.js";
+import { IpcHandlerError, ipcCallAssistant } from "../ipc/assistant-client.js";
 import { getLogger } from "../logger.js";
 
 const log = getLogger("verification-reply");
 
-const DELIVERY_TIMEOUT_MS = 10_000;
+/**
+ * How long the intercept waits for the daemon's answer before it lets the
+ * webhook return. Not a delivery deadline: the transports' own retries can
+ * outlast it (a Telegram send allows 15 seconds per attempt across three
+ * retries), and the daemon keeps sending after the gateway stops waiting.
+ */
+const DELIVERY_WAIT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Reply templates (mirrors assistant's verification-templates.ts)
@@ -52,6 +58,10 @@ export function composeVerificationFailureReply(reason?: string): string {
  * call that timed out may still have been sent, and a second attempt would
  * post the reply twice; the transports retry transient provider errors
  * themselves.
+ *
+ * Only an answer from the daemon is a verdict. No answer (a wait that ran
+ * out, a dropped socket) leaves the outcome unknown, and is logged as that
+ * rather than as a failure.
  */
 export async function deliverVerificationReply(
   params: GatewayReplyRequest,
@@ -60,7 +70,7 @@ export async function deliverVerificationReply(
     const result = await ipcCallAssistant(
       DELIVER_GATEWAY_REPLY_IPC_METHOD,
       { body: params },
-      { timeoutMs: DELIVERY_TIMEOUT_MS },
+      { timeoutMs: DELIVERY_WAIT_MS },
     );
     if (!ChannelDeliveryResultSchema.safeParse(result).data?.ok) {
       log.error(
@@ -69,9 +79,16 @@ export async function deliverVerificationReply(
       );
     }
   } catch (err) {
-    log.error(
+    if (err instanceof IpcHandlerError) {
+      log.error(
+        { err, chatId: params.chatId },
+        "Verification reply delivery failed",
+      );
+      return;
+    }
+    log.warn(
       { err, chatId: params.chatId },
-      "Verification reply delivery did not complete",
+      "Verification reply outcome unknown: no answer from the daemon",
     );
   }
 }
