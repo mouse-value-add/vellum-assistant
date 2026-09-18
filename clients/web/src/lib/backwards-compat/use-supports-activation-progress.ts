@@ -13,14 +13,13 @@
  * sync tag.
  *
  * MIN_VERSION invariant: a dev floor rather than a release number, per
- * `docs/BACKWARDS_COMPAT.md`. The routes reached `main` while it carried the
- * 0.11.10 base, after the 0.12.0 release branch had been cut, and 0.12.1 was
- * patched from that same branch, so neither release carries them and 0.12.2
- * is the first that does. The floor names the commit that moved `main` to
- * the 0.12.1 base (`5e16607`): dev and local pre-releases compare AHEAD of
- * the stable release with the same base and order by their stamp, so every
- * `main` build from that minute on passes, released 0.12.0 and 0.12.1 do
- * not, and 0.12.2 and later pass on the base comparison alone.
+ * `docs/BACKWARDS_COMPAT.md`. Released 0.12.0 and 0.12.1 do not carry the
+ * routes; 0.12.2 is the first release that does, and so does every `main`
+ * build on the 0.12.1 base. The floor names the first minute of that base
+ * (`5e16607`): dev and local pre-releases compare AHEAD of the stable release
+ * with the same base and order by their stamp, so `main` builds from that
+ * minute on pass, both route-less releases do not, and 0.12.2 and later pass
+ * on the base comparison alone.
  *
  * Scoped to the active assistant via `useAssistantScopedSupports` (see its
  * JSDoc in `./utils.ts`). Switching from a new assistant to an older one
