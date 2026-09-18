@@ -305,6 +305,51 @@ const validResponse = {
   scopeOptions: [{ pattern: "git push --force", label: "git push --force" }],
 };
 
+describe("whether a failed call reached the daemon", () => {
+  // A caller may only repeat a call the daemon provably never saw; anything
+  // that reached the socket may already have had its effect.
+
+  async function transportFailure(
+    call: Promise<unknown>,
+  ): Promise<IpcTransportError> {
+    try {
+      await call;
+    } catch (err) {
+      if (err instanceof IpcTransportError) {
+        return err;
+      }
+      throw err;
+    }
+    throw new Error("expected the call to fail");
+  }
+
+  test("a socket that does not exist: the request was never written", async () => {
+    setupWorkspace();
+    const err = await transportFailure(ipcCallAssistant("test_method"));
+    expect(err.requestWritten).toBe(false);
+  });
+
+  test("a daemon that never answers: the request was written", async () => {
+    const sockPath = setupWorkspace();
+    await startServer(sockPath, () => {});
+
+    const err = await transportFailure(
+      ipcCallAssistant("test_method", undefined, { timeoutMs: 50 }),
+    );
+    expect(err.requestWritten).toBe(true);
+  });
+
+  test("a daemon that hangs up after reading the request: the request was written", async () => {
+    const sockPath = setupWorkspace();
+    await startServer(sockPath, (_id, _method, _params, socket) => {
+      socket.destroy();
+    });
+
+    const err = await transportFailure(ipcCallAssistant("test_method"));
+    expect(err.requestWritten).toBe(true);
+  });
+});
+
 describe("ipcSuggestTrustRule", () => {
   test("returns typed response when server returns a valid object", async () => {
     const sockPath = setupWorkspace();

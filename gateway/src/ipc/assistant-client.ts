@@ -86,9 +86,19 @@ export class IpcHandlerError extends Error {
  * (socket error, timeout, closed before response).
  */
 export class IpcTransportError extends Error {
-  constructor(message: string) {
+  /**
+   * Whether the request reached the socket before the call failed. False
+   * only when the connection never opened (no socket, refused, a connect
+   * that timed out), which is the one case where the daemon provably never
+   * saw the request. Defaults to true, the reading a caller that cannot
+   * tell has to take.
+   */
+  readonly requestWritten: boolean;
+
+  constructor(message: string, opts?: { requestWritten?: boolean }) {
     super(message);
     this.name = "IpcTransportError";
+    this.requestWritten = opts?.requestWritten ?? true;
   }
 }
 
@@ -144,6 +154,9 @@ export async function ipcCallAssistantRaw(
 
   return new Promise<IpcCallResult>((resolve, reject) => {
     let settled = false;
+    let requestWritten = false;
+    const transportError = (message: string) =>
+      new IpcTransportError(message, { requestWritten });
 
     const finish = (value?: IpcCallResult, error?: Error) => {
       if (settled) return;
@@ -161,16 +174,14 @@ export async function ipcCallAssistantRaw(
     const connectTimer = setTimeout(() => {
       finish(
         undefined,
-        new IpcTransportError(
-          `Connect timed out after ${CONNECT_TIMEOUT_MS}ms`,
-        ),
+        transportError(`Connect timed out after ${CONNECT_TIMEOUT_MS}ms`),
       );
     }, CONNECT_TIMEOUT_MS);
 
     const callTimer = setTimeout(() => {
       finish(
         undefined,
-        new IpcTransportError(`Call timed out after ${callTimeoutMs}ms`),
+        transportError(`Call timed out after ${callTimeoutMs}ms`),
       );
     }, callTimeoutMs);
 
@@ -197,7 +208,7 @@ export async function ipcCallAssistantRaw(
                 envelope.statusCode,
                 envelope.errorCode ?? "UNKNOWN",
               )
-            : new IpcTransportError(envelope.error),
+            : transportError(envelope.error),
         );
         return;
       }
@@ -208,7 +219,7 @@ export async function ipcCallAssistantRaw(
       (envelope, binary) => settleEnvelope(envelope as IpcResponse, binary),
       // A malformed frame is unrecoverable for a one-shot call: the stream
       // position is lost, so fail rather than wait out the timeout.
-      (err) => finish(undefined, new IpcTransportError(err.message)),
+      (err) => finish(undefined, transportError(err.message)),
       {
         onStreamStart: (envelope) => {
           streamEnvelope = envelope;
@@ -240,6 +251,7 @@ export async function ipcCallAssistantRaw(
       } else if (opts?.headers) {
         envelope.headers = opts.headers;
       }
+      requestWritten = true;
       writeMessage(socket, envelope, opts?.binary);
 
       socket.on("data", (chunk) => {
@@ -250,16 +262,13 @@ export async function ipcCallAssistantRaw(
     socket.on("error", (err) => {
       finish(
         undefined,
-        new IpcTransportError(err instanceof Error ? err.message : String(err)),
+        transportError(err instanceof Error ? err.message : String(err)),
       );
     });
 
     socket.on("close", () => {
       if (!settled) {
-        finish(
-          undefined,
-          new IpcTransportError("Socket closed before response"),
-        );
+        finish(undefined, transportError("Socket closed before response"));
       }
     });
   });

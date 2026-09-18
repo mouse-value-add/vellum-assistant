@@ -31,6 +31,7 @@
 import { createServer, type Server, type Socket } from "node:net";
 
 import {
+  DB_MIGRATIONS_UNAVAILABLE_ERROR_CODE,
   ensureSocketDir,
   type IpcEnvelope,
   IpcFrameReader,
@@ -492,7 +493,7 @@ export class AssistantIpcServer {
       id,
       error: `Database migrations ${readiness.state}; IPC method '${method}' is temporarily unavailable`,
       statusCode: 503,
-      errorCode: "DB_MIGRATIONS_UNAVAILABLE",
+      errorCode: DB_MIGRATIONS_UNAVAILABLE_ERROR_CODE,
       errorDetails: readiness,
     };
   }
