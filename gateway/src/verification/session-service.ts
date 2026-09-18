@@ -47,7 +47,6 @@ import {
   createOutboundSession as storeCreateOutboundSession,
   findActiveSession,
   findPendingSessionByHash,
-  updateSessionStatus,
 } from "../db/session-store.js";
 import { getLogger } from "../logger.js";
 import {
@@ -56,14 +55,21 @@ import {
   resolveCanonicalPrincipal,
   revokeExistingChannelGuardian,
 } from "./binding-helpers.js";
-import { gatewayChannelStatus } from "./contact-helpers.js";
+import {
+  gatewayChannelStatus,
+  mirrorCommittedGrant,
+  readMirrorChannelSoftly,
+} from "./contact-helpers.js";
 import { checkIdentityMatch } from "./identity-match.js";
 import {
   isRateLimited,
   recordInvalidAttempt,
   resetRateLimit,
 } from "./rate-limit-helpers.js";
-import { applyTrustedContactSideEffects } from "./text-verification.js";
+import {
+  applyTrustedContactGrantWrites,
+  verifiedDisplayName,
+} from "./text-verification.js";
 
 const log = getLogger("verification-session-service");
 
@@ -271,11 +277,12 @@ const CONSUME_FAILURE: ValidateConsumeSessionResult = {
  *   code stays redeemable — no spent-code-without-binding state can exist.
  *   A blocked authoritative gateway row still rejects the verification with
  *   the code spent (mirrors the text guardian path).
- * - trusted_contact purpose: upsert the verified contact channel; a
- *   blocked/revoked authoritative gateway row rejects the verification even
- *   though the code matched (mirrors text-verification). The upsert spans
- *   assistant-IPC IO so it cannot share the consume's transaction; a thrown
- *   side effect instead restores the session for retry.
+ * - trusted_contact purpose: consume + verified-channel grant commit in ONE
+ *   gateway transaction, the same grant text-verification applies. The
+ *   assistant mirror is read before and updated after, both softly, so a
+ *   daemon that cannot answer never splits the consume from the grant. A
+ *   blocked/revoked authoritative gateway row rejects the verification with
+ *   the code spent; a thrown write rolls the consume back.
  *
  * On failure the invalid-attempt counter is incremented; after exceeding the
  * threshold the actor is locked out for a cooldown. Success resets it.
@@ -380,6 +387,49 @@ export async function validateAndConsumeSession(
     return { success: true, verificationType: session.verificationPurpose };
   }
 
+  if (session.verificationPurpose === "trusted_contact") {
+    const mirror = await readMirrorChannelSoftly(channel, actorExternalUserId);
+    const txn = getGatewayDb().transaction(() => {
+      const consume = consumeSession(
+        session.id,
+        actorExternalUserId,
+        actorChatId,
+      );
+      if (!consume.consumed) return { consumed: false as const };
+      return {
+        consumed: true as const,
+        grant: applyTrustedContactGrantWrites({
+          sourceChannel: channel,
+          canonicalUserId: actorExternalUserId,
+          actorChatId,
+          displayName: verifiedDisplayName(mirror, {
+            canonicalUserId: actorExternalUserId,
+          }),
+          mirror,
+        }),
+      };
+    });
+    if (!txn.consumed) {
+      log.warn(
+        { sessionId: session.id },
+        "Session already consumed by concurrent request",
+      );
+      return CONSUME_FAILURE;
+    }
+
+    await resetRateLimit(channel, actorExternalUserId, actorChatId);
+
+    if (!txn.grant) {
+      log.warn(
+        { channel, actorExternalUserId },
+        "Trusted-contact verification rejected: gateway channel is blocked/revoked",
+      );
+      return CONSUME_FAILURE;
+    }
+    await mirrorCommittedGrant(txn.grant.postCommit);
+    return { success: true, verificationType: session.verificationPurpose };
+  }
+
   // Status-guarded atomic consume: a non-consumed return means a concurrent
   // consumer already won, so this attempt fails (one-time-code semantics).
   const consumeResult = consumeSession(
@@ -396,38 +446,6 @@ export async function validateAndConsumeSession(
   }
 
   await resetRateLimit(channel, actorExternalUserId, actorChatId);
-
-  if (session.verificationPurpose === "trusted_contact") {
-    // Mirrors text-verification: a blocked/revoked authoritative gateway row
-    // rejects the verification — the actor must not regain trusted status
-    // even though the code matched and the session is consumed.
-    let verified: boolean;
-    try {
-      verified = await applyTrustedContactSideEffects({
-        sourceChannel: channel,
-        canonicalUserId: actorExternalUserId,
-        actorChatId,
-      });
-    } catch (err) {
-      // The upsert spans assistant-IPC IO, so it cannot share the consume's
-      // transaction. Compensate: restore the session's pre-consume status so
-      // a transient side-effect failure never strands a spent code without
-      // its channel upsert (the retry re-runs the idempotent upsert).
-      updateSessionStatus(session.id, session.status);
-      log.warn(
-        { err, sessionId: session.id },
-        "Trusted-contact side effect failed; session restored for retry",
-      );
-      throw err;
-    }
-    if (!verified) {
-      log.warn(
-        { channel, actorExternalUserId },
-        "Trusted-contact verification rejected: gateway channel is blocked/revoked",
-      );
-      return CONSUME_FAILURE;
-    }
-  }
 
   return { success: true, verificationType: session.verificationPurpose };
 }

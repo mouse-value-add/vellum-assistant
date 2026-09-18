@@ -105,22 +105,10 @@ export function composeVerificationFailureReply(reason?: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * A reply that announces a grant, to be recorded in the grant's own
- * transaction: pass `withinCommit` to the grant's write, then hand `id` to
- * {@link deliverOwedReply} once the grant has committed.
- */
-export function replyOwedWithGrant(reply: GatewayReplyRequest): {
-  id: string;
-  withinCommit: () => void;
-} {
-  const id = newOwedReplyId();
-  return { id, withinCommit: () => recordOwedReply(id, reply) };
-}
-
-/**
  * Owe a reply that announces no grant (a failure, an already-member notice)
- * and try it at once. A reply that announces a grant goes through
- * {@link replyOwedWithGrant} instead.
+ * and try it at once. A reply that announces a grant is recorded with
+ * `recordOwedReply` inside the grant's own transaction instead, then handed
+ * to {@link deliverOwedReply}.
  *
  * Never throws: the code or invite is already consumed when this runs, and a
  * failure that propagated would error the webhook and let the provider retry

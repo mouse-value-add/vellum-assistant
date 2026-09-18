@@ -30,7 +30,7 @@ import {
   test,
 } from "bun:test";
 import { Database } from "bun:sqlite";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import "./test-preload.js";
 
@@ -211,6 +211,19 @@ function activeGuardianPhoneBindings(): { address: string }[] {
   return guardianPhoneBindings()
     .filter((b) => b.status === "active")
     .map((b) => ({ address: b.address }));
+}
+
+function phoneChannel() {
+  return getGatewayDb()
+    .select()
+    .from(contactChannels)
+    .where(
+      and(
+        eq(contactChannels.type, "phone"),
+        eq(contactChannels.address, PHONE),
+      ),
+    )
+    .get();
 }
 
 function sessionRow(id: string) {
@@ -718,23 +731,45 @@ describe("trusted-contact consume — verified channel upsert", () => {
     expect(rows[0].status).toBe("active");
   });
 
-  test("side-effect failure restores the session: the code stays redeemable", async () => {
+  test("a daemon that cannot answer does not stop the grant", async () => {
     const { sessionId, secret } = createPhoneTrustedContactSession();
-
-    // Induce an assistant-IPC failure in the upsert's decision path (the
-    // trusted-contact side effect spans real IO, so it compensates by
-    // restoring the session instead of sharing the consume's transaction).
     lookupContactChannelIdentityImpl = async () => {
       throw new Error("assistant IPC unavailable");
     };
-    await expect(
-      validateAndConsumeSession("phone", secret, PHONE, PHONE),
-    ).rejects.toThrow("assistant IPC unavailable");
+
+    const result = await validateAndConsumeSession(
+      "phone",
+      secret,
+      PHONE,
+      PHONE,
+    );
     lookupContactChannelIdentityImpl = async () => null;
 
-    expect(sessionRow(sessionId)?.status).toBe("awaiting_response");
+    expect(result).toEqual({
+      success: true,
+      verificationType: "trusted_contact",
+    });
+    expect(sessionRow(sessionId)?.status).toBe("consumed");
+    expect(phoneChannel()?.status).toBe("active");
+  });
 
-    // After recovery the same code redeems normally.
+  test("a gateway write that fails rolls the consume back: the code stays redeemable", async () => {
+    const { sessionId, secret } = createPhoneTrustedContactSession();
+    const db = getGatewayDb();
+    db.run(
+      sql`CREATE TRIGGER fail_channel_inserts BEFORE INSERT ON contact_channels BEGIN SELECT RAISE(ABORT, 'gateway write failed'); END`,
+    );
+    try {
+      await expect(
+        validateAndConsumeSession("phone", secret, PHONE, PHONE),
+      ).rejects.toThrow("gateway write failed");
+    } finally {
+      db.run(sql`DROP TRIGGER fail_channel_inserts`);
+    }
+
+    expect(sessionRow(sessionId)?.status).toBe("awaiting_response");
+    expect(phoneChannel()).toBeUndefined();
+
     const retry = await validateAndConsumeSession(
       "phone",
       secret,
@@ -746,17 +781,7 @@ describe("trusted-contact consume — verified channel upsert", () => {
       verificationType: "trusted_contact",
     });
     expect(sessionRow(sessionId)?.status).toBe("consumed");
-    const channel = getGatewayDb()
-      .select()
-      .from(contactChannels)
-      .where(
-        and(
-          eq(contactChannels.type, "phone"),
-          eq(contactChannels.address, PHONE),
-        ),
-      )
-      .get();
-    expect(channel?.status).toBe("active");
+    expect(phoneChannel()?.status).toBe("active");
   });
 
   test("blocked actor: correct code fails closed, channel stays blocked", async () => {

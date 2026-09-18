@@ -72,6 +72,49 @@ export async function findContactChannelByAddress(
   };
 }
 
+/**
+ * The assistant mirror's view of a channel, read before a grant commits.
+ * Soft: the mirror carries identity and display name only, and the gateway's
+ * grant writes resolve the channel by logical key without it, so a daemon
+ * that is down, restarting, or migrating yields null instead of stopping the
+ * grant.
+ */
+export async function readMirrorChannelSoftly(
+  channelType: string,
+  address: string,
+): Promise<ContactChannelRow | null> {
+  try {
+    return await findContactChannelByAddress(
+      channelType,
+      canonicalizeInboundIdentity(channelType, address) ?? address,
+    );
+  } catch (err) {
+    log.warn(
+      { err, channelType },
+      "Assistant mirror lookup failed (soft); granting from the gateway alone",
+    );
+    return null;
+  }
+}
+
+/**
+ * Bring the assistant mirror up to a grant that has committed. Soft: the
+ * grant and the reply announcing it are already durable, and a throw here
+ * would fail the webhook into a provider retry of a code that is spent.
+ */
+export async function mirrorCommittedGrant(
+  postCommit: () => Promise<void>,
+): Promise<void> {
+  try {
+    await postCommit();
+  } catch (err) {
+    log.warn(
+      { err },
+      "Assistant mirror update failed (soft); the gateway grant stands",
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Gateway dual-write (verified outcome)
 // ---------------------------------------------------------------------------
@@ -797,12 +840,6 @@ export async function upsertVerifiedContactChannel(params: {
    * already-consumed invite to a non-intercepted path.
    */
   softMirrorFailures?: boolean;
-  /**
-   * Runs inside the transaction that commits the verified channel, and only
-   * when it does, so a caller's own write lands atomically with the grant. A
-   * throw rolls the grant back.
-   */
-  withinCommit?: () => void;
 }): Promise<{ verified: boolean }> {
   const { sourceChannel } = params;
   const mirrorSoft = params.softMirrorFailures === true;
@@ -841,22 +878,16 @@ export async function upsertVerifiedContactChannel(params: {
   // mirror only if the gateway accepted the write.
   let result: VerifiedChannelGatewayResult;
   try {
-    result = getGatewayDb().transaction(() => {
-      const writes = applyVerifiedChannelGatewayWrites({
-        sourceChannel,
-        externalUserId: params.externalUserId,
-        externalChatId: params.externalChatId,
-        displayName: params.displayName,
-        username: params.username,
-        verifiedVia: params.verifiedVia,
-        contactId: params.contactId,
-        allowRevokedReactivation: params.allowRevokedReactivation,
-        existingMirrorChannel: existing,
-      });
-      if (writes.verified) {
-        params.withinCommit?.();
-      }
-      return writes;
+    result = applyVerifiedChannelGatewayWrites({
+      sourceChannel,
+      externalUserId: params.externalUserId,
+      externalChatId: params.externalChatId,
+      displayName: params.displayName,
+      username: params.username,
+      verifiedVia: params.verifiedVia,
+      contactId: params.contactId,
+      allowRevokedReactivation: params.allowRevokedReactivation,
+      existingMirrorChannel: existing,
     });
   } catch (gwErr) {
     // The gateway DB is the source of truth and the assistant mirror carries

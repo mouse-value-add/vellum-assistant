@@ -9,15 +9,23 @@
  *   2. Check rate limits
  *   3. Hash + find matching session
  *   4. Verify identity binding (outbound sessions)
- *   5. Consume session (atomic status guard)
- *   6. Apply side effects (guardian binding OR trusted contact upsert)
- *   7. Deliver deterministic reply
+ *   5. Consume the session, apply its grant (guardian binding OR trusted
+ *      contact), and owe the reply, in one gateway transaction
+ *   6. Deliver deterministic reply
  *
  * The assistant NEVER sees verification code messages. Both success and
  * failure are short-circuited at the gateway.
  */
 
-import { createGuardianBinding } from "../auth/guardian-bootstrap.js";
+import {
+  applyGuardianBindingGatewayWrites,
+  mirrorGuardianBinding,
+} from "../auth/guardian-bootstrap.js";
+import { getGatewayDb } from "../db/connection.js";
+import {
+  newOwedReplyId,
+  recordOwedReply,
+} from "../db/gateway-reply-outbox-store.js";
 import {
   consumeSession,
   findPendingSessionByHash,
@@ -36,9 +44,12 @@ import {
   hashVerificationSecret,
 } from "./code-parsing.js";
 import {
-  findContactChannelByAddress,
+  applyVerifiedChannelGatewayWrites,
+  type ContactChannelRow,
   gatewayChannelStatus,
-  upsertVerifiedContactChannel,
+  mirrorCommittedGrant,
+  mirrorVerifiedChannel,
+  readMirrorChannelSoftly,
 } from "./contact-helpers.js";
 import { canonicalizeInboundIdentity } from "./identity.js";
 import { checkIdentityMatch } from "./identity-match.js";
@@ -51,7 +62,6 @@ import {
   composeVerificationFailureReply,
   composeVerificationSuccessReply,
   deliverOwedReply,
-  replyOwedWithGrant,
   sendGatewayReply,
 } from "./reply-delivery.js";
 
@@ -221,9 +231,58 @@ export async function tryTextVerificationIntercept(
     };
   }
 
-  // 6. Consume session (atomic — only the first consumer wins)
-  const { consumed } = consumeSession(session.id, canonicalUserId, actorChatId);
-  if (!consumed) {
+  const purpose: "guardian" | "trusted_contact" =
+    session.verificationPurpose === "trusted_contact"
+      ? "trusted_contact"
+      : "guardian";
+  const mirror = await readMirrorChannelSoftly(sourceChannel, canonicalUserId);
+  const grantParams: VerificationGrantParams = {
+    sourceChannel,
+    canonicalUserId,
+    actorChatId,
+    actorUsername,
+    displayName: verifiedDisplayName(mirror, {
+      canonicalUserId,
+      actorDisplayName,
+      actorUsername,
+    }),
+    mirror,
+  };
+  const owedReplyId = replyCallbackUrl ? newOwedReplyId() : undefined;
+
+  // 5. Consume the session and apply its grant in one gateway transaction,
+  //    with the success reply recorded as owed inside it: the consume is
+  //    status-guarded, so only the first consumer wins; a grant never lands
+  //    without the reply announcing it; and a thrown write rolls the consume
+  //    back, so the code stays redeemable when the provider retries. A
+  //    blocked/revoked authoritative gateway row refuses the grant: the actor
+  //    must not regain trusted status nor see a success reply, and the code
+  //    is still spent.
+  const committed = getGatewayDb().transaction(() => {
+    const { consumed } = consumeSession(
+      session.id,
+      canonicalUserId,
+      actorChatId,
+    );
+    if (!consumed) {
+      return { consumed: false as const };
+    }
+    const grant =
+      purpose === "guardian"
+        ? applyGuardianGrantWrites(grantParams)
+        : applyTrustedContactGrantWrites(grantParams);
+    if (grant && replyCallbackUrl && owedReplyId) {
+      recordOwedReply(owedReplyId, {
+        callbackUrl: replyCallbackUrl,
+        chatId: actorChatId,
+        text: composeVerificationSuccessReply(grant.role),
+        assistantId,
+      });
+    }
+    return { consumed: true as const, grant };
+  });
+
+  if (!committed.consumed) {
     log.warn(
       { sessionId: session.id },
       "Session already consumed by concurrent request",
@@ -237,10 +296,7 @@ export async function tryTextVerificationIntercept(
     return {
       intercepted: true,
       outcome: "failed",
-      trustClass:
-        session.verificationPurpose === "trusted_contact"
-          ? "trusted_contact"
-          : "guardian",
+      trustClass: purpose,
       pendingReplyText,
     };
   }
@@ -248,48 +304,10 @@ export async function tryTextVerificationIntercept(
   // Reset rate limits on success
   await resetRateLimit(sourceChannel, canonicalUserId, actorChatId);
 
-  const trustClass: "guardian" | "trusted_contact" =
-    session.verificationPurpose === "trusted_contact"
-      ? "trusted_contact"
-      : "guardian";
-
-  // 7. Apply side effects. A blocked/revoked authoritative gateway row rejects
-  //    the verification: the actor must not regain trusted status nor see a
-  //    success reply, even though the code matched and the session consumed.
-  //    The success reply is recorded as owed in the transaction that commits
-  //    the grant, so the grant never lands without it.
-  const successReplyText = composeVerificationSuccessReply(trustClass);
-  const owedReply = replyCallbackUrl
-    ? replyOwedWithGrant({
-        callbackUrl: replyCallbackUrl,
-        chatId: actorChatId,
-        text: successReplyText,
-        assistantId,
-      })
-    : undefined;
-  const withinCommit = owedReply?.withinCommit;
-  const sideEffectsVerified =
-    trustClass === "guardian"
-      ? await applyGuardianSideEffects({
-          sourceChannel,
-          canonicalUserId,
-          actorChatId,
-          actorDisplayName,
-          actorUsername,
-          withinCommit,
-        })
-      : await applyTrustedContactSideEffects({
-          sourceChannel,
-          canonicalUserId,
-          actorChatId,
-          actorDisplayName,
-          actorUsername,
-          withinCommit,
-        });
-
-  if (!sideEffectsVerified) {
+  const { grant } = committed;
+  if (!grant) {
     log.warn(
-      { sourceChannel, actorExternalUserId: canonicalUserId, trustClass },
+      { sourceChannel, actorExternalUserId: canonicalUserId, purpose },
       "Verification rejected: authoritative gateway channel is blocked/revoked",
     );
     const pendingReplyText = await replyWithFailure(
@@ -301,24 +319,26 @@ export async function tryTextVerificationIntercept(
     return {
       intercepted: true,
       outcome: "failed",
-      trustClass,
+      trustClass: purpose,
       pendingReplyText,
     };
   }
 
-  // 8. Deliver success reply
+  await mirrorCommittedGrant(grant.postCommit);
+
+  // 6. Deliver success reply
   let pendingReplyText: string | undefined;
-  if (owedReply) {
-    await deliverOwedReply(owedReply.id);
+  if (owedReplyId) {
+    await deliverOwedReply(owedReplyId);
   } else {
-    pendingReplyText = successReplyText;
+    pendingReplyText = composeVerificationSuccessReply(grant.role);
   }
 
   log.info(
     {
       sourceChannel,
       actorExternalUserId: canonicalUserId,
-      trustClass,
+      trustClass: grant.role,
       sessionId: session.id,
     },
     "Text verification succeeded",
@@ -327,34 +347,93 @@ export async function tryTextVerificationIntercept(
   return {
     intercepted: true,
     outcome: "verified",
-    trustClass,
+    trustClass: grant.role,
     pendingReplyText,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Side effects
+// Grants
 // ---------------------------------------------------------------------------
 
-async function applyGuardianSideEffects(params: {
+/** What a consumed code granted, and the mirror update that follows it. */
+interface VerificationGrant {
+  role: "guardian" | "trusted_contact";
+  postCommit: () => Promise<void>;
+}
+
+/** The sender and chat a consumed code grants access to. */
+interface VerificationGrantParams {
   sourceChannel: string;
   canonicalUserId: string;
   actorChatId: string;
-  actorDisplayName?: string;
   actorUsername?: string;
-  /** Runs inside the transaction that commits the grant, if one commits. */
-  withinCommit?: () => void;
-}): Promise<boolean> {
-  const {
-    sourceChannel,
-    canonicalUserId,
-    actorChatId,
-    actorDisplayName,
-    actorUsername,
-    withinCommit,
-  } = params;
+  displayName: string;
+  /** The assistant mirror's view of the channel, read before the grant. */
+  mirror: ContactChannelRow | null;
+}
 
-  // Check for binding conflict — another user already holds guardian
+/**
+ * The name a verified sender is recorded under: the assistant mirror's
+ * curated name when the channel already has one, otherwise the platform's.
+ */
+export function verifiedDisplayName(
+  mirror: ContactChannelRow | null,
+  sender: {
+    canonicalUserId: string;
+    actorDisplayName?: string;
+    actorUsername?: string;
+  },
+): string {
+  return mirror?.displayName?.trim().length
+    ? mirror.displayName
+    : (sender.actorDisplayName ??
+        sender.actorUsername ??
+        sender.canonicalUserId);
+}
+
+/**
+ * Trusted-contact grant for a consumed code: the verified-channel gateway
+ * writes, composed inside the consume's transaction. Shared with the
+ * session service's validate+consume path so the write has exactly one
+ * implementation. Returns null when the authoritative gateway row is
+ * blocked or revoked.
+ */
+export function applyTrustedContactGrantWrites(
+  params: VerificationGrantParams,
+): VerificationGrant | null {
+  const result = applyVerifiedChannelGatewayWrites({
+    sourceChannel: params.sourceChannel,
+    externalUserId: params.canonicalUserId,
+    externalChatId: params.actorChatId,
+    displayName: params.displayName,
+    username: params.actorUsername,
+    existingMirrorChannel: params.mirror
+      ? {
+          channelId: params.mirror.channelId,
+          contactId: params.mirror.contactId,
+        }
+      : null,
+  });
+  if (!result.verified) {
+    return null;
+  }
+  return {
+    role: "trusted_contact",
+    postCommit: () => mirrorVerifiedChannel(result.mirror),
+  };
+}
+
+/**
+ * Guardian grant for a consumed code, composed inside the consume's
+ * transaction. When another sender already guards the channel, this sender
+ * becomes a trusted contact instead, and the grant says so.
+ */
+function applyGuardianGrantWrites(
+  params: VerificationGrantParams,
+): VerificationGrant | null {
+  const { sourceChannel, canonicalUserId } = params;
+
   const existing = getExistingGuardianBinding(sourceChannel);
   if (existing?.address && existing.address !== canonicalUserId) {
     log.warn(
@@ -365,106 +444,36 @@ async function applyGuardianSideEffects(params: {
       },
       "Guardian binding conflict: another user already holds this channel",
     );
-    // Still upsert the contact channel so the sender is a known contact,
-    // but skip guardian binding creation.
-    const { verified } = await upsertVerifiedContactChannel({
-      sourceChannel,
-      externalUserId: canonicalUserId,
-      externalChatId: actorChatId,
-      displayName: actorDisplayName,
-      username: actorUsername,
-      withinCommit,
-    });
-    return verified;
+    return applyTrustedContactGrantWrites(params);
   }
 
   // The gateway is the source of truth: a blocked/revoked gateway row rejects
   // the binding. Check BEFORE the same-user revoke below so a legitimately
   // re-verifying guardian (whose current row is active) isn't blocked by their
-  // own about-to-be-revoked row. createGuardianBinding writes "active"
-  // unconditionally, so this guard is the only thing stopping a blocked actor.
+  // own about-to-be-revoked row. The binding writes "active" unconditionally,
+  // so this guard is the only thing stopping a blocked actor.
   const gwStatus = gatewayChannelStatus(sourceChannel, canonicalUserId);
   if (gwStatus === "blocked" || gwStatus === "revoked") {
     log.warn(
       { sourceChannel, address: canonicalUserId, status: gwStatus },
       "Skipping guardian binding: authoritative gateway channel is blocked or revoked",
     );
-    return false;
+    return null;
   }
 
-  // Revoke existing binding (same-user re-verification)
+  // Same-user re-verification replaces the current binding; the revoke and
+  // the new binding commit together.
   revokeExistingChannelGuardian(sourceChannel);
-
-  // Resolve canonical principal — unify all channel bindings
-  const canonicalPrincipal = resolveCanonicalPrincipal(canonicalUserId);
-
-  // Determine display name — preserve existing if user is re-verifying
-  const existingContact = await findContactChannelByAddress(
-    sourceChannel,
-    canonicalUserId,
-  );
-  const displayName = existingContact?.displayName?.trim().length
-    ? existingContact.displayName
-    : (actorDisplayName ?? actorUsername ?? canonicalUserId);
-
-  // Create guardian binding (dual-writes to both DBs)
-  await createGuardianBinding(
-    {
-      channel: sourceChannel,
-      externalUserId: canonicalUserId,
-      deliveryChatId: actorChatId,
-      guardianPrincipalId: canonicalPrincipal,
-      displayName,
-      verifiedVia: "challenge",
-      reactivateRevoked: true,
-    },
-    { withinCommit },
-  );
-  return true;
-}
-
-/**
- * Trusted-contact side effect for a consumed verification session:
- * idempotent verified-channel upsert. Shared with the session service's
- * validate+consume path so the write has exactly one implementation.
- * Returns false when the authoritative gateway row is blocked/revoked.
- */
-export async function applyTrustedContactSideEffects(params: {
-  sourceChannel: string;
-  canonicalUserId: string;
-  actorChatId: string;
-  actorDisplayName?: string;
-  actorUsername?: string;
-  /** Runs inside the transaction that commits the grant, if one commits. */
-  withinCommit?: () => void;
-}): Promise<boolean> {
-  const {
-    sourceChannel,
-    canonicalUserId,
-    actorChatId,
-    actorDisplayName,
-    actorUsername,
-    withinCommit,
-  } = params;
-
-  // Preserve existing display name if available
-  const existingContact = await findContactChannelByAddress(
-    sourceChannel,
-    canonicalUserId,
-  );
-  const displayName = existingContact?.displayName?.trim().length
-    ? existingContact.displayName
-    : (actorDisplayName ?? actorUsername ?? canonicalUserId);
-
-  const { verified } = await upsertVerifiedContactChannel({
-    sourceChannel,
+  const writes = applyGuardianBindingGatewayWrites({
+    channel: sourceChannel,
     externalUserId: canonicalUserId,
-    externalChatId: actorChatId,
-    displayName,
-    username: actorUsername,
-    withinCommit,
+    deliveryChatId: params.actorChatId,
+    guardianPrincipalId: resolveCanonicalPrincipal(canonicalUserId),
+    displayName: params.displayName,
+    verifiedVia: "challenge",
+    reactivateRevoked: true,
   });
-  return verified;
+  return { role: "guardian", postCommit: () => mirrorGuardianBinding(writes) };
 }
 
 // ---------------------------------------------------------------------------

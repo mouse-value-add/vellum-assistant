@@ -648,11 +648,11 @@ describe("post-claim failure isolation", () => {
     expect(gwChannel("U_SENDER")?.status).toBe("active");
   });
 
-  test("gateway-side ACL upsert throw fails closed: no access, no redeemed reply, no mirror event", async () => {
+  test("a gateway write that fails rolls the claim back: no access, and the invite stays redeemable", async () => {
     seedContact("c1");
     const inviteId = seedInvite();
-    // Force a genuine gateway-side failure inside the ACL upsert while
-    // leaving reads (membership gate, claim) intact: abort channel writes.
+    // Force a genuine gateway-side failure inside the ACL write while
+    // leaving reads (membership gate) intact: abort channel writes.
     const db = getGatewayDb();
     db.run(
       sql`CREATE TRIGGER fail_channel_inserts BEFORE INSERT ON contact_channels BEGIN SELECT RAISE(ABORT, 'gateway write failed'); END`,
@@ -669,12 +669,17 @@ describe("post-claim failure isolation", () => {
       db.run(sql`DROP TRIGGER fail_channel_updates`);
     }
 
-    // The use is consumed (claim committed), but no channel was activated —
-    // telling the sender they're in would be wrong.
-    expect(result.status).toBe("failed");
-    expect(inviteRow(inviteId).useCount).toBe(1);
+    // The claim and the grant are one transaction: nothing committed, so the
+    // sender is told to try again rather than that the invite is dead.
+    expect(result).toMatchObject({ status: "failed", reason: "unavailable" });
+    expect(inviteRow(inviteId).useCount).toBe(0);
     expect(gwChannel("U_SENDER")).toBeUndefined();
     expect(inviteRedeemedEvents()).toHaveLength(0);
+
+    const retry = await redeemInviteByCode({ code: CODE, ...IDENTITY });
+    expect(retry.status).toBe("redeemed");
+    expect(inviteRow(inviteId).useCount).toBe(1);
+    expect(gwChannel("U_SENDER")?.status).toBe("active");
   });
 });
 

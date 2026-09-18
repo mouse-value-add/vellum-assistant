@@ -26,22 +26,27 @@ import {
   type TrustVerdict,
 } from "@vellumai/gateway-client";
 
+import { getGatewayDb } from "../db/connection.js";
 import { ContactStore, type IngressInviteRow } from "../db/contact-store.js";
+import {
+  newOwedReplyId,
+  recordOwedReply,
+} from "../db/gateway-reply-outbox-store.js";
 import { ipcCallAssistant } from "../ipc/assistant-client.js";
 import { getLogger } from "../logger.js";
 import { extractEmailReplyBody } from "./code-parsing.js";
 import {
-  upsertVerifiedContactChannel,
+  applyVerifiedChannelGatewayWrites,
   getGatewayChannelByExternalChatId,
   getGatewayChannelByKey,
+  mirrorCommittedGrant,
+  mirrorVerifiedChannel,
+  readMirrorChannelSoftly,
+  type VerifiedChannelMirrorPlan,
 } from "./contact-helpers.js";
 import { canonicalizeInboundIdentity } from "./identity.js";
 import { ensureInviteLive } from "./invite-liveness.js";
-import {
-  deliverOwedReply,
-  replyOwedWithGrant,
-  sendGatewayReply,
-} from "./reply-delivery.js";
+import { deliverOwedReply, sendGatewayReply } from "./reply-delivery.js";
 
 const log = getLogger("invite-redemption");
 
@@ -59,6 +64,7 @@ const INVITE_REPLY_TEMPLATES = {
   channel_mismatch: "This invite is not valid for this channel.",
   missing_identity:
     "Unable to process this invite. Please contact the person who shared it.",
+  unavailable: "Unable to process this invite right now. Please try again.",
 } as const;
 
 export type InviteRedemptionFailureReason = Exclude<
@@ -243,26 +249,6 @@ async function finishRedemption(
     return failed("invalid_token");
   }
 
-  // ── Atomic claim ──
-  // recordInviteRedemption gates on status="active", so only the first of two
-  // concurrent redeemers (or a redeemer racing a revoke) consumes the row.
-  const claim = store.recordInviteRedemption({
-    inviteId: invite.id,
-    redeemedByExternalUserId: externalUserId ?? null,
-    redeemedByExternalChatId: externalChatId ?? null,
-  });
-  if (!claim.updated) {
-    return failed("invalid_token");
-  }
-
-  // ── Commit point ──
-  // The claim above consumed the use; from here the redemption must never
-  // regress to a thrown engine error (the intercept would fall through and
-  // forward the raw code to the runtime on an already-consumed invite).
-  // Assistant-mirror failures are soft inside the helper; a gateway-side ACL
-  // failure yields the failed outcome (no access was granted, so a success
-  // reply would be wrong), and cosmetic lookups degrade without failing.
-
   // The target contact's curated displayName wins over the raw
   // transport-provided name.
   let displayName = params.displayName;
@@ -272,52 +258,79 @@ async function finishRedemption(
   } catch (err) {
     log.warn(
       { err, inviteId: invite.id },
-      "Invite redemption: target contact lookup failed post-claim",
+      "Invite redemption: target contact lookup failed",
     );
   }
 
-  // ── ACL side effect ──
-  // The same gateway store path the `upsert_verified_channel` IPC handler
-  // uses, with the same `allowRevokedReactivation` semantics the daemon's
-  // member-write-relay passes: an invite may reactivate a revoked member;
-  // blocked actors are still refused inside the helper.
   const address = externalUserId ?? externalChatId!;
-  const owedReply = replyTo
-    ? replyOwedWithGrant({ ...replyTo, text: INVITE_REPLY_TEMPLATES.redeemed })
-    : undefined;
-  let verified = false;
+  const mirror = await readMirrorChannelSoftly(sourceChannel, address);
+  const owedReplyId = replyTo ? newOwedReplyId() : undefined;
+
+  // ── Claim, grant, and reply: one gateway transaction ──
+  // The claim gates on status="active", so only the first of two concurrent
+  // redeemers (or a redeemer racing a revoke) consumes the row, and it runs
+  // first inside the transaction so that arbitration is unchanged. The ACL
+  // write is the one the `upsert_verified_channel` IPC handler makes, with
+  // the `allowRevokedReactivation` an invite carries: a revoked member may
+  // come back, a blocked one is refused. A refused grant still commits the
+  // claim, so a use is spent exactly as before; a thrown write rolls the
+  // claim back with everything else, leaving the invite redeemable.
+  let committed:
+    | { claimed: false }
+    | { claimed: true; plan: VerifiedChannelMirrorPlan | null };
   try {
-    ({ verified } = await upsertVerifiedContactChannel({
-      sourceChannel,
-      externalUserId: address,
-      externalChatId: externalChatId ?? address,
-      displayName,
-      username,
-      verifiedVia: "invite",
-      contactId: invite.contactId,
-      allowRevokedReactivation: true,
-      softMirrorFailures: true,
-      withinCommit: owedReply?.withinCommit,
-    }));
+    committed = getGatewayDb().transaction(() => {
+      const claim = store.recordInviteRedemption({
+        inviteId: invite.id,
+        redeemedByExternalUserId: externalUserId ?? null,
+        redeemedByExternalChatId: externalChatId ?? null,
+      });
+      if (!claim.updated) {
+        return { claimed: false as const };
+      }
+      const grant = applyVerifiedChannelGatewayWrites({
+        sourceChannel,
+        externalUserId: address,
+        externalChatId: externalChatId ?? address,
+        displayName,
+        username,
+        verifiedVia: "invite",
+        contactId: invite.contactId,
+        allowRevokedReactivation: true,
+        existingMirrorChannel: mirror
+          ? { channelId: mirror.channelId, contactId: mirror.contactId }
+          : null,
+      });
+      if (!grant.verified) {
+        return { claimed: true as const, plan: null };
+      }
+      if (replyTo && owedReplyId) {
+        recordOwedReply(owedReplyId, {
+          ...replyTo,
+          text: INVITE_REPLY_TEMPLATES.redeemed,
+        });
+      }
+      return { claimed: true as const, plan: grant.mirror };
+    });
   } catch (err) {
-    // Assistant-mirror failures are soft inside the helper, so a throw here
-    // is a gateway-side failure: no access was granted. Fail closed rather
-    // than telling the sender they're in.
     log.error(
       { err, sourceChannel, inviteId: invite.id },
-      "Invite redemption: ACL upsert threw post-claim; use already consumed — failing closed",
+      "Invite redemption: gateway write failed; nothing committed",
     );
+    return failed("unavailable");
   }
-  if (!verified) {
-    // The authoritative write was refused or failed (e.g. a block landed
-    // under the race). The claimed use is wasted — same semantics as the
-    // daemon engine.
+  if (!committed.claimed) {
+    return failed("invalid_token");
+  }
+  if (!committed.plan) {
     log.warn(
       { sourceChannel, inviteId: invite.id },
-      "Invite redemption: gateway channel upsert did not verify after claim",
+      "Invite redemption: gateway refused the channel after the claim",
     );
     return failed("invalid_token");
   }
+  const plan = committed.plan;
+  await mirrorCommittedGrant(() => mirrorVerifiedChannel(plan));
 
   const outcome: InviteRedemptionOutcome = {
     inviteId: invite.id,
@@ -337,7 +350,7 @@ async function finishRedemption(
     status: "redeemed",
     outcome,
     replyText: INVITE_REPLY_TEMPLATES.redeemed,
-    ...(owedReply ? { owedReplyId: owedReply.id } : {}),
+    ...(owedReplyId ? { owedReplyId } : {}),
   };
 }
 
