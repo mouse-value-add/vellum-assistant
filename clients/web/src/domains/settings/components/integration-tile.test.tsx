@@ -111,7 +111,7 @@ describe("IntegrationTile", () => {
       },
     });
 
-    openMenu("Try another way");
+    openMenu("Other ways to connect Notion");
     await screen.findByRole("menuitem", { name: "Notion MCP server" });
     await screen.findByRole("menuitem", { name: "Use your own OAuth app" });
     expect(
@@ -142,7 +142,7 @@ describe("IntegrationTile", () => {
     });
 
     expect(
-      screen.queryByRole("button", { name: "Try another way" }),
+      screen.queryByRole("button", { name: "Other ways to connect Notion" }),
     ).toBeNull();
   });
 
@@ -159,21 +159,65 @@ describe("IntegrationTile", () => {
     expect(handlers.onConnect).not.toHaveBeenCalled();
   });
 
-  test("offers to stop waiting only while there is something to stop", () => {
-    const cancellable = tile({
+  test("cancels from the action slot once the X is showing", () => {
+    tile({
       plan: notionPlan,
       state: { phase: "waiting", canCancel: true },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const cancel = screen.getByRole("button", {
+      name: "Cancel connecting Notion",
+    });
+    // A pointer arriving is what turns the spinner into an X, so the click
+    // that follows lands on a control the user has already been shown.
+    fireEvent.pointerEnter(cancel);
+    fireEvent.click(cancel);
     expect(handlers.onCancel).toHaveBeenCalledTimes(1);
+  });
 
-    cancellable.unmount();
+  test("never throws a sign-in away on a single unwarned press", () => {
     tile({
+      plan: notionPlan,
+      state: { phase: "waiting", canCancel: true },
+    });
+
+    // No hover ever arrived, which is every tap on a touch screen. The first
+    // press only reveals the X; the second is the one that means it.
+    const cancel = screen.getByRole("button", {
+      name: "Cancel connecting Notion",
+    });
+    fireEvent.click(cancel);
+    expect(handlers.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(cancel);
+    expect(handlers.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test("offers nothing to press while there is nothing to stop", () => {
+    const uncancellable = tile({
       plan: notionPlan,
       state: { phase: "waiting", canCancel: false },
     });
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    screen.getByText("Finish signing in to Notion in your browser.");
+
+    uncancellable.unmount();
+    tile({ plan: notionPlan, state: { phase: "connecting" } });
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    screen.getByText("Almost there. Waiting for Notion to become ready.");
+  });
+
+  test("says nothing in the tile body while an attempt is in flight", () => {
+    const { container } = tile({
+      plan: notionPlan,
+      state: { phase: "waiting", canCancel: true },
+    });
+
+    // The description is all the body ever holds, whatever the attempt is
+    // doing: anything else here would be a line the grid row has to grow for.
+    const description = container.querySelector("p.line-clamp-2");
+    expect(description?.textContent).toBe(notionPlan.description ?? "");
   });
 
   test("sends a failed MCP attempt to its setup guide and its alternatives", async () => {
@@ -189,13 +233,33 @@ describe("IntegrationTile", () => {
     });
 
     screen.getByText("Linear rejected the sign-in.");
-    fireEvent.click(screen.getByRole("button", { name: "Setup guide" }));
+    // Both of them behind the retry's chevron, where they cost the tile no
+    // height at all.
+    openMenu("Other ways to connect Linear");
+    await screen.findByRole("menuitem", { name: "Sign in through Vellum" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Setup guide" }));
     expect(handlers.onOpenSetupGuide).toHaveBeenCalledWith(
       "https://example.com/docs/linear-mcp",
     );
+  });
 
-    openMenu("Try another way");
-    await screen.findByRole("menuitem", { name: "Sign in through Vellum" });
+  test("spends the description's lines on the failure rather than new ones", () => {
+    const { container } = tile({
+      plan: googlePlan,
+      state: {
+        phase: "failed",
+        error: "Google did not return an account.",
+        methodId: googlePlan.primary.id,
+        methodKind: "managed-oauth",
+      },
+    });
+
+    // One clamped block in the body, holding the error instead of the
+    // description. Two blocks would be the row-stretching bug coming back.
+    const blocks = container.querySelectorAll("p.line-clamp-2");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.textContent).toBe("Google did not return an account.");
+    expect(screen.queryByText(googlePlan.description ?? "")).toBeNull();
   });
 
   test("says what went wrong in the words it was given", () => {
@@ -228,11 +292,11 @@ describe("IntegrationTile", () => {
       },
     });
 
-    // On screen in full, held to three lines, and reachable whole from the
-    // title for the rest.
+    // Held to the two lines the description had reserved, and reachable whole
+    // from the title for the rest.
     const message = screen.getByText(paragraph);
-    expect(message.className).toContain("line-clamp-3");
     expect(message.getAttribute("title")).toBe(paragraph);
+    expect(message.closest("p")?.className).toContain("line-clamp-2");
     expect(
       screen.queryByText("Sign-in to Google did not complete."),
     ).toBeNull();
@@ -262,9 +326,8 @@ describe("IntegrationTile", () => {
       },
     });
 
-    expect(screen.queryByRole("button", { name: "Setup guide" })).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "Try another way" }),
+      screen.queryByRole("button", { name: "Other ways to connect Google" }),
     ).toBeNull();
     fireEvent.click(
       screen.getByRole("button", { name: "Retry connecting Google" }),
