@@ -318,7 +318,7 @@ function ungroupedSql(alias = "conversations"): string {
  *   Background and Scheduled sidebar sections from one request.
  * - `"scheduled"` — scheduled rows only, so the Scheduled section can load
  *   independently of the broader background backlog without over-fetching it.
- * - `"all"` — the union of `"standard"` and `"background"`, so one paginated
+ * - `"all"`: the union of `"standard"` and `"background"`, so one paginated
  *   request covers a user's whole history instead of interleaving three. Not
  *   a bypass of the visibility rules: it is exactly those two predicates
  *   OR-ed, with the legacy `private` type excluded on top, so nothing reaches

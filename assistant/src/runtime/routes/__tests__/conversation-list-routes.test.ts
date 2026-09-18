@@ -1303,7 +1303,7 @@ describe("GET /v1/conversations/sections", () => {
   });
 });
 
-describe("GET /v1/conversations — conversationType=all", () => {
+describe("GET /v1/conversations, conversationType=all", () => {
   beforeEach(() => {
     clearConversations();
   });
