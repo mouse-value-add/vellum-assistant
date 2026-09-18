@@ -159,6 +159,7 @@ function FieldValue({
             <DataTable
               {...tableProps(field)}
               copyable={false}
+              label={field.label}
               renderCell={(text) => <CellText>{text}</CellText>}
             />
           </ClampedContent>
