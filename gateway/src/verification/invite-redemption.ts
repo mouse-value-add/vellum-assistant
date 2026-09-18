@@ -14,6 +14,7 @@
  */
 
 import {
+  type GatewayReplyRequest,
   hashInviteCode,
   hashInviteToken,
   isInviteCodeRedemptionEnabled,
@@ -36,7 +37,11 @@ import {
 } from "./contact-helpers.js";
 import { canonicalizeInboundIdentity } from "./identity.js";
 import { ensureInviteLive } from "./invite-liveness.js";
-import { deliverVerificationReply } from "./reply-delivery.js";
+import {
+  deliverOwedReply,
+  replyOwedWithGrant,
+  sendGatewayReply,
+} from "./reply-delivery.js";
 
 const log = getLogger("invite-redemption");
 
@@ -70,6 +75,11 @@ export type InviteRedemptionEngineResult =
       status: "redeemed" | "already_member";
       outcome: InviteRedemptionOutcome;
       replyText: string;
+      /**
+       * The reply recorded as owed in the grant's own transaction, when the
+       * caller named where to send it and access was granted.
+       */
+      owedReplyId?: string;
     }
   | {
       status: "failed";
@@ -96,6 +106,11 @@ interface RedeemIdentityParams {
   externalChatId?: string;
   displayName?: string;
   username?: string;
+  /**
+   * Where the sender's reply goes. When set, a redemption that grants access
+   * records its reply as owed in the same transaction as the grant.
+   */
+  replyTo?: Omit<GatewayReplyRequest, "text">;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +124,8 @@ interface RedeemIdentityParams {
  * `no_match` so a bare 6-digit message can fall through as normal content.
  */
 export async function redeemInviteByCode(
-  params: RedeemInviteByCodeRequest & { store?: ContactStore },
+  params: RedeemInviteByCodeRequest &
+    Pick<RedeemIdentityParams, "replyTo"> & { store?: ContactStore },
 ): Promise<InviteRedemptionEngineResult> {
   const store = params.store ?? new ContactStore();
   if (!params.externalUserId && !params.externalChatId) {
@@ -134,7 +150,8 @@ export async function redeemInviteByCode(
  * invalid invite — never a fall-through.
  */
 export async function redeemInviteByToken(
-  params: RedeemInviteByTokenRequest & { store?: ContactStore },
+  params: RedeemInviteByTokenRequest &
+    Pick<RedeemIdentityParams, "replyTo"> & { store?: ContactStore },
 ): Promise<InviteRedemptionEngineResult> {
   const store = params.store ?? new ContactStore();
   if (!params.externalUserId && !params.externalChatId) {
@@ -165,7 +182,8 @@ async function finishRedemption(
   invite: IngressInviteRow,
   params: RedeemIdentityParams,
 ): Promise<InviteRedemptionEngineResult> {
-  const { sourceChannel, externalUserId, externalChatId, username } = params;
+  const { sourceChannel, externalUserId, externalChatId, username, replyTo } =
+    params;
 
   const liveness = ensureInviteLive(store, invite);
   if (!liveness.live) {
@@ -264,6 +282,9 @@ async function finishRedemption(
   // member-write-relay passes: an invite may reactivate a revoked member;
   // blocked actors are still refused inside the helper.
   const address = externalUserId ?? externalChatId!;
+  const owedReply = replyTo
+    ? replyOwedWithGrant({ ...replyTo, text: INVITE_REPLY_TEMPLATES.redeemed })
+    : undefined;
   let verified = false;
   try {
     ({ verified } = await upsertVerifiedContactChannel({
@@ -276,6 +297,7 @@ async function finishRedemption(
       contactId: invite.contactId,
       allowRevokedReactivation: true,
       softMirrorFailures: true,
+      withinCommit: owedReply?.withinCommit,
     }));
   } catch (err) {
     // Assistant-mirror failures are soft inside the helper, so a throw here
@@ -315,6 +337,7 @@ async function finishRedemption(
     status: "redeemed",
     outcome,
     replyText: INVITE_REPLY_TEMPLATES.redeemed,
+    ...(owedReply ? { owedReplyId: owedReply.id } : {}),
   };
 }
 
@@ -564,6 +587,10 @@ export async function tryInviteRedemptionIntercept(
     return { intercepted: false };
   }
 
+  const replyTo = replyCallbackUrl
+    ? { callbackUrl: replyCallbackUrl, chatId: actorChatId, assistantId }
+    : undefined;
+
   let result: InviteRedemptionEngineResult;
   try {
     result = token
@@ -574,6 +601,7 @@ export async function tryInviteRedemptionIntercept(
           externalChatId: actorChatId,
           displayName: actorDisplayName,
           username: actorUsername,
+          replyTo,
         })
       : await redeemInviteByCode({
           code: trimmed,
@@ -582,6 +610,7 @@ export async function tryInviteRedemptionIntercept(
           externalChatId: actorChatId,
           displayName: actorDisplayName,
           username: actorUsername,
+          replyTo,
         });
   } catch (err) {
     // Fail-soft: fall through to normal forwarding rather than dropping the
@@ -610,13 +639,12 @@ export async function tryInviteRedemptionIntercept(
   );
 
   let pendingReplyText: string | undefined;
-  if (replyCallbackUrl) {
-    await deliverVerificationReply({
-      callbackUrl: replyCallbackUrl,
-      chatId: actorChatId,
-      text: result.replyText,
-      assistantId,
-    });
+  const owedReplyId =
+    result.status === "failed" ? undefined : result.owedReplyId;
+  if (owedReplyId) {
+    await deliverOwedReply(owedReplyId);
+  } else if (replyTo) {
+    await sendGatewayReply({ ...replyTo, text: result.replyText });
   } else {
     pendingReplyText = result.replyText;
   }

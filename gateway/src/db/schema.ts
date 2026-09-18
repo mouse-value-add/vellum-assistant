@@ -797,3 +797,34 @@ export const inboundSeenEvents = sqliteTable(
     index("idx_inbound_seen_events_expires_at").on(table.expiresAt),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Gateway reply outbox
+// ---------------------------------------------------------------------------
+
+/**
+ * Replies the gateway owes for messages it answered at ingress (an invite
+ * redemption, a verification code), each until it is settled.
+ *
+ * A reply that grants access is written in the same transaction as the grant,
+ * so a committed grant never exists without the reply that tells the person.
+ * Delivery goes through the daemon, which may be restarting or migrating when
+ * the grant commits; a row stays here until its delivery settles one way or
+ * the other (see `verification/reply-delivery.ts`), and is deleted then.
+ */
+export const gatewayReplyOutbox = sqliteTable("gateway_reply_outbox", {
+  id: text("id").primaryKey(),
+  // The `GatewayReplyRequest` handed to the daemon's `deliver_gateway_reply`.
+  callbackUrl: text("callback_url").notNull(),
+  chatId: text("chat_id").notNull(),
+  text: text("text").notNull(),
+  assistantId: text("assistant_id"),
+  // `pending` while owed and not being sent; `sending` while one delivery
+  // attempt holds it. A `sending` row whose attempt outlived its bound was
+  // abandoned by a gateway that stopped mid-send, and may have been sent.
+  state: text("state").$type<"pending" | "sending">().notNull(),
+  createdAt: integer("created_at").notNull(),
+  // Past this, the reply is stale and is dropped rather than sent.
+  expiresAt: integer("expires_at").notNull(),
+  attemptStartedAt: integer("attempt_started_at"),
+});

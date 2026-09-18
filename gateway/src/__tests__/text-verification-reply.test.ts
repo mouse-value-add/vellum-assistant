@@ -23,6 +23,9 @@ import {
 } from "@vellumai/gateway-client";
 
 let ipcCalls: { method: string; params?: Record<string, unknown> }[] = [];
+// Models a daemon that went away after answering the grant's mirror reads
+// and before the reply: its socket refuses the reply unsent.
+let replySocketRefused = false;
 
 // Spread the actual module so untouched exports stay importable by
 // later-loaded files when suites share a bun process.
@@ -33,6 +36,14 @@ mock.module("../ipc/assistant-client.js", () => ({
     method: string,
     params?: Record<string, unknown>,
   ) => {
+    if (replySocketRefused && method === DELIVER_GATEWAY_REPLY_IPC_METHOD) {
+      throw new actualAssistantClient.IpcTransportError(
+        "connect ECONNREFUSED",
+        {
+          requestWritten: false,
+        },
+      );
+    }
     ipcCalls.push({ method, params });
     return { ok: true, messageIds: ["1"] };
   },
@@ -41,10 +52,12 @@ mock.module("../ipc/assistant-client.js", () => ({
 await import("./test-preload.js");
 const { getGatewayDb, initGatewayDb, resetGatewayDb } =
   await import("../db/connection.js");
-const { channelVerificationSessions } = await import("../db/schema.js");
+const { channelVerificationSessions, contactChannels, gatewayReplyOutbox } =
+  await import("../db/schema.js");
 const { createOutboundSession } = await import("../db/session-store.js");
 const { tryTextVerificationIntercept } =
   await import("../verification/text-verification.js");
+const { sweepOwedReplies } = await import("../verification/reply-delivery.js");
 
 const CHANNEL = "telegram";
 const ACTOR = "777000";
@@ -77,7 +90,10 @@ beforeAll(async () => {
 
 beforeEach(() => {
   ipcCalls = [];
+  replySocketRefused = false;
   getGatewayDb().delete(channelVerificationSessions).run();
+  getGatewayDb().delete(contactChannels).run();
+  getGatewayDb().delete(gatewayReplyOutbox).run();
   createOutboundSession({
     id: "session-1",
     channel: CHANNEL,
@@ -127,5 +143,34 @@ describe("text verification reply", () => {
     });
     expect(String(replies()[0]!.text)).toContain("direct message");
     expect(String(replies()[0]!.text)).not.toContain(CODE);
+  });
+
+  test("a verified contact whose reply the daemon could not take is told once it can", async () => {
+    replySocketRefused = true;
+
+    const result = await tryTextVerificationIntercept(
+      interceptParams({ isDirectMessage: true }),
+    );
+
+    expect(result).toMatchObject({ intercepted: true, outcome: "verified" });
+    const channel = getGatewayDb()
+      .select()
+      .from(contactChannels)
+      .all()
+      .find((c) => c.address === ACTOR);
+    expect(channel?.status).toBe("active");
+    expect(replies()).toHaveLength(0);
+
+    replySocketRefused = false;
+    await sweepOwedReplies();
+
+    expect(replies()).toEqual([
+      {
+        callbackUrl: REPLY_URL,
+        chatId: ACTOR,
+        text: "Verification successful! You can now message the assistant.",
+        assistantId: "self",
+      },
+    ]);
   });
 });

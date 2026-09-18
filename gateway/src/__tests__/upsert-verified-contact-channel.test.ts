@@ -76,6 +76,9 @@ let gwWriteThrows = false;
 
 mock.module("../db/connection.js", () => ({
   getGatewayDb: () => ({
+    // The verified-channel writes commit in one transaction; the fake runs
+    // the callback, since it records calls rather than modelling rollback.
+    transaction: <T>(fn: () => T): T => fn(),
     select: () => ({
       from: () => ({
         where: () => ({

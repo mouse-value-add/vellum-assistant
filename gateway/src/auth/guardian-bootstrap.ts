@@ -557,10 +557,19 @@ export async function mirrorGuardianBinding(
  */
 export async function createGuardianBinding(
   params: CreateGuardianBindingParams,
+  options?: {
+    /**
+     * Runs inside the transaction that commits the binding, so a caller's
+     * own write lands atomically with it. A throw rolls the binding back.
+     */
+    withinCommit?: () => void;
+  },
 ): Promise<CreateGuardianBindingResult> {
-  const writes = getGatewayDb().transaction(() =>
-    applyGuardianBindingGatewayWrites(params),
-  );
+  const writes = getGatewayDb().transaction(() => {
+    const committed = applyGuardianBindingGatewayWrites(params);
+    options?.withinCommit?.();
+    return committed;
+  });
 
   await mirrorGuardianBinding(writes);
 

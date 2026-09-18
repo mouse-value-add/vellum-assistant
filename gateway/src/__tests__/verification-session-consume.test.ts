@@ -68,12 +68,13 @@ mock.module("../db/assistant-db-proxy.js", () => ({
 // Identity-mirror IPC — recorded and acked; the gateway DB stays the ACL
 // source of truth in these tests.
 const mirrorCalls: { method: string; params: unknown }[] = [];
+const actualAssistantClient = await import("../ipc/assistant-client.js");
 mock.module("../ipc/assistant-client.js", () => ({
+  ...actualAssistantClient,
   ipcCallAssistant: async (method: string, params: unknown) => {
     mirrorCalls.push({ method, params });
     return {};
   },
-  IpcHandlerError: class IpcHandlerError extends Error {},
 }));
 
 // Contact-info reads (daemon-backed) — no known contacts by default; the

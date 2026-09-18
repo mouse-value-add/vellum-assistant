@@ -269,6 +269,10 @@ import { cleanupExpiredInboundEvents } from "./db/inbound-dedup-store.js";
 import { onWebhookIngressRoutesChanged } from "./db/webhook-ingress-route-store.js";
 import { runPostAssistantReady } from "./post-assistant-ready.js";
 import {
+  OWED_REPLY_SWEEP_INTERVAL_MS,
+  sweepOwedReplies,
+} from "./verification/reply-delivery.js";
+import {
   clearManagedPublicBaseUrl,
   createVelayTunnelClient,
   enablePublicIngress,
@@ -2447,6 +2451,12 @@ async function main() {
     }
   }, INBOUND_DEDUP_CLEANUP_INTERVAL_MS);
 
+  // Replies owed for messages answered at ingress that the daemon could not
+  // take when they were first tried (see verification/reply-delivery.ts).
+  const owedReplySweep = setInterval(() => {
+    void sweepOwedReplies();
+  }, OWED_REPLY_SWEEP_INTERVAL_MS);
+
   const telegramCaches = {
     credentials: credentialCache,
     configFile: configFileCache,
@@ -3194,6 +3204,7 @@ async function main() {
     whatsappDedupCache.stopCleanup();
     emailDedupCache.stopCleanup();
     clearInterval(inboundDedupCleanup);
+    clearInterval(owedReplySweep);
     if (slackSocketClient) {
       slackSocketClient.stop();
       slackSocketClient = null;

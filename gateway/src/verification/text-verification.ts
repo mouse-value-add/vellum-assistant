@@ -50,7 +50,9 @@ import {
 import {
   composeVerificationFailureReply,
   composeVerificationSuccessReply,
-  deliverVerificationReply,
+  deliverOwedReply,
+  replyOwedWithGrant,
+  sendGatewayReply,
 } from "./reply-delivery.js";
 
 const log = getLogger("text-verification");
@@ -254,6 +256,18 @@ export async function tryTextVerificationIntercept(
   // 7. Apply side effects. A blocked/revoked authoritative gateway row rejects
   //    the verification: the actor must not regain trusted status nor see a
   //    success reply, even though the code matched and the session consumed.
+  //    The success reply is recorded as owed in the transaction that commits
+  //    the grant, so the grant never lands without it.
+  const successReplyText = composeVerificationSuccessReply(trustClass);
+  const owedReply = replyCallbackUrl
+    ? replyOwedWithGrant({
+        callbackUrl: replyCallbackUrl,
+        chatId: actorChatId,
+        text: successReplyText,
+        assistantId,
+      })
+    : undefined;
+  const withinCommit = owedReply?.withinCommit;
   const sideEffectsVerified =
     trustClass === "guardian"
       ? await applyGuardianSideEffects({
@@ -262,6 +276,7 @@ export async function tryTextVerificationIntercept(
           actorChatId,
           actorDisplayName,
           actorUsername,
+          withinCommit,
         })
       : await applyTrustedContactSideEffects({
           sourceChannel,
@@ -269,6 +284,7 @@ export async function tryTextVerificationIntercept(
           actorChatId,
           actorDisplayName,
           actorUsername,
+          withinCommit,
         });
 
   if (!sideEffectsVerified) {
@@ -291,15 +307,9 @@ export async function tryTextVerificationIntercept(
   }
 
   // 8. Deliver success reply
-  const successReplyText = composeVerificationSuccessReply(trustClass);
   let pendingReplyText: string | undefined;
-  if (replyCallbackUrl) {
-    await deliverVerificationReply({
-      callbackUrl: replyCallbackUrl,
-      chatId: actorChatId,
-      text: successReplyText,
-      assistantId,
-    });
+  if (owedReply) {
+    await deliverOwedReply(owedReply.id);
   } else {
     pendingReplyText = successReplyText;
   }
@@ -332,6 +342,8 @@ async function applyGuardianSideEffects(params: {
   actorChatId: string;
   actorDisplayName?: string;
   actorUsername?: string;
+  /** Runs inside the transaction that commits the grant, if one commits. */
+  withinCommit?: () => void;
 }): Promise<boolean> {
   const {
     sourceChannel,
@@ -339,6 +351,7 @@ async function applyGuardianSideEffects(params: {
     actorChatId,
     actorDisplayName,
     actorUsername,
+    withinCommit,
   } = params;
 
   // Check for binding conflict — another user already holds guardian
@@ -360,6 +373,7 @@ async function applyGuardianSideEffects(params: {
       externalChatId: actorChatId,
       displayName: actorDisplayName,
       username: actorUsername,
+      withinCommit,
     });
     return verified;
   }
@@ -394,15 +408,18 @@ async function applyGuardianSideEffects(params: {
     : (actorDisplayName ?? actorUsername ?? canonicalUserId);
 
   // Create guardian binding (dual-writes to both DBs)
-  await createGuardianBinding({
-    channel: sourceChannel,
-    externalUserId: canonicalUserId,
-    deliveryChatId: actorChatId,
-    guardianPrincipalId: canonicalPrincipal,
-    displayName,
-    verifiedVia: "challenge",
-    reactivateRevoked: true,
-  });
+  await createGuardianBinding(
+    {
+      channel: sourceChannel,
+      externalUserId: canonicalUserId,
+      deliveryChatId: actorChatId,
+      guardianPrincipalId: canonicalPrincipal,
+      displayName,
+      verifiedVia: "challenge",
+      reactivateRevoked: true,
+    },
+    { withinCommit },
+  );
   return true;
 }
 
@@ -418,6 +435,8 @@ export async function applyTrustedContactSideEffects(params: {
   actorChatId: string;
   actorDisplayName?: string;
   actorUsername?: string;
+  /** Runs inside the transaction that commits the grant, if one commits. */
+  withinCommit?: () => void;
 }): Promise<boolean> {
   const {
     sourceChannel,
@@ -425,6 +444,7 @@ export async function applyTrustedContactSideEffects(params: {
     actorChatId,
     actorDisplayName,
     actorUsername,
+    withinCommit,
   } = params;
 
   // Preserve existing display name if available
@@ -442,6 +462,7 @@ export async function applyTrustedContactSideEffects(params: {
     externalChatId: actorChatId,
     displayName,
     username: actorUsername,
+    withinCommit,
   });
   return verified;
 }
@@ -458,7 +479,7 @@ async function replyWithFailure(
 ): Promise<string | undefined> {
   const text = composeVerificationFailureReply(reason);
   if (!replyCallbackUrl) return text;
-  await deliverVerificationReply({
+  await sendGatewayReply({
     callbackUrl: replyCallbackUrl,
     chatId,
     text,

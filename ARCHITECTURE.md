@@ -555,7 +555,8 @@ subgraph "Text Q&A Session"
     %% itself via messaging/providers and never POSTs the reply back to the gateway.
     %% A reply the gateway composes for a message it answered at ingress (a
     %% verification code, an invite redemption) reaches the same transport over
-    %% the daemon's IPC-only deliver_gateway_reply method.
+    %% the daemon's IPC-only deliver_gateway_reply method, from a gateway-DB
+    %% outbox that holds it while the daemon cannot take it.
     %% The same transport carries proactive sends: the messaging tool and
     %% POST /v1/channels/send run sendChannelText (runtime/channel-send.ts), which
     %% asks the transport to address a chat or person (addressFor) and records the

@@ -797,6 +797,12 @@ export async function upsertVerifiedContactChannel(params: {
    * already-consumed invite to a non-intercepted path.
    */
   softMirrorFailures?: boolean;
+  /**
+   * Runs inside the transaction that commits the verified channel, and only
+   * when it does, so a caller's own write lands atomically with the grant. A
+   * throw rolls the grant back.
+   */
+  withinCommit?: () => void;
 }): Promise<{ verified: boolean }> {
   const { sourceChannel } = params;
   const mirrorSoft = params.softMirrorFailures === true;
@@ -835,16 +841,22 @@ export async function upsertVerifiedContactChannel(params: {
   // mirror only if the gateway accepted the write.
   let result: VerifiedChannelGatewayResult;
   try {
-    result = applyVerifiedChannelGatewayWrites({
-      sourceChannel,
-      externalUserId: params.externalUserId,
-      externalChatId: params.externalChatId,
-      displayName: params.displayName,
-      username: params.username,
-      verifiedVia: params.verifiedVia,
-      contactId: params.contactId,
-      allowRevokedReactivation: params.allowRevokedReactivation,
-      existingMirrorChannel: existing,
+    result = getGatewayDb().transaction(() => {
+      const writes = applyVerifiedChannelGatewayWrites({
+        sourceChannel,
+        externalUserId: params.externalUserId,
+        externalChatId: params.externalChatId,
+        displayName: params.displayName,
+        username: params.username,
+        verifiedVia: params.verifiedVia,
+        contactId: params.contactId,
+        allowRevokedReactivation: params.allowRevokedReactivation,
+        existingMirrorChannel: existing,
+      });
+      if (writes.verified) {
+        params.withinCommit?.();
+      }
+      return writes;
     });
   } catch (gwErr) {
     // The gateway DB is the source of truth and the assistant mirror carries
