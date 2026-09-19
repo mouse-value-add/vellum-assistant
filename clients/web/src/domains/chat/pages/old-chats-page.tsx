@@ -16,6 +16,7 @@
 import { Check, RotateCcw, Search } from "lucide-react";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ChangeEvent,
@@ -46,7 +47,6 @@ import {
   ConversationActionsSheet,
   renderConversationMenuItems,
 } from "@/domains/chat/components/conversation-actions-menu";
-import { LoadMoreSentinel } from "@/domains/chat/components/load-more-sentinel";
 import { useLongPressSheet } from "@/hooks/use-long-press-sheet";
 import {
   filterOldChats,
@@ -159,6 +159,62 @@ export const META_SLOT_CLASSES = [
   "[&_[data-slot=crossfade-stack]>*]:w-full",
   "[&_[data-slot=crossfade-stack]>*]:justify-end",
 ].join(" ");
+
+/**
+ * Local midnight of the current day, advancing when the day turns, so a page
+ * left open overnight re-bands its rows instead of keeping yesterday's chats
+ * under Today with clock-only timestamps.
+ *
+ * One timeout aimed at the next local midnight rather than a poll: the
+ * boundary is known exactly, and a backgrounded tab whose timer fires late
+ * simply re-bands late and schedules the next one from the time it woke.
+ */
+function useLocalDayStart(): number {
+  const [dayStart, setDayStart] = useState(() =>
+    new Date().setHours(0, 0, 0, 0),
+  );
+  useEffect(() => {
+    const nextMidnight = new Date();
+    nextMidnight.setHours(24, 0, 0, 0);
+    const timer = setTimeout(
+      () => setDayStart(new Date().setHours(0, 0, 0, 0)),
+      /* At least a second, so a clock moved onto the boundary cannot schedule
+         a zero-delay timer that re-fires in a loop. */
+      Math.max(1_000, nextMidnight.getTime() - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [dayStart]);
+  return dayStart;
+}
+
+/**
+ * Keep asking for pages while the loaded window holds nothing the current
+ * chip and search leave standing.
+ *
+ * The window is one global recency page and the narrowing is client-side, so
+ * an empty view here says nothing about the pages behind it. An
+ * `IntersectionObserver` cannot drive this: the sentinel it watches never
+ * leaves the viewport in an empty view, so it reports one intersection and
+ * never another however much data arrives. Re-running on the loaded row count
+ * is what asks again. It stops when a match appears, when the server reports
+ * no more pages, or when a page adds no rows at all.
+ */
+export function useBackfillUntilMatch({
+  enabled,
+  loadedCount,
+  onLoadMore,
+}: {
+  enabled: boolean;
+  loadedCount: number;
+  onLoadMore: () => void;
+}): void {
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    onLoadMore();
+  }, [enabled, loadedCount, onLoadMore]);
+}
 
 function OldChatsRow({
   conversation,
@@ -294,9 +350,13 @@ export function OldChatsPage({
     [conversations, filter, searchText, displayTitle],
   );
 
-  /* One `now` for every band in a render, so two rows minutes apart cannot
-     land on opposite sides of a midnight that moved between them. */
-  const bandedAt = useMemo(() => now ?? new Date(), [now]);
+  /* One reference instant for every band and every row label in a render, so
+     two rows read minutes apart cannot land on opposite sides of a midnight
+     that moved between them. Local midnight rather than the current time:
+     nothing here asks for anything finer than the calendar day, and pinning
+     it to the day is what lets the value stay stable until the day turns. */
+  const dayStart = useLocalDayStart();
+  const bandedAt = useMemo(() => now ?? new Date(dayStart), [now, dayStart]);
   const locale = formatLocale();
 
   const items = useMemo((): OldChatsListItem[] => {
@@ -357,6 +417,14 @@ export function OldChatsPage({
       onLoadMore();
     }
   }, [hasMore, onLoadMore]);
+
+  /* An empty view is only the answer once the history runs out, so the page
+     keeps pulling while the loaded window leaves nothing standing. */
+  useBackfillUntilMatch({
+    enabled: items.length === 0 && hasMore && !isLoading && !isError,
+    loadedCount: conversations.length,
+    onLoadMore,
+  });
 
   return (
     <PageShell>
@@ -475,15 +543,13 @@ function OldChatsBody({
   if (items.length === 0) {
     /* The chips and the search run over the loaded window, while the window
        itself is one global recency page, so a view with no match here may
-       still have plenty further back. The list is what fires `endReached`,
-       and it is not on screen, so a sentinel keeps the pages coming until a
-       match arrives or the server says there are none left. Only then is the
-       empty state the truth. */
+       still have plenty further back. `useBackfillUntilMatch` in the page is
+       pulling those pages; until it runs out this is a search in progress,
+       not an empty history. */
     if (hasMore) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-4">
+        <div className="flex h-full items-center justify-center">
           <OldChatsSpinner label={t("oldChatsPage.loading")} />
-          <LoadMoreSentinel onVisible={endReached} />
         </div>
       );
     }
