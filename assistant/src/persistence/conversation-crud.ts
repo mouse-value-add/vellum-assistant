@@ -3590,9 +3590,10 @@ export function unarchiveConversation(id: string): boolean {
  *
  * Rows the user never reads resurface nothing. `insertMessageCore` excludes
  * the echo-suppressed set (hidden signals, subagent and ACP notifications, and
- * the `<background_event>` trigger each wake persists) along with the empty
- * row an LLM call reserves before it runs, so a call that is rejected before
- * producing anything leaves the conversation Done. Retrospectives and memory
+ * the `<background_event>` trigger each wake persists); the empty row an LLM
+ * call reserves before it runs, so a call rejected before producing anything
+ * leaves the conversation Done; and any row whose producer passed
+ * {@link AddMessageOptions.skipResurface}. Retrospectives and memory
  * consolidation are excluded by construction: they append to a fork or to a
  * conversation of their own, never to the conversation under review.
  *
