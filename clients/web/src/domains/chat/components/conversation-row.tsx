@@ -306,10 +306,12 @@ export function ConversationRow({
             event.stopPropagation();
             markDone();
           }}
-          onContextMenu={(event) => {
-            event.stopPropagation();
-            event.preventDefault();
-          }}
+          /* No `onContextMenu` of its own, unlike the ellipsis it replaces:
+             the ellipsis swallowed the event because it owned a menu, and
+             this owns a command. Letting it through means a right-click over
+             the check opens the row's menu as a right-click anywhere else on
+             the row does, and the context-menu key with focus on the check
+             reaches the same trigger. */
           className={ROW_TRAILING_CONTROL_CLASSES}
         >
           <Check size={14} aria-hidden className={ROW_TRAILING_GLYPH_CLASSES} />

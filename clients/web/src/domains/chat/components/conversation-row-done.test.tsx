@@ -208,4 +208,21 @@ describe("ConversationRow — sidebar-done on", () => {
     const { queryByLabelText } = renderRow({});
     expect(queryByLabelText("Mark as done")).toBeNull();
   });
+
+  /* The row menu is the only path to Rename and Delete now, and the
+     context-menu key fires `contextmenu` on whatever holds focus. The check
+     is the row's one focusable control, so an event swallowed there would
+     take that path with it. */
+  test("the check lets a contextmenu event through to the row's trigger", () => {
+    const { getByLabelText } = renderRow({
+      onArchive: () => {},
+      onRename: () => {},
+    });
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    getByLabelText("Mark as done").dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
 });
