@@ -188,12 +188,34 @@ describe("IntegrationTile", () => {
     const cancel = screen.getByRole("button", {
       name: "Cancel connecting Notion",
     });
+    // A touch tap sends its leave before its click, both times. Acting on
+    // that leave would disarm the button between the tap that revealed the X
+    // and the tap that meant it, and the sign-in could never be stopped.
     fireEvent.pointerEnter(cancel, { pointerType: "touch" });
+    fireEvent.pointerLeave(cancel, { pointerType: "touch" });
     fireEvent.click(cancel, { detail: 1 });
     expect(handlers.onCancel).not.toHaveBeenCalled();
 
+    fireEvent.pointerEnter(cancel, { pointerType: "touch" });
+    fireEvent.pointerLeave(cancel, { pointerType: "touch" });
     fireEvent.click(cancel, { detail: 1 });
     expect(handlers.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test("lets a mouse leaving take the X back", () => {
+    tile({
+      plan: notionPlan,
+      state: { phase: "waiting", canCancel: true },
+    });
+
+    const cancel = screen.getByRole("button", {
+      name: "Cancel connecting Notion",
+    });
+    fireEvent.pointerEnter(cancel, { pointerType: "mouse" });
+    fireEvent.pointerLeave(cancel, { pointerType: "mouse" });
+    // The warning left with the pointer, so the next press is unwarned again.
+    fireEvent.click(cancel, { detail: 1 });
+    expect(handlers.onCancel).not.toHaveBeenCalled();
   });
 
   test("cancels on the first keyboard press, with nothing to reveal first", () => {

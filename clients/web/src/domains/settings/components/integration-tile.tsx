@@ -6,7 +6,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ActionMenu } from "@vellumai/design-library/components/action-menu";
 import {
@@ -236,6 +236,13 @@ export function IntegrationTile({
   );
 }
 
+/**
+ * How long an X a finger revealed stays up before the spinner comes back.
+ * Long enough to read the square and press it again, short enough that a tile
+ * armed by a stray tap is not still armed when the user comes back to it.
+ */
+const TOUCH_ARMED_MS = 4000;
+
 /** What an attempt in this phase has to say for itself. */
 function progressMessage(
   t: ReturnType<typeof useTranslation<"settings">>["t"],
@@ -401,8 +408,35 @@ function ProgressAction({
    * thumb cannot be had back by pressing again.
    */
   const [revealed, setRevealed] = useState(false);
+  /** Runs out an X a finger revealed. Never set for a pointer that hovers. */
+  const disarm = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canCancel = state.phase === "waiting" && state.canCancel;
   const status = progressMessage(t, name, state);
+
+  function clearDisarm() {
+    if (disarm.current) {
+      clearTimeout(disarm.current);
+      disarm.current = null;
+    }
+  }
+
+  function reveal(byTouch: boolean) {
+    clearDisarm();
+    setRevealed(true);
+    // A hovering pointer takes the X back when it leaves. A finger has no
+    // such moment, and a tile left armed turns the next curious tap into a
+    // cancel, so the reveal runs out on its own instead.
+    if (byTouch) {
+      disarm.current = setTimeout(() => setRevealed(false), TOUCH_ARMED_MS);
+    }
+  }
+
+  function conceal() {
+    clearDisarm();
+    setRevealed(false);
+  }
+
+  useEffect(() => clearDisarm, []);
 
   const announcement = announce ? (
     <span role="status" className="sr-only">
@@ -454,21 +488,30 @@ function ProgressAction({
         // X before its click lands.
         onPointerEnter={(event) => {
           if (event.pointerType !== "touch") {
-            setRevealed(true);
+            reveal(false);
           }
         }}
-        onPointerLeave={() => setRevealed(false)}
-        onBlur={() => setRevealed(false)}
+        // A finger's leave arrives before its click, so taking the X back
+        // here would take it back between the tap that revealed it and the
+        // tap that meant it, and the sign-in could never be called off at
+        // all. Only a pointer that was hovering has a leave worth acting on.
+        onPointerLeave={(event) => {
+          if (event.pointerType !== "touch") {
+            conceal();
+          }
+        }}
+        onBlur={conceal}
         onClick={(event) => {
           // A keyboard press and an assistive-technology activation carry no
           // pointer, so `detail` is 0. There is no mis-aimed thumb to guard
           // against and the control is already announced by what it does, so
           // the first activation is the one that means it.
           if (revealed || event.detail === 0) {
+            conceal();
             onCancel();
             return;
           }
-          setRevealed(true);
+          reveal(true);
         }}
       />
       {announcement}
