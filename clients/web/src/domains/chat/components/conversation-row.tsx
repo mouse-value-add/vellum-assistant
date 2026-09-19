@@ -1,19 +1,27 @@
 /**
  * A single conversation row in the assistant sidebar: the title, a
- * trailing status indicator (attention / processing / unread), an
- * actions menu, an optional right-click context menu, and optional
- * drag-reorder. Pin/unpin lives in the actions and context menus.
- * Action callbacks, active/processing state, and the drag controller
- * come from {@link useConversationListContext}.
+ * trailing status indicator (attention / processing / unread), one
+ * trailing control, an optional right-click context menu, and optional
+ * drag-reorder. Action callbacks, active/processing state, and the drag
+ * controller come from {@link useConversationListContext}.
+ *
+ * Which trailing control it is, is the `sidebar-done` flag's answer. Off, it
+ * is the actions "…", and pin/unpin lives in that menu and in the context
+ * menu. On, it is a Done check: the row's one command is "I am finished with
+ * this", and every other action is on the right-click menu and the chat
+ * header's title dropdown. Both draw in the same box, so the row's geometry
+ * does not depend on the flag.
  *
  * Rendered in every list surface — Pinned, Recents, channel sections,
  * custom groups, and the collapsed-rail flyout. The flyout passes
  * `withContextMenu={false}` (no right-click menu) and `marquee={false}`.
  */
 
-import { Archive, ArchiveRestore, Pin, PinOff } from "lucide-react";
+import { Archive, ArchiveRestore, Check, Pin, PinOff } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import { useCallback, useState } from "react";
 
-import { ContextMenu, PanelItem } from "@vellumai/design-library";
+import { ContextMenu, PanelItem, Tooltip } from "@vellumai/design-library";
 import { cn } from "@vellumai/design-library/utils/cn";
 
 import { SwipeActionReveal } from "@/components/swipe-action-reveal";
@@ -24,6 +32,16 @@ import {
   renderConversationMenuItems,
   type ConversationMenuItemsProps,
 } from "@/domains/chat/components/conversation-actions-menu";
+import { useSectionDoneFlash } from "@/domains/chat/components/section-done-flash";
+import {
+  useConversationDoneLabels,
+  useSidebarDoneEnabled,
+  type ConversationDoneLabels,
+} from "@/utils/done-labels";
+import {
+  ROW_TRAILING_CONTROL_CLASSES,
+  ROW_TRAILING_GLYPH_CLASSES,
+} from "@/domains/chat/utils/row-trailing-control";
 import { useTranslation, type TFunction } from "@/i18n";
 import { useLongPressSheet } from "@/hooks/use-long-press-sheet";
 import {
@@ -60,6 +78,13 @@ export interface ConversationRowProps {
   marquee?: boolean;
   /** Override the select handler (the rail flyout also closes the popover). */
   onSelect?: (conversationId: string) => void;
+  /**
+   * Whether this row may play the collapse-and-fade under `sidebar-done`.
+   * The list passes `false` for a windowed one: virtuoso owns the geometry
+   * of a row it is recycling, so a row animating its own height there fights
+   * the measurement rather than reading as the row leaving.
+   */
+  animateDone?: boolean;
 }
 
 export function buildMenuProps(
@@ -148,6 +173,7 @@ function buildSwipeActions(
   ctx: ConversationListContextValue,
   conversation: Conversation,
   t: TFunction<"chat">,
+  doneLabels: ConversationDoneLabels,
 ): { leadingActions: SwipeAction[]; trailingActions: SwipeAction[] } {
   const isChannel = isChannelConversation(conversation);
 
@@ -175,14 +201,14 @@ function buildSwipeActions(
   if (isArchived && ctx.onUnarchive) {
     trailingActions.push({
       id: "unarchive",
-      label: t("conversationActions.unarchive"),
+      label: doneLabels.unarchive,
       icon: ArchiveRestore,
       onSelect: () => ctx.onUnarchive?.(conversation),
     });
   } else if (!isArchived && ctx.onArchive) {
     trailingActions.push({
       id: "archive",
-      label: t("conversationActions.archive"),
+      label: doneLabels.swipeArchive,
       icon: Archive,
       variant: "destructive",
       onSelect: () => ctx.onArchive?.(conversation),
@@ -192,16 +218,28 @@ function buildSwipeActions(
   return { leadingActions, trailingActions };
 }
 
+/**
+ * How long the row takes to collapse out of the list once it is marked done.
+ * Short enough to read as the row leaving rather than as a wait for it.
+ */
+const DONE_EXIT_MS = 180;
+
 export function ConversationRow({
   conversation,
   withContextMenu = true,
   marquee = true,
   onSelect,
+  animateDone = false,
 }: ConversationRowProps) {
   const ctx = useConversationListContext();
   const { conversationId } = conversation;
   const { t } = useTranslation("chat");
   const displayTitle = useDisplayConversationTitle();
+  const sidebarDone = useSidebarDoneEnabled();
+  const doneLabels = useConversationDoneLabels();
+  const { flash } = useSectionDoneFlash();
+  const reduceMotion = useReducedMotion();
+  const [leaving, setLeaving] = useState(false);
 
   const isProcessing =
     conversationId === ctx.activeConversationId
@@ -228,6 +266,7 @@ export function ConversationRow({
     ctx,
     conversation,
     t,
+    doneLabels,
   );
 
   const isTouch = isPointerCoarse();
@@ -239,9 +278,52 @@ export function ConversationRow({
   // ellipsis, and both are armed by a coarse pointer, so a device that has
   // neither hover nor a coarse pointer (a hoverless stylus) keeps the ellipsis:
   // right-click alone is not a path ordinary tapping or a screen reader finds.
-  const showsEllipsis = useShowsHoverAffordance(withContextMenu && isTouch);
+  const showsTrailingControl = useShowsHoverAffordance(
+    withContextMenu && isTouch,
+  );
 
-  const panelItem = (
+  /* Under the flag the row's trailing control is the Done check, never the
+     ellipsis: Rename, Delete and the rest live in the row's right-click menu
+     and in the chat header's title dropdown. The check takes the ellipsis's
+     own slot, box and reveal, so nothing on the row moves. */
+  const collapsesOut = sidebarDone && animateDone && !reduceMotion;
+  const markDone = useCallback(() => {
+    flash();
+    if (!collapsesOut) {
+      ctx.onArchive?.(conversation);
+      return;
+    }
+    setLeaving(true);
+  }, [collapsesOut, ctx, conversation, flash]);
+
+  const doneCheck =
+    sidebarDone && ctx.onArchive && conversation.archivedAt == null ? (
+      <Tooltip content={doneLabels.archive} side="right">
+        <button
+          type="button"
+          aria-label={doneLabels.archive}
+          onClick={(event) => {
+            event.stopPropagation();
+            markDone();
+          }}
+          onContextMenu={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+          }}
+          className={ROW_TRAILING_CONTROL_CLASSES}
+        >
+          <Check size={14} aria-hidden className={ROW_TRAILING_GLYPH_CLASSES} />
+        </button>
+      </Tooltip>
+    ) : undefined;
+
+  const trailingAction = !showsTrailingControl ? undefined : sidebarDone ? (
+    doneCheck
+  ) : (
+    <ConversationActionsMenu {...menuProps} shortcuts={shortcuts} />
+  );
+
+  const swipeRow = (
     <SwipeActionReveal
       // The row's shape, which is `PanelItem`'s radius: the layer a swipe
       // reveals behind the row inherits it, so no corner of the layer shows
@@ -261,11 +343,7 @@ export function ConversationRow({
           ) : undefined
         }
         badgeBare
-        trailingAction={
-          showsEllipsis ? (
-            <ConversationActionsMenu {...menuProps} shortcuts={shortcuts} />
-          ) : undefined
-        }
+        trailingAction={trailingAction}
         className={cn(
           // `!` forces this over PanelItem's own max-md:py-3: cross-package
           // Tailwind generation order doesn't reliably favor a plain
@@ -289,6 +367,31 @@ export function ConversationRow({
         )}
       />
     </SwipeActionReveal>
+  );
+
+  /* The row collapses and fades as it is marked done, then hands over to the
+     archive, so the list closes the gap once rather than snapping shut under
+     the pointer. The wrapper mounts only on that path: off the flag, on a
+     windowed list, or under reduced motion the row is the bare row it has
+     always been. */
+  const panelItem = collapsesOut ? (
+    <motion.div
+      className="overflow-hidden"
+      initial={false}
+      animate={
+        leaving ? { height: 0, opacity: 0 } : { height: "auto", opacity: 1 }
+      }
+      transition={{ duration: DONE_EXIT_MS / 1000, ease: "easeOut" }}
+      onAnimationComplete={() => {
+        if (leaving) {
+          ctx.onArchive?.(conversation);
+        }
+      }}
+    >
+      {swipeRow}
+    </motion.div>
+  ) : (
+    swipeRow
   );
 
   // Touch: replace the right-click ContextMenu with a long-press → bottom sheet.
@@ -321,6 +424,7 @@ export function ConversationRow({
           Primitive: ContextMenu,
           t,
           shortcuts,
+          doneLabels,
           ...menuProps,
         })}
       </ContextMenu.Content>

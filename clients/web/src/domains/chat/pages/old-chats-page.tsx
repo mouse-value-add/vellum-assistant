@@ -46,6 +46,7 @@ import {
   renderConversationMenuItems,
 } from "@/domains/chat/components/conversation-actions-menu";
 import { LoadMoreSentinel } from "@/domains/chat/components/load-more-sentinel";
+import { conversationDoneLabels } from "@/utils/done-labels";
 import { useLongPressSheet } from "@/hooks/use-long-press-sheet";
 import {
   filterOldChats,
@@ -124,7 +125,8 @@ function rowTime(conversation: Conversation): number | undefined {
   return conversation.lastMessageAt ?? conversation.createdAt;
 }
 
-function OldChatsRow({ conversation }: { conversation: Conversation }) {
+/** Exported for its own test; the page is the only thing that renders it. */
+export function OldChatsRow({ conversation }: { conversation: Conversation }) {
   const { t } = useTranslation("chat");
   const displayTitle = useDisplayConversationTitle();
   const ctx = useConversationListContext();
@@ -137,9 +139,11 @@ function OldChatsRow({ conversation }: { conversation: Conversation }) {
           locale: formatLocale(),
           minimumUnit: "minute",
         });
-  const toggleLabel = done
-    ? t("conversationActions.reopen")
-    : t("conversationActions.markAsDone");
+  /* This page exists only with `sidebar-done` on, so its menus never say
+     "Archive": the label set is pinned to the done wording rather than read
+     off the flag, which is what keeps a story of the page honest too. */
+  const doneLabels = conversationDoneLabels(t, true);
+  const toggleLabel = done ? doneLabels.unarchive : doneLabels.archive;
 
   const longPress = useLongPressSheet({ shouldSkip: skipNestedControls });
   const menuProps = buildMenuProps(ctx, conversation);
@@ -197,6 +201,7 @@ function OldChatsRow({ conversation }: { conversation: Conversation }) {
         <div {...longPress.wrapperProps}>{row}</div>
         <ConversationActionsSheet
           {...menuProps}
+          doneLabels={doneLabels}
           open={longPress.open}
           onOpenChange={longPress.onOpenChange}
         />
@@ -211,6 +216,7 @@ function OldChatsRow({ conversation }: { conversation: Conversation }) {
         {renderConversationMenuItems({
           Primitive: ContextMenu,
           t,
+          doneLabels,
           ...menuProps,
         })}
       </ContextMenu.Content>

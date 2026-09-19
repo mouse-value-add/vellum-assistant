@@ -66,6 +66,7 @@ import {
   renderGroupMenuItemsAsPanelItems,
   type GroupMenuItemsProps,
 } from "@/domains/chat/components/group-actions-menu";
+import { useConversationDoneLabels } from "@/utils/done-labels";
 import { useTranslation } from "@/i18n";
 import type { Conversation } from "@/types/conversation-types";
 import { useOverflows } from "@/hooks/use-overflows";
@@ -188,6 +189,9 @@ export function ConversationRowList({
     <ConversationRow
       key={conversation.conversationId}
       conversation={conversation}
+      /* Only a mounted list can let a row collapse out of it: virtuoso owns
+         a windowed row's geometry, so there the row simply goes. */
+      animateDone={!windows}
     />
   );
 
@@ -316,6 +320,8 @@ export interface ConversationNavSectionProps extends ConversationRowListProps {
   drag?: CollapsibleNavSectionDrag;
   /** Forwarded to `CollapsibleNavSection.Section`; defaults to `true`. */
   collapsible?: boolean;
+  /** Forwarded to `CollapsibleNavSection.Section`: hold the header's reveal. */
+  revealHold?: boolean;
   /**
    * Overrides the default `ConversationRowList` content, e.g. nested
    * sub-sections instead of a row list. `items`/pagination/drag props are
@@ -336,12 +342,14 @@ export function ConversationNavSection({
   collapsedIndicator,
   drag,
   collapsible,
+  revealHold,
   children,
   ...listProps
 }: ConversationNavSectionProps) {
   const hasMenu = groupMenu != null && hasAnyGroupMenuAction(groupMenu);
   const { overlayCards } = useConversationListContext();
   const { t } = useTranslation("chat");
+  const doneLabels = useConversationDoneLabels();
 
   return (
     <CollapsibleNavSection.Section
@@ -355,7 +363,12 @@ export function ConversationNavSection({
       trailing={trailing}
       contextMenuContent={
         hasMenu
-          ? renderGroupMenuItems({ Primitive: ContextMenu, ...groupMenu, t })
+          ? renderGroupMenuItems({
+              Primitive: ContextMenu,
+              ...groupMenu,
+              t,
+              doneLabels,
+            })
           : undefined
       }
       touchMenuContent={
@@ -365,12 +378,14 @@ export function ConversationNavSection({
                 ...groupMenu,
                 onClose: close,
                 t,
+                doneLabels,
               })
           : undefined
       }
       collapsedIndicator={collapsedIndicator}
       drag={drag}
       collapsible={collapsible}
+      revealHold={revealHold}
       unbounded={listProps.unbounded}
       isLast={listProps.isLast}
     >
