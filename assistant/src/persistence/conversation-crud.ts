@@ -45,7 +45,6 @@ import { readProviderMetadata } from "../messaging/read-provider-metadata.js";
 import { HOOKS } from "../plugin-api/constants.js";
 import { forkConversationMemory } from "../plugins/defaults/memory/fork-conversation-memory.js";
 import { indexMessageNow } from "../plugins/defaults/memory/indexer.js";
-import { SKILL_CARD_MESSAGE_KIND } from "../plugins/defaults/memory/memory-retrospective-constants.js";
 import { runHook } from "../plugins/pipeline.js";
 import type { ContentBlock } from "../providers/types.js";
 import { getCurrentSeq } from "../runtime/assistant-stream-state.js";
@@ -949,6 +948,8 @@ interface InsertMessageCoreParams {
   /** The row is a reservation booked ahead of the content that will fill it
    *  ({@link reserveMessage}), so it carries nothing to read yet. */
   reserved?: boolean;
+  /** See {@link AddMessageOptions.skipResurface}. */
+  skipResurface?: boolean;
 }
 
 /**
@@ -1037,6 +1038,7 @@ async function insertMessageCore(
     id,
     insertPrecondition,
     reserved,
+    skipResurface,
   } = params;
   warnOnModelInvisibleContent(content, conversationId);
   const db = getDb();
@@ -1192,17 +1194,15 @@ async function insertMessageCore(
   // Four kinds of insert are not that: the echo-suppressed set, which never
   // renders in the transcript; the empty row `reserveMessage` books for an LLM
   // call that has not run yet, whose content arrives at the finalize seam and
-  // resurfaces from there; a retrospective's skill card, which the assistant
-  // files about a conversation rather than in it, and which lands exactly when
-  // a conversation has gone idle, so resurfacing on it would bounce a chat the
-  // user has just marked done straight back into the sidebar; and a
+  // resurfaces from there; a row whose producer declared it bookkeeping ABOUT
+  // the conversation rather than activity in it (`skipResurface`); and a
   // deduplicated insert, which wrote no row at all. Best-effort: a failure
   // here must not escalate into a failed persist.
   if (
     !inserted.deduplicated &&
     !reserved &&
-    !isEchoSuppressedUserMessage(metadata) &&
-    metadata?.kind !== SKILL_CARD_MESSAGE_KIND
+    !skipResurface &&
+    !isEchoSuppressedUserMessage(metadata)
   ) {
     try {
       resurfaceArchivedConversation(conversationId, inserted.createdAt);
@@ -2689,6 +2689,17 @@ export interface AddMessageOptions {
    * during that sleep.
    */
   insertPrecondition?: () => boolean;
+  /**
+   * The row is the assistant's bookkeeping ABOUT this conversation rather than
+   * activity in it, so it must not bring the conversation back from Done (see
+   * {@link resurfaceArchivedConversation}). The producer declares this, because
+   * only the producer knows which of the two a row is.
+   *
+   * The retrospective skill card is the case: a pass runs once a conversation
+   * has gone idle, which is exactly when the user has just marked it done, so
+   * a card that resurfaced would bounce fresh done chats back into the sidebar.
+   */
+  skipResurface?: boolean;
 }
 
 /**
@@ -2702,8 +2713,14 @@ export async function addMessage(
   content: string,
   options?: AddMessageOptions,
 ) {
-  const { metadata, skipIndexing, clientMessageId, id, insertPrecondition } =
-    options ?? {};
+  const {
+    metadata,
+    skipIndexing,
+    clientMessageId,
+    id,
+    insertPrecondition,
+    skipResurface,
+  } = options ?? {};
   const inserted = await insertMessageCore({
     conversationId,
     role,
@@ -2712,6 +2729,7 @@ export async function addMessage(
     clientMessageId,
     id,
     ...(insertPrecondition ? { insertPrecondition } : {}),
+    ...(skipResurface ? { skipResurface } : {}),
   });
 
   if (inserted.deduplicated) {

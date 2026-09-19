@@ -224,10 +224,11 @@ describe("Done conversations and new activity", () => {
     expect(listInvalidations).toHaveLength(0);
   });
 
-  test("a retrospective's skill card leaves the source conversation Done", async () => {
-    // The one row a retrospective does append to the conversation it reviewed.
-    // A pass runs when the conversation goes idle, which is exactly when the
-    // user has just marked it done, so the card must not bounce it back.
+  test("a row its producer marked as bookkeeping leaves the conversation Done", async () => {
+    // The retrospective skill card, written the way
+    // `memory-retrospective-skill-card.ts` writes it. Persistence cannot
+    // import the memory plugin (`persistence-layering-guard`), so the producer
+    // declares the row instead of the seam recognising its kind.
     await addMessage(
       DONE_CONVERSATION_ID,
       "assistant",
@@ -250,6 +251,7 @@ describe("Done conversations and new activity", () => {
         metadata: { kind: SKILL_CARD_MESSAGE_KIND, automated: true },
         skipIndexing: true,
         clientMessageId: "surface-1",
+        skipResurface: true,
       },
     );
 
