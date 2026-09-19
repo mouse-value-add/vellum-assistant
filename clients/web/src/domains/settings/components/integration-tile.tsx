@@ -398,14 +398,15 @@ function ProgressAction({
   onCancel: () => void;
 }) {
   const { t } = useTranslation("settings");
+  const hoverCapable = useHoverCapable();
   /**
    * Whether the slot is showing the X rather than the spinner.
    *
-   * A mouse or a pen reveals it on arrival, and the tooltip comes up with it,
-   * so the click that follows is aimed at a control that has already said
-   * what it does. A finger gets no such warning, so its first press only
-   * reveals and the second one cancels: a sign-in thrown away by a mis-aimed
-   * thumb cannot be had back by pressing again.
+   * A pointer that hovers reveals it on arrival, and the tooltip comes up
+   * with it, so the click that follows is aimed at a control that has already
+   * said what it does. A pointer that does not gets no such warning, so its
+   * first press only reveals and the second one cancels: a sign-in thrown
+   * away by a mis-aimed thumb cannot be had back by pressing again.
    */
   const [revealed, setRevealed] = useState(false);
   /** Runs out an X a finger revealed. Never set for a pointer that hovers. */
@@ -437,6 +438,19 @@ function ProgressAction({
   }
 
   useEffect(() => clearDisarm, []);
+
+  /**
+   * Whether this pointer arriving is a warning the user has had.
+   *
+   * Both halves are needed. The device has to be able to hover at all, or the
+   * tooltip was never mounted and there was nothing to read. And the pointer
+   * that arrived has to be one that hovers rather than one that reports
+   * itself on contact: a finger, or a stylus on a tablet that answers
+   * `hover: none`, enters and clicks in the same touch.
+   */
+  function warned(pointerType: string) {
+    return hoverCapable && pointerType !== "touch";
+  }
 
   const announcement = announce ? (
     <span role="status" className="sr-only">
@@ -482,21 +496,18 @@ function ProgressAction({
         iconOnly={revealed ? <X /> : <Loader2 className="animate-spin" />}
         aria-label={t("integrationTile.cancelLabel", { name })}
         tooltip={t("integrationTile.waitingCancel", { name })}
-        // The pointer that arrived, not the device's own idea of whether it
-        // can hover. A convertible with a trackpad reports hover and is still
-        // being tapped with a finger, and that finger gets no tooltip and no
-        // X before its click lands.
         onPointerEnter={(event) => {
-          if (event.pointerType !== "touch") {
+          if (warned(event.pointerType)) {
             reveal(false);
           }
         }}
-        // A finger's leave arrives before its click, so taking the X back
-        // here would take it back between the tap that revealed it and the
-        // tap that meant it, and the sign-in could never be called off at
-        // all. Only a pointer that was hovering has a leave worth acting on.
+        // A pointer that lands on contact sends its leave before its click,
+        // so taking the X back here would take it back between the press that
+        // revealed it and the press that meant it, and the sign-in could
+        // never be called off at all. Only a pointer that was hovering has a
+        // leave worth acting on.
         onPointerLeave={(event) => {
-          if (event.pointerType !== "touch") {
+          if (warned(event.pointerType)) {
             conceal();
           }
         }}

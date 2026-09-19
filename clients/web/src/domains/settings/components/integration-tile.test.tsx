@@ -202,6 +202,31 @@ describe("IntegrationTile", () => {
     expect(handlers.onCancel).toHaveBeenCalledTimes(1);
   });
 
+  test("gives a stylus that cannot hover the same two presses", () => {
+    render(
+      <HoverCapabilityOverride hoverCapable={false}>
+        <IntegrationTile
+          {...handlers}
+          plan={notionPlan}
+          state={{ phase: "waiting", canCancel: true }}
+        />
+      </HoverCapabilityOverride>,
+    );
+
+    // A tablet stylus reports `pen` and still lands on contact, on a device
+    // that mounts no tooltip at all. Trusting the pointer type alone would
+    // cancel on the press that was only meant to reveal.
+    const cancel = screen.getByRole("button", {
+      name: "Cancel connecting Notion",
+    });
+    fireEvent.pointerEnter(cancel, { pointerType: "pen" });
+    fireEvent.click(cancel, { detail: 1 });
+    expect(handlers.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(cancel, { detail: 1 });
+    expect(handlers.onCancel).toHaveBeenCalledTimes(1);
+  });
+
   test("lets a mouse leaving take the X back", () => {
     tile({
       plan: notionPlan,
