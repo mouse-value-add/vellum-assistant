@@ -104,11 +104,17 @@ export interface IntegrationTileProps {
  *
  * The tile is the same height in every one of those states, and that is the
  * point. These are grid cells, and a grid row stretches to its tallest cell,
- * so a line of status text added to one tile pushes empty space into every
- * neighbour beside it. So nothing a connect attempt has to say is allowed to
- * add a line: the progress and the way to call it off live in the action
- * slot the connect button already occupies, and a failure spends the
- * description's two reserved lines rather than asking for lines of its own.
+ * so a line of status text on one tile puts empty space into every neighbour
+ * beside it. Nothing a connect attempt has to say is allowed to add a line:
+ * the progress and the way to call it off live in the action slot the connect
+ * button already occupies, and a failure spends the description's two
+ * reserved lines rather than asking for lines of its own.
+ *
+ * Where the device cannot hover there is no tooltip to carry the progress, so
+ * the attempt spends those same two lines the way a failure does. The
+ * description is what the user reads to decide whether to connect, and they
+ * have decided; on a phone it is worth less than knowing there is a sign-in
+ * waiting for them in another tab.
  *
  * On a platform-hosted assistant the other ways to connect stay out of sight
  * until the recommended one fails: offering the choice up front asks every
@@ -132,7 +138,10 @@ export function IntegrationTile({
 }: IntegrationTileProps) {
   const { t } = useTranslation("settings");
   const methodLabel = useConnectMethodLabel(plan.name);
+  const hoverCapable = useHoverCapable();
   const inFlight = state.phase === "waiting" || state.phase === "connecting";
+  // Only one of the two says it, so neither is read out twice.
+  const progressInBody = inFlight && !hoverCapable;
 
   function startMethod(method: ConnectMethod) {
     if (method.availability === "login-required") {
@@ -181,7 +190,12 @@ export function IntegrationTile({
   let action: ReactNode = connectButton;
   if (inFlight) {
     action = (
-      <ProgressAction name={plan.name} state={state} onCancel={onCancel} />
+      <ProgressAction
+        name={plan.name}
+        state={state}
+        announce={!progressInBody}
+        onCancel={onCancel}
+      />
     );
   } else if (state.phase === "failed") {
     action = (
@@ -211,6 +225,8 @@ export function IntegrationTile({
       subtitle={
         state.phase === "failed" ? (
           <FailureText name={plan.name} state={state} />
+        ) : progressInBody && inFlight ? (
+          <span role="status">{progressMessage(t, plan.name, state)}</span>
         ) : (
           (plan.description ?? undefined)
         )
@@ -218,6 +234,17 @@ export function IntegrationTile({
       primaryAction={action}
     />
   );
+}
+
+/** What an attempt in this phase has to say for itself. */
+function progressMessage(
+  t: ReturnType<typeof useTranslation<"settings">>["t"],
+  name: string,
+  state: Extract<TileConnectState, { phase: "waiting" | "connecting" }>,
+): string {
+  return state.phase === "waiting"
+    ? t("integrationTile.waiting", { name })
+    : t("integrationTile.connecting", { name });
 }
 
 /**
@@ -263,11 +290,12 @@ function FailureText({
 /**
  * The retry, with every other way in a chevron away.
  *
- * What used to be two more lines under the description is the menu on the
- * retry: the provider's own setup guide, then the methods this plan still has
- * that are not the one that just failed. With nothing behind it the chevron
- * is not drawn, so a managed sign-in that has nowhere else to go keeps a
- * plain square retry.
+ * The menu holds the provider's own setup guide, then the methods this plan
+ * still has that are not the one that just failed. It is a menu rather than a
+ * row of buttons because a row of buttons is two more lines, and two more
+ * lines on one tile is empty space on every tile in the row. With nothing
+ * behind it the chevron is not drawn, so a managed sign-in that has nowhere
+ * else to go keeps a plain square retry.
  */
 function RetryAction({
   plan,
@@ -346,41 +374,41 @@ function RetryAction({
  * wait that can be called off makes the spinner a button that turns into an
  * X; a wait that cannot is the same square with nothing to click, since a
  * control that looks live and does nothing is worse than no control.
- *
- * The message is also announced: a tooltip is a hover affordance and a live
- * region is not, so the phase reaches a screen reader and a touch device
- * whether or not a pointer ever arrives.
  */
 function ProgressAction({
   name,
   state,
+  announce,
   onCancel,
 }: {
   name: string;
   state: Extract<TileConnectState, { phase: "waiting" | "connecting" }>;
+  /**
+   * Put the message in a live region here. False where the tile body already
+   * carries it visibly, so it is not announced twice.
+   */
+  announce: boolean;
   onCancel: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const hoverCapable = useHoverCapable();
   /**
-   * Whether the slot is showing the X rather than the spinner. A pointer or a
-   * keyboard reveals it on arrival, so the click that follows cancels. With
-   * neither, the first tap reveals and the second cancels: a tap carries no
-   * hover to warn the user what the square does, and a sign-in thrown away by
-   * a mis-aimed thumb is not recoverable by tapping again.
+   * Whether the slot is showing the X rather than the spinner.
+   *
+   * A mouse or a pen reveals it on arrival, and the tooltip comes up with it,
+   * so the click that follows is aimed at a control that has already said
+   * what it does. A finger gets no such warning, so its first press only
+   * reveals and the second one cancels: a sign-in thrown away by a mis-aimed
+   * thumb cannot be had back by pressing again.
    */
   const [revealed, setRevealed] = useState(false);
   const canCancel = state.phase === "waiting" && state.canCancel;
-  const status =
-    state.phase === "waiting"
-      ? t("integrationTile.waiting", { name })
-      : t("integrationTile.connecting", { name });
+  const status = progressMessage(t, name, state);
 
-  const announcement = (
+  const announcement = announce ? (
     <span role="status" className="sr-only">
       {status}
     </span>
-  );
+  ) : null;
 
   if (!canCancel) {
     return (
@@ -420,16 +448,27 @@ function ProgressAction({
         iconOnly={revealed ? <X /> : <Loader2 className="animate-spin" />}
         aria-label={t("integrationTile.cancelLabel", { name })}
         tooltip={t("integrationTile.waitingCancel", { name })}
-        onPointerEnter={hoverCapable ? () => setRevealed(true) : undefined}
-        onPointerLeave={hoverCapable ? () => setRevealed(false) : undefined}
-        onFocus={hoverCapable ? () => setRevealed(true) : undefined}
-        onBlur={() => setRevealed(false)}
-        onClick={() => {
-          if (!revealed) {
+        // The pointer that arrived, not the device's own idea of whether it
+        // can hover. A convertible with a trackpad reports hover and is still
+        // being tapped with a finger, and that finger gets no tooltip and no
+        // X before its click lands.
+        onPointerEnter={(event) => {
+          if (event.pointerType !== "touch") {
             setRevealed(true);
+          }
+        }}
+        onPointerLeave={() => setRevealed(false)}
+        onBlur={() => setRevealed(false)}
+        onClick={(event) => {
+          // A keyboard press and an assistive-technology activation carry no
+          // pointer, so `detail` is 0. There is no mis-aimed thumb to guard
+          // against and the control is already announced by what it does, so
+          // the first activation is the one that means it.
+          if (revealed || event.detail === 0) {
+            onCancel();
             return;
           }
-          onCancel();
+          setRevealed(true);
         }}
       />
       {announcement}

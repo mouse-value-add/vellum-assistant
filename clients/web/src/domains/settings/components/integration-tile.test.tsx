@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { HoverCapabilityOverride } from "@vellumai/design-library/utils/hover-capability";
 
 import {
   GOOGLE_PROVIDER,
@@ -168,28 +169,46 @@ describe("IntegrationTile", () => {
     const cancel = screen.getByRole("button", {
       name: "Cancel connecting Notion",
     });
-    // A pointer arriving is what turns the spinner into an X, so the click
-    // that follows lands on a control the user has already been shown.
-    fireEvent.pointerEnter(cancel);
-    fireEvent.click(cancel);
+    // A mouse arriving is what turns the spinner into an X, so the click that
+    // follows lands on a control the user has already been shown.
+    fireEvent.pointerEnter(cancel, { pointerType: "mouse" });
+    fireEvent.click(cancel, { detail: 1 });
     expect(handlers.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  test("never throws a sign-in away on a single unwarned press", () => {
+  test("never throws a sign-in away on a single unwarned tap", () => {
     tile({
       plan: notionPlan,
       state: { phase: "waiting", canCancel: true },
     });
 
-    // No hover ever arrived, which is every tap on a touch screen. The first
-    // press only reveals the X; the second is the one that means it.
+    // A convertible reports that it can hover because of its trackpad, and is
+    // being tapped with a finger anyway. The finger gets no tooltip, so it
+    // gets the two-press path: the first reveals the X, the second means it.
     const cancel = screen.getByRole("button", {
       name: "Cancel connecting Notion",
     });
-    fireEvent.click(cancel);
+    fireEvent.pointerEnter(cancel, { pointerType: "touch" });
+    fireEvent.click(cancel, { detail: 1 });
     expect(handlers.onCancel).not.toHaveBeenCalled();
 
-    fireEvent.click(cancel);
+    fireEvent.click(cancel, { detail: 1 });
+    expect(handlers.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test("cancels on the first keyboard press, with nothing to reveal first", () => {
+    tile({
+      plan: notionPlan,
+      state: { phase: "waiting", canCancel: true },
+    });
+
+    // A keyboard press and a screen reader's activation carry no pointer, so
+    // there is no mis-aimed thumb to guard against. Arming here would read as
+    // a cancel button that does nothing.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel connecting Notion" }),
+      { detail: 0 },
+    );
     expect(handlers.onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -218,6 +237,30 @@ describe("IntegrationTile", () => {
     // doing: anything else here would be a line the grid row has to grow for.
     const description = container.querySelector("p.line-clamp-2");
     expect(description?.textContent).toBe(notionPlan.description ?? "");
+  });
+
+  test("puts the progress where a thumb can read it with no hover", () => {
+    const { container } = render(
+      <HoverCapabilityOverride hoverCapable={false}>
+        <IntegrationTile
+          {...handlers}
+          plan={notionPlan}
+          state={{ phase: "waiting", canCancel: true }}
+        />
+      </HoverCapabilityOverride>,
+    );
+
+    // No hover means no tooltip at all, so the message takes the description's
+    // two reserved lines instead. Still one block, still the same height.
+    const blocks = container.querySelectorAll("p.line-clamp-2");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.textContent).toBe(
+      "Finish signing in to Notion in your browser.",
+    );
+    // And only once, so a screen reader does not hear it twice.
+    expect(
+      screen.getAllByText("Finish signing in to Notion in your browser."),
+    ).toHaveLength(1);
   });
 
   test("sends a failed MCP attempt to its setup guide and its alternatives", async () => {

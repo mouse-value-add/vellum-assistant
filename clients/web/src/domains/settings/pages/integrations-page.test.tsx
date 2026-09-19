@@ -270,17 +270,17 @@ async function settle() {
 /**
  * Call off the sign-in from the tile's action slot.
  *
- * The slot spends the wait as a spinner and only turns into an X once a
- * pointer or a keyboard has arrived on it, so a test that means to cancel
- * arrives the same way a mouse does. A bare click would only reveal the X,
- * which is the whole point of it on a touch screen.
+ * The slot spends the wait as a spinner and turns into an X once a mouse
+ * arrives on it, so a test that means to cancel arrives the same way a mouse
+ * does. A finger gets a second press instead, which is the whole point of it
+ * on a touch screen.
  */
 function cancelFromTile(name: string) {
   const button = screen.getByRole("button", {
     name: `Cancel connecting ${name}`,
   });
-  fireEvent.pointerEnter(button);
-  fireEvent.click(button);
+  fireEvent.pointerEnter(button, { pointerType: "mouse" });
+  fireEvent.click(button, { detail: 1 });
 }
 
 /** Radix opens a menu on pointer-down, not on a synthetic click. */

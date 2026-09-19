@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { HoverCapabilityOverride } from "@vellumai/design-library/utils/hover-capability";
 import { expect, screen, userEvent } from "storybook/test";
 
 import {
@@ -181,6 +182,23 @@ export const WaitingHovered: Story = {
       await screen.findByRole("button", { name: "Cancel connecting Notion" }),
     );
   },
+};
+
+/**
+ * The same wait on a device that cannot hover, where a tooltip mounts
+ * nothing. The message takes the description's two reserved lines instead of
+ * a line of its own, so a thumb can read it and the tile is the height it was.
+ * Pressing the square reveals the X; pressing it again calls the sign-in off.
+ */
+export const WaitingOnTouch: Story = {
+  args: { plan: notionPlan, state: { phase: "waiting", canCancel: true } },
+  decorators: [
+    (Story) => (
+      <HoverCapabilityOverride hoverCapable={false}>
+        <Story />
+      </HoverCapabilityOverride>
+    ),
+  ],
 };
 
 /** The grant landed; the server is coming up, and there is nothing to cancel. */
