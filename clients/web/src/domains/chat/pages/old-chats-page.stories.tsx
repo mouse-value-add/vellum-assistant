@@ -81,7 +81,9 @@ const HISTORY: Conversation[] = DAY_OFFSETS.map((offset, index) => {
   return {
     conversationId: `conv-${index + 1}`,
     title: TITLES[index % TITLES.length],
-    lastMessageAt: daysAgo(offset, 9 + (index % 9)),
+    /* Kept before `NOW`'s 14:30 so today's rows read as times already past,
+       which is what a real history holds. */
+    lastMessageAt: daysAgo(offset, 8 + (index % 6)),
     createdAt: daysAgo(offset + 1),
     originChannel: channel,
     /* Every fifth row is filed as done, and every seventh belongs to a

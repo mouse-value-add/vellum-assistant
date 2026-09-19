@@ -30,6 +30,7 @@ import {
   PanelItem,
   VirtualList,
 } from "@vellumai/design-library";
+import { cn } from "@vellumai/design-library/utils/cn";
 
 import { PageShell } from "@/components/page-shell";
 import {
@@ -57,12 +58,15 @@ import {
   type OldChatsFilter,
 } from "@/domains/chat/utils/old-chats-filters";
 import { formatLocale, useTranslation, type TFunction } from "@/i18n";
-import { formatRelativeTime } from "@/lib/relative-time";
 import type {
   Conversation,
   ConversationGroup,
 } from "@/types/conversation-types";
-import { bucketByDate, type DateBucketId } from "@/utils/bucket-by-date";
+import {
+  bucketByDate,
+  formatBucketedTime,
+  type DateBucketId,
+} from "@/utils/bucket-by-date";
 import { ChannelIcon, getChannelLabel } from "@/utils/channel-presentation";
 import { useDisplayConversationTitle } from "@/utils/conversation-title";
 import { isPointerCoarse } from "@/utils/pointer";
@@ -125,20 +129,57 @@ function rowTime(conversation: Conversation): number | undefined {
   return conversation.lastMessageAt ?? conversation.createdAt;
 }
 
+/**
+ * The row's timestamp, and the "Done" that precedes it. Metadata, so it is
+ * drawn at the size and tone the rest of the page gives secondary text rather
+ * than at the title's weight: this page is a long column of near-identical
+ * rows, and the title is the only thing in one worth reading first.
+ */
+export const ROW_META_CLASSES =
+  "whitespace-nowrap tabular-nums text-body-small-lighter text-[color:var(--content-tertiary)]";
+
+/**
+ * Right-aligns both occupants of the row's shared trailing cell.
+ *
+ * `PanelItem` stacks the badge and the trailing action in one `CrossfadeStack`
+ * so they trade places without moving the title, and that cell centres what it
+ * holds. Centring is right for the sidebar, whose badge is a status dot about
+ * the width of its ellipsis. Here the badge is a timestamp several times wider
+ * than the check that replaces it, so a centred check floats inboard by half
+ * the difference and lands somewhere new on every row. Stretching both
+ * occupants and ending their content pins the check's right edge to the
+ * timestamp's, on every row.
+ *
+ * Applied from the call site through `data-slot`, which is the design
+ * library's stated way to restyle a part from outside without widening a
+ * component's API (see `packages/design-library/AGENTS.md`). The descendant
+ * selector outweighs the badge's own `justify-center`, so this does not
+ * depend on utility ordering.
+ */
+export const META_SLOT_CLASSES = [
+  "[&_[data-slot=crossfade-stack]>*]:w-full",
+  "[&_[data-slot=crossfade-stack]>*]:justify-end",
+].join(" ");
+
 /** Exported for its own test; the page is the only thing that renders it. */
-export function OldChatsRow({ conversation }: { conversation: Conversation }) {
+export function OldChatsRow({
+  conversation,
+  now,
+}: {
+  conversation: Conversation;
+  now: Date;
+}) {
   const { t } = useTranslation("chat");
   const displayTitle = useDisplayConversationTitle();
   const ctx = useConversationListContext();
   const done = isDoneConversation(conversation);
   const timestamp = rowTime(conversation);
-  const relative =
+  /* Measured against the same `now` the bands are, so the label and the
+     heading above it are two readings of one decision. */
+  const when =
     timestamp === undefined
       ? ""
-      : formatRelativeTime(timestamp, {
-          locale: formatLocale(),
-          minimumUnit: "minute",
-        });
+      : formatBucketedTime(timestamp, now, formatLocale());
   /* This page exists only with `sidebar-done` on, so its menus never say
      "Archive": the label set is pinned to the done wording rather than read
      off the flag, which is what keeps a story of the page honest too. */
@@ -166,9 +207,9 @@ export function OldChatsRow({ conversation }: { conversation: Conversation }) {
         />
       }
       badge={
-        done
-          ? t("oldChatsPage.doneMeta", { time: relative })
-          : relative || undefined
+        <span className={ROW_META_CLASSES}>
+          {done ? t("oldChatsPage.doneMeta", { time: when }) : when}
+        </span>
       }
       badgeBare
       onSelect={() => ctx.onSelect(conversation.conversationId)}
@@ -182,7 +223,10 @@ export function OldChatsRow({ conversation }: { conversation: Conversation }) {
           onClick={toggleDone}
         />
       }
-      className="min-h-[36px] px-2 text-[var(--content-default)]"
+      className={cn(
+        "min-h-[36px] px-2 text-[var(--content-default)]",
+        META_SLOT_CLASSES,
+      )}
       title={
         timestamp === undefined
           ? undefined
@@ -309,9 +353,9 @@ export function OldChatsPage({
           {item.label}
         </h2>
       ) : (
-        <OldChatsRow conversation={item.conversation} />
+        <OldChatsRow conversation={item.conversation} now={bandedAt} />
       ),
-    [],
+    [bandedAt],
   );
 
   const endReached = useCallback(() => {

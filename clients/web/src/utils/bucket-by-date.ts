@@ -41,7 +41,12 @@ export function dateBucketKey(id: DateBucketId): string {
   return id.kind === "month" ? `month:${id.year}-${id.month}` : id.kind;
 }
 
-function bucketIdFor(timestamp: number, now: Date): DateBucketId {
+/**
+ * The band `timestamp` falls in, for a caller holding one instant rather than
+ * a list. {@link bucketByDate} files its items through this, so anything that
+ * labels a row with it agrees with the heading the row sits under.
+ */
+export function dateBucketIdFor(timestamp: number, now: Date): DateBucketId {
   const today = localDayStart(now);
   if (timestamp >= today) {
     return { kind: "today" };
@@ -100,7 +105,7 @@ export function bucketByDate<T>(
     if (timestamp == null || !Number.isFinite(timestamp)) {
       continue;
     }
-    const id = bucketIdFor(timestamp, now);
+    const id = dateBucketIdFor(timestamp, now);
     const key = dateBucketKey(id);
     const existing = buckets.get(key);
     if (existing) {
@@ -113,4 +118,62 @@ export function bucketByDate<T>(
      recency-ordered in practice but nothing here depends on that, and a band
      order that changes with the input is a band order nobody can test. */
   return [...buckets.values()].sort(compareBuckets);
+}
+
+/**
+ * `Intl.DateTimeFormat` is expensive to construct and the reuse is the
+ * documented pattern, so each shape is built once per locale. The key carries
+ * the shape because one locale needs three of them.
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatter(
+  shape: "time" | "dayMonth" | "dayMonthYear",
+  locale: string | undefined,
+): Intl.DateTimeFormat {
+  const key = `${shape}:${locale ?? ""}`;
+  let cached = formatters.get(key);
+  if (!cached) {
+    cached = new Intl.DateTimeFormat(
+      locale,
+      shape === "time"
+        ? { hour: "numeric", minute: "2-digit" }
+        : shape === "dayMonth"
+          ? { day: "numeric", month: "short" }
+          : { day: "numeric", month: "short", year: "numeric" },
+    );
+    formatters.set(key, cached);
+  }
+  return cached;
+}
+
+/**
+ * How a row inside a date band names its own instant, in a form that cannot
+ * contradict the heading above it.
+ *
+ * Today and Yesterday are single days, so the clock time is the only thing
+ * left to say and it is unambiguous under either heading. Every older band
+ * spans several days, so the row carries the date; the year shows only when
+ * it differs from `now`'s, which is the rule `formatFriendlyDate` follows.
+ *
+ * Deliberately not a relative duration ("2 days ago"). Those round, and a
+ * rounded duration disagrees with a calendar band: a chat from early
+ * yesterday is a bit over a day old and reads as two days, under a heading
+ * that says Yesterday.
+ */
+export function formatBucketedTime(
+  timestamp: number,
+  now: Date,
+  locale?: string,
+): string {
+  const kind = dateBucketIdFor(timestamp, now).kind;
+  const date = new Date(timestamp);
+  if (kind === "today" || kind === "yesterday") {
+    return formatter("time", locale).format(date);
+  }
+  const shape =
+    date.getFullYear() === now.getFullYear() ? "dayMonth" : "dayMonthYear";
+  return formatter(shape, locale).format(date);
 }

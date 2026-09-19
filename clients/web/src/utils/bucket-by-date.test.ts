@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { bucketByDate, dateBucketKey } from "@/utils/bucket-by-date";
+import {
+  bucketByDate,
+  dateBucketIdFor,
+  dateBucketKey,
+  formatBucketedTime,
+} from "@/utils/bucket-by-date";
 
 /** Local wall-clock instant, so every case is expressed in the reader's zone. */
 function at(
@@ -127,6 +132,72 @@ describe("bucketByDate", () => {
       { key: "today", items: [afterMidnight] },
       { key: "yesterday", items: [beforeTransition] },
     ]);
+  });
+});
+
+describe("formatBucketedTime", () => {
+  const EN = "en-US";
+
+  test("names a chat from today by its clock time", () => {
+    expect(formatBucketedTime(at(2026, 8, 18, 9, 14), NOW, EN)).toBe("9:14 AM");
+  });
+
+  // The defect this replaced: a rounded relative duration reads "2 days ago"
+  // for an instant the calendar bands put under Yesterday.
+  test("names a chat from early yesterday by its clock time, not a duration", () => {
+    const earlyYesterday = at(2026, 8, 17, 0, 30);
+    expect(dateBucketIdFor(earlyYesterday, NOW).kind).toBe("yesterday");
+    expect(formatBucketedTime(earlyYesterday, NOW, EN)).toBe("12:30 AM");
+  });
+
+  test("names an older chat in the current year by day and month", () => {
+    expect(formatBucketedTime(at(2026, 8, 12, 16, 5), NOW, EN)).toBe("Sep 12");
+  });
+
+  test("adds the year once it differs from now's", () => {
+    expect(formatBucketedTime(at(2025, 10, 3, 16, 5), NOW, EN)).toBe(
+      "Nov 3, 2025",
+    );
+  });
+
+  test("keeps a January instant in the current year without a year", () => {
+    expect(formatBucketedTime(at(2026, 0, 6, 8, 0), NOW, EN)).toBe("Jan 6");
+  });
+
+  test("formats in the locale it is given", () => {
+    expect(formatBucketedTime(at(2026, 8, 12, 16, 5), NOW, "es-ES")).toMatch(
+      /12/,
+    );
+    expect(formatBucketedTime(at(2026, 8, 12, 16, 5), NOW, "es-ES")).not.toBe(
+      "Sep 12",
+    );
+  });
+
+  // Every band a row can sit under has to produce a label, and none of them
+  // may produce a relative phrase.
+  test("never produces a relative phrase, in any band", () => {
+    const samples = [
+      at(2026, 8, 18, 9),
+      at(2026, 8, 17, 9),
+      at(2026, 8, 14, 9),
+      at(2026, 8, 1, 9),
+      at(2026, 6, 20, 9),
+      at(2025, 11, 31, 9),
+    ];
+    for (const sample of samples) {
+      const label = formatBucketedTime(sample, NOW, EN);
+      expect(label).not.toMatch(/ago|yesterday|now|day/i);
+      expect(label.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("dateBucketIdFor", () => {
+  test("answers the same band bucketByDate files an item into", () => {
+    const sample = at(2026, 8, 14);
+    expect(dateBucketKey(dateBucketIdFor(sample, NOW))).toBe(
+      bucketByDate([sample], (value) => value, NOW)[0].key,
+    );
   });
 });
 

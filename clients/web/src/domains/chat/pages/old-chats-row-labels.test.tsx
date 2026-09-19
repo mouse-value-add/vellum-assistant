@@ -62,6 +62,9 @@ import { ConversationListProvider } from "@/domains/chat/components/conversation
 import { useClientFeatureFlagStore } from "@/stores/client-feature-flag-store";
 import type { Conversation } from "@/types/conversation-types";
 
+/** A fixed clock, so the row's relative timestamp is not the thing under test. */
+const NOW = Date.UTC(2026, 8, 18, 16, 30);
+
 const CONVERSATION: Conversation = {
   conversationId: "conv-xyz",
   title: "Launch review brief",
@@ -80,7 +83,7 @@ function renderRow(conversation: Conversation) {
           onDelete: () => {},
         },
       },
-      createElement(OldChatsRow, { conversation }),
+      createElement(OldChatsRow, { conversation, now: new Date(NOW) }),
     ),
   );
 }
