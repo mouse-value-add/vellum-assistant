@@ -1,6 +1,4 @@
 import {
-  Archive,
-  ArchiveRestore,
   Copy,
   ExternalLink,
   FolderInput,
@@ -267,13 +265,16 @@ export function renderConversationMenuItems({
   const archiveItem =
     isArchived && onUnarchive ? (
       <Primitive.Item
-        leftIcon={<ArchiveRestore size={14} />}
+        leftIcon={<doneLabels.unarchiveIcon size={14} />}
         onSelect={onUnarchive}
       >
         {doneLabels.unarchive}
       </Primitive.Item>
     ) : onArchive ? (
-      <Primitive.Item leftIcon={<Archive size={14} />} onSelect={onArchive}>
+      <Primitive.Item
+        leftIcon={<doneLabels.archiveIcon size={14} />}
+        onSelect={onArchive}
+      >
         {doneLabels.archive}
       </Primitive.Item>
     ) : null;
@@ -590,7 +591,7 @@ export function renderConversationMenuItemsAsPanelItems({
     isArchived && onUnarchive
       ? buildSheetMenuItem({
           key: "unarchive",
-          icon: ArchiveRestore,
+          icon: doneLabels.unarchiveIcon,
           label: doneLabels.unarchive,
           run: onUnarchive,
           onClose,
@@ -598,7 +599,7 @@ export function renderConversationMenuItemsAsPanelItems({
       : onArchive
         ? buildSheetMenuItem({
             key: "archive",
-            icon: Archive,
+            icon: doneLabels.archiveIcon,
             label: doneLabels.archive,
             run: onArchive,
             onClose,

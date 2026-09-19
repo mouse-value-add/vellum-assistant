@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Archive, ArchiveRestore, Check, RotateCcw } from "lucide-react";
 
 import { fixedT } from "@/i18n";
 import { conversationDoneLabels } from "@/utils/done-labels";
@@ -50,6 +51,20 @@ describe("conversationDoneLabels", () => {
     ] as const) {
       expect(off[key]).not.toBe(on[key]);
     }
+  });
+
+  /* A menu row reading "Mark as done" beside an archive box is the drift the
+     icons travel with the labels to prevent. */
+  test("the glyphs change with the wording", () => {
+    const off = conversationDoneLabels(t, false);
+    expect(off.archiveIcon).toBe(Archive);
+    expect(off.unarchiveIcon).toBe(ArchiveRestore);
+    expect(off.archiveAllIcon).toBe(Archive);
+
+    const on = conversationDoneLabels(t, true);
+    expect(on.archiveIcon).toBe(Check);
+    expect(on.unarchiveIcon).toBe(RotateCcw);
+    expect(on.archiveAllIcon).toBe(Check);
   });
 
   test("the bulk confirmation stops telling users to search is:archived", () => {

@@ -17,8 +17,9 @@
  * `withContextMenu={false}` (no right-click menu) and `marquee={false}`.
  */
 
-import { Archive, ArchiveRestore, Check, Pin, PinOff } from "lucide-react";
+import { Check, Pin, PinOff } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ContextMenu, PanelItem, Tooltip } from "@vellumai/design-library";
@@ -202,14 +203,14 @@ function buildSwipeActions(
     trailingActions.push({
       id: "unarchive",
       label: doneLabels.unarchive,
-      icon: ArchiveRestore,
+      icon: doneLabels.unarchiveIcon,
       onSelect: () => ctx.onUnarchive?.(conversation),
     });
   } else if (!isArchived && ctx.onArchive) {
     trailingActions.push({
       id: "archive",
       label: doneLabels.swipeArchive,
-      icon: Archive,
+      icon: doneLabels.archiveIcon,
       variant: "destructive",
       onSelect: () => ctx.onArchive?.(conversation),
     });
@@ -223,6 +224,14 @@ function buildSwipeActions(
  * Short enough to read as the row leaving rather than as a wait for it.
  */
 const DONE_EXIT_MS = 180;
+
+/**
+ * The row's own box, animatable. `SwipeActionReveal` forwards its ref and
+ * takes `style`, which is all motion needs to drive the element a list
+ * already lays out, so the collapse costs no wrapper and the rows stand
+ * exactly where they stand with the flag off.
+ */
+const MotionSwipeActionReveal = motion.create(SwipeActionReveal);
 
 export function ConversationRow({
   conversation,
@@ -343,75 +352,83 @@ export function ConversationRow({
     <ConversationActionsMenu {...menuProps} shortcuts={shortcuts} />
   );
 
-  const swipeRow = (
-    <SwipeActionReveal
-      // The row's shape, which is `PanelItem`'s radius: the layer a swipe
-      // reveals behind the row inherits it, so no corner of the layer shows
-      // past the row's own.
-      className="rounded-[6px]"
-      leadingActions={leadingActions}
-      trailingActions={trailingActions}
-    >
-      <PanelItem
-        label={displayTitle(conversation.title)}
-        marqueeOnHover={marquee}
-        active={isActiveConversation}
-        onSelect={() => select(conversationId)}
-        badge={
-          hasThreadStatus(status) ? (
-            <ThreadStatusIndicator {...status} />
-          ) : undefined
-        }
-        badgeBare
-        trailingAction={trailingAction}
-        className={cn(
-          // `!` forces this over PanelItem's own max-md:py-3: cross-package
-          // Tailwind generation order doesn't reliably favor a plain
-          // (unmarked) override here.
-          "p-[6px] max-md:p-2! text-[var(--content-default)]",
-          // A row in the drawer stands at the same height as the pills above
-          // it, which is taller than a row in the rail. Restated under
-          // `max-md` for the same reason the padding above is: PanelItem's own
-          // `max-md:h-auto` is a variant, so an unprefixed height never
-          // reaches it at a touch viewport.
-          // The wash belongs to the row rather than the panel: declared on the
-          // menu it would reach every active PanelItem in the drawer, and a
-          // tinted pill that publishes `--panel-item-bg` and no active value
-          // of its own would lose its colour to it. It reads through the
-          // row's hover property first so the active row matches whatever
-          // its card hovers in: the assistant card publishes an accent wash
-          // for hover, and a value stated on the row itself would beat it.
-          ctx.overlayCards
-            ? "min-h-[var(--side-menu-tile-size)] [--panel-item-active:var(--panel-item-hover,var(--surface-hover))]"
-            : "h-[30px]",
-        )}
-      />
-    </SwipeActionReveal>
+  const swipeProps = {
+    // The row's shape, which is `PanelItem`'s radius: the layer a swipe
+    // reveals behind the row inherits it, so no corner of the layer shows
+    // past the row's own.
+    className: "rounded-[6px]",
+    leadingActions,
+    trailingActions,
+  };
+
+  const rowBody = (
+    <PanelItem
+      label={displayTitle(conversation.title)}
+      marqueeOnHover={marquee}
+      active={isActiveConversation}
+      onSelect={() => select(conversationId)}
+      badge={
+        hasThreadStatus(status) ? (
+          <ThreadStatusIndicator {...status} />
+        ) : undefined
+      }
+      badgeBare
+      trailingAction={trailingAction}
+      className={cn(
+        // `!` forces this over PanelItem's own max-md:py-3: cross-package
+        // Tailwind generation order doesn't reliably favor a plain
+        // (unmarked) override here.
+        "p-[6px] max-md:p-2! text-[var(--content-default)]",
+        // A row in the drawer stands at the same height as the pills above
+        // it, which is taller than a row in the rail. Restated under
+        // `max-md` for the same reason the padding above is: PanelItem's own
+        // `max-md:h-auto` is a variant, so an unprefixed height never
+        // reaches it at a touch viewport.
+        // The wash belongs to the row rather than the panel: declared on the
+        // menu it would reach every active PanelItem in the drawer, and a
+        // tinted pill that publishes `--panel-item-bg` and no active value
+        // of its own would lose its colour to it. It reads through the
+        // row's hover property first so the active row matches whatever
+        // its card hovers in: the assistant card publishes an accent wash
+        // for hover, and a value stated on the row itself would beat it.
+        ctx.overlayCards
+          ? "min-h-[var(--side-menu-tile-size)] [--panel-item-active:var(--panel-item-hover,var(--surface-hover))]"
+          : "h-[30px]",
+      )}
+    />
   );
 
   /* The row collapses and fades as it is marked done, then hands over to the
      archive, so the list closes the gap once rather than snapping shut under
-     the pointer. The wrapper mounts only on that path: off the flag, on a
-     windowed list, or under reduced motion the row is the bare row it has
-     always been. */
+     the pointer.
+
+     Animated on the row's own box, never on a wrapper around it. An extra
+     element between the list and the row is another child for the list's
+     spacing to act on, which moved every row under the flag; the row the
+     list lays out has to be the same element in both states. `overflow` is
+     declared only while the row is leaving, because the box it is declared
+     on is a flex item, and one that clips gives up its content-sized
+     minimum (see `SwipeActionReveal`). At rest this writes `height: auto`
+     and `opacity: 1`, which are the values the element already had. */
   const panelItem = collapsesOut ? (
-    <motion.div
-      className="overflow-hidden"
+    <MotionSwipeActionReveal
+      {...swipeProps}
       initial={false}
       animate={
         leaving ? { height: 0, opacity: 0 } : { height: "auto", opacity: 1 }
       }
       transition={{ duration: DONE_EXIT_MS / 1000, ease: "easeOut" }}
+      style={leaving ? { overflow: "hidden" } : undefined}
       onAnimationComplete={() => {
         if (leaving) {
           runPendingDone();
         }
       }}
     >
-      {swipeRow}
-    </motion.div>
+      {rowBody}
+    </MotionSwipeActionReveal>
   ) : (
-    swipeRow
+    <SwipeActionReveal {...swipeProps}>{rowBody}</SwipeActionReveal>
   );
 
   // Touch: replace the right-click ContextMenu with a long-press → bottom sheet.

@@ -19,7 +19,6 @@
  */
 
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpRight,
@@ -205,7 +204,7 @@ export function renderGroupMenuItems({
       ) : null}
       {onArchiveAll ? (
         <Primitive.Item
-          leftIcon={<Archive size={14} />}
+          leftIcon={<doneLabels.archiveAllIcon size={14} />}
           onSelect={onArchiveAll}
           disabled={!hasConversations}
         >
@@ -326,7 +325,7 @@ export function renderGroupMenuItemsAsPanelItems({
       {onArchiveAll
         ? buildPanelMenuItem({
             key: "archive-all",
-            icon: Archive,
+            icon: doneLabels.archiveAllIcon,
             label: doneLabels.archiveAll,
             disabled: !hasConversations,
             run: onArchiveAll,
