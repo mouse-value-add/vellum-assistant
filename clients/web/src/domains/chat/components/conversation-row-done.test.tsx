@@ -82,12 +82,18 @@ const CONVERSATION: Conversation = {
   title: "Launch review brief",
 };
 
-function renderRow(ctx: Partial<ConversationListContextValue>) {
+function renderRow(
+  ctx: Partial<ConversationListContextValue>,
+  rowProps: { animateDone?: boolean } = {},
+) {
   return render(
     createElement(
       ConversationListProvider,
       { value: { onSelect: () => {}, ...ctx } },
-      createElement(ConversationRow, { conversation: CONVERSATION }),
+      createElement(ConversationRow, {
+        conversation: CONVERSATION,
+        ...rowProps,
+      }),
     ),
   );
 }
@@ -131,7 +137,7 @@ afterAll(() => {
   mock.restore();
 });
 
-describe("ConversationRow — sidebar-done off", () => {
+describe("ConversationRow: sidebar-done off", () => {
   test("the trailing control is the actions menu, not a check", () => {
     const { queryByLabelText, getByLabelText } = renderRow({
       onArchive: () => {},
@@ -153,7 +159,7 @@ describe("ConversationRow — sidebar-done off", () => {
   });
 });
 
-describe("ConversationRow — sidebar-done on", () => {
+describe("ConversationRow: sidebar-done on", () => {
   beforeEach(() => {
     useClientFeatureFlagStore.setState({ sidebarDone: true });
   });
@@ -224,5 +230,25 @@ describe("ConversationRow — sidebar-done on", () => {
     });
     getByLabelText("Mark as done").dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  /* The collapse is a courtesy and the write is not: a row torn off the
+     screen mid-animation (a navigation, a section remount) still has to
+     send the archive the user asked for. */
+  test("a row unmounted mid-collapse still archives", () => {
+    const archived: string[] = [];
+    const { getByLabelText, unmount } = renderRow(
+      {
+        onArchive: (conversation) => archived.push(conversation.conversationId),
+      },
+      { animateDone: true },
+    );
+
+    fireEvent.click(getByLabelText("Mark as done"));
+    // The collapse is still running: nothing has been written yet.
+    expect(archived).toEqual([]);
+
+    unmount();
+    expect(archived).toEqual(["conv-xyz"]);
   });
 });

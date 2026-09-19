@@ -332,14 +332,10 @@ function SidebarSectionCardWithMenu({
       unbounded={section.type === "pinned"}
       isLast={isLast}
       maxHeight={isAssistantSection ? ASSISTANT_SECTION_MAX_HEIGHT : undefined}
-      /* Under the flag a section rests at its own height for good: the list
-         is short because what is finished leaves it, so an Expand control
-         would be an answer to a problem the check already solves. The
-         section still caps, scrolls and pages the same way. */
-      expandable={
-        !sidebarDone &&
-        (section.type === "recents" || section.type === "channel")
-      }
+      /* Which sections rest at the mid height, whatever the flag: the cap is
+         the section's shape, and only the control that grows past it goes
+         away under `sidebar-done` (see `ConversationRowList`). */
+      expandable={section.type === "recents" || section.type === "channel"}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
       items={conversations}

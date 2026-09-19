@@ -19,7 +19,7 @@
 
 import { Archive, ArchiveRestore, Check, Pin, PinOff } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ContextMenu, PanelItem, Tooltip } from "@vellumai/design-library";
 import { cn } from "@vellumai/design-library/utils/cn";
@@ -287,14 +287,32 @@ export function ConversationRow({
      and in the chat header's title dropdown. The check takes the ellipsis's
      own slot, box and reveal, so nothing on the row moves. */
   const collapsesOut = sidebarDone && animateDone && !reduceMotion;
+
+  /* The archive the collapse is waiting on. Held in a ref and fired at most
+     once, because the animation is a courtesy and the write is not: the
+     accepted click has to reach the daemon whether the animation finishes,
+     is cut short by a navigation that unmounts the row, or never runs at all
+     because the tab was backgrounded before its first frame. */
+  const pendingDoneRef = useRef<(() => void) | null>(null);
+  const runPendingDone = useCallback(() => {
+    const run = pendingDoneRef.current;
+    pendingDoneRef.current = null;
+    run?.();
+  }, []);
+  useEffect(() => () => runPendingDone(), [runPendingDone]);
+
   const markDone = useCallback(() => {
     flash();
     if (!collapsesOut) {
       ctx.onArchive?.(conversation);
       return;
     }
+    pendingDoneRef.current = () => ctx.onArchive?.(conversation);
     setLeaving(true);
-  }, [collapsesOut, ctx, conversation, flash]);
+    /* The backstop, not the usual path: `onAnimationComplete` gets there
+       first whenever frames are running. */
+    window.setTimeout(runPendingDone, DONE_EXIT_MS * 2);
+  }, [collapsesOut, ctx, conversation, flash, runPendingDone]);
 
   const doneCheck =
     sidebarDone && ctx.onArchive && conversation.archivedAt == null ? (
@@ -386,7 +404,7 @@ export function ConversationRow({
       transition={{ duration: DONE_EXIT_MS / 1000, ease: "easeOut" }}
       onAnimationComplete={() => {
         if (leaving) {
-          ctx.onArchive?.(conversation);
+          runPendingDone();
         }
       }}
     >

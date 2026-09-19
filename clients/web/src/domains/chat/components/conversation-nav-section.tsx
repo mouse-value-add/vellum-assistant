@@ -23,7 +23,8 @@
  * non-last section caps at, so a hundred threads do not run the rail's
  * whole height by default, and grows to the full height on request (see
  * {@link SidebarExpandRow}). Either way the rows scroll inside it the same
- * way; only how much of the list is in view changes.
+ * way; only how much of the list is in view changes. Under `sidebar-done`
+ * the request goes away and the section stays at the resting height.
  *
  * Every section above the last one caps at a fixed height and scrolls
  * within itself instead, since an uncapped busy section would otherwise
@@ -66,7 +67,10 @@ import {
   renderGroupMenuItemsAsPanelItems,
   type GroupMenuItemsProps,
 } from "@/domains/chat/components/group-actions-menu";
-import { useConversationDoneLabels } from "@/utils/done-labels";
+import {
+  useConversationDoneLabels,
+  useSidebarDoneEnabled,
+} from "@/utils/done-labels";
 import { useTranslation } from "@/i18n";
 import type { Conversation } from "@/types/conversation-types";
 import { useOverflows } from "@/hooks/use-overflows";
@@ -172,18 +176,26 @@ export function ConversationRowList({
      control so it can be put back. */
   const canExpand =
     expandable === true && isLast === true && !unbounded && !scrollWithBody;
+  /* Under `sidebar-done` the section rests at its mid height for good: the
+     list is short because what is finished leaves it, so the control that
+     grows past the cap is an answer to a problem the check already solves.
+     The cap, the scroll and the paging are untouched, and a section the user
+     had grown before the flag came on is back at the resting height rather
+     than stranded tall with nothing to put it back. */
+  const sidebarDone = useSidebarDoneEnabled();
+  const grown = expanded && !sidebarDone;
   const { ref: scrollerRef, overflows: scrollerOverflows } =
     useOverflows<HTMLDivElement>({ contentKey: items.length });
   const overflowsCap =
     windows || scrollerOverflows || onEndReached !== undefined;
   const expandRow =
-    canExpand && (overflowsCap || expanded) ? (
+    !sidebarDone && canExpand && (overflowsCap || grown) ? (
       <SidebarExpandRow
-        expanded={expanded}
-        onToggle={() => onExpandedChange?.(!expanded)}
+        expanded={grown}
+        onToggle={() => onExpandedChange?.(!grown)}
       />
     ) : null;
-  const atMidHeight = canExpand && !expanded;
+  const atMidHeight = canExpand && !grown;
 
   const renderRow = (conversation: Conversation) => (
     <ConversationRow

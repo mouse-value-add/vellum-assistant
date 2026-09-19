@@ -599,26 +599,37 @@ export function useConversationActions({
         }
       }
 
-      archiveMutation.mutate({
-        assistantId,
-        conversationId: conversation.conversationId,
-        previousArchivedAt: conversation.archivedAt,
-      });
-
-      /* The row is gone from the list the moment it is checked, so the toast
-         is the only place the action can be taken back. Keyed on the
-         conversation, so checking one row twice replaces its toast rather
-         than stacking a second one beside it. */
-      if (sidebarDone) {
-        toast(t("conversationDoneToast.message"), {
-          id: `conversation-done:${conversation.conversationId}`,
-          description: conversation.title ?? undefined,
-          action: {
-            label: t("conversationDoneToast.undo"),
-            onClick: () => handleUnarchiveConversation(conversation),
+      archiveMutation.mutate(
+        {
+          assistantId,
+          conversationId: conversation.conversationId,
+          previousArchivedAt: conversation.archivedAt,
+        },
+        {
+          /* The row is gone from the list the moment it is checked, so the
+             toast is the only place the action can be taken back. Raised on
+             success rather than beside the request, for two reasons: a
+             failed archive rolls back silently instead of leaving a "Done"
+             standing over a conversation that is still open, and Undo cannot
+             be pressed until the archive has landed, so the two writes can
+             never reach the daemon out of order. Keyed on the conversation,
+             so checking one row twice replaces its toast rather than
+             stacking a second one beside it. */
+          onSuccess: () => {
+            if (!sidebarDone) {
+              return;
+            }
+            toast(t("conversationDoneToast.message"), {
+              id: `conversation-done:${conversation.conversationId}`,
+              description: conversation.title ?? undefined,
+              action: {
+                label: t("conversationDoneToast.undo"),
+                onClick: () => handleUnarchiveConversation(conversation),
+              },
+            });
           },
-        });
-      }
+        },
+      );
     },
     [
       activeConversationId,
