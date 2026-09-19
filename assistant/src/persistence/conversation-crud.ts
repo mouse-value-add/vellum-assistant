@@ -102,7 +102,7 @@ import {
   computerUseScreenshotAttachmentIdsFromMetadata,
   type ConversationCreateType,
   type ConversationOrigin,
-  isBackgroundEventMetadata,
+  isEchoSuppressedUserMessage,
   isHiddenMessageMetadata,
   isNoResponseMetadata,
   isReactionMessageMetadata,
@@ -945,6 +945,9 @@ interface InsertMessageCoreParams {
   /** Answered synchronously at the top of every insert attempt. See
    *  {@link AddMessageOptions.insertPrecondition}. */
   insertPrecondition?: () => boolean;
+  /** The row is a reservation booked ahead of the content that will fill it
+   *  ({@link reserveMessage}), so it carries nothing to read yet. */
+  reserved?: boolean;
 }
 
 /**
@@ -1032,6 +1035,7 @@ async function insertMessageCore(
     clientMessageId,
     id,
     insertPrecondition,
+    reserved,
   } = params;
   warnOnModelInvisibleContent(content, conversationId);
   const db = getDb();
@@ -1183,20 +1187,19 @@ async function insertMessageCore(
     { op: "insertMessageCore", context: { conversationId } },
   );
 
-  // A message the user reads brings a Done conversation back to the list. Two
-  // kinds of row are not that: a hidden machine signal, and the
-  // `<background_event>` trigger a wake persists ahead of its run — clients
-  // drop both from the transcript, so resurfacing on either would put the
-  // conversation back for work that has produced nothing yet. A deduplicated
-  // insert wrote no row at all. Best-effort: a failure here must not escalate
-  // into a failed message persist.
+  // A message the user reads brings a Done conversation back to the list.
+  // Three kinds of insert are not that: the echo-suppressed set, which never
+  // renders in the transcript; the empty row `reserveMessage` books for an LLM
+  // call that has not run yet, whose content arrives at the finalize seam and
+  // resurfaces from there; and a deduplicated insert, which wrote no row at
+  // all. Best-effort: a failure here must not escalate into a failed persist.
   if (
     !inserted.deduplicated &&
-    !isHiddenMessageMetadata(metadata) &&
-    !isBackgroundEventMetadata(metadata)
+    !reserved &&
+    !isEchoSuppressedUserMessage(metadata)
   ) {
     try {
-      resurfaceArchivedConversation(conversationId);
+      resurfaceArchivedConversation(conversationId, inserted.createdAt);
     } catch (err) {
       log.warn(
         { err, conversationId, messageId: inserted.id },
@@ -3549,35 +3552,50 @@ export function unarchiveConversation(id: string): boolean {
 }
 
 /**
- * Bring a Done conversation back to the list because a user-visible message
- * landed in it.
+ * Bring a Done conversation back to the list because a message the user reads
+ * landed in it at `activityAt`.
  *
  * Under the `sidebar-done` gate "Done" is a completion mark, not a deletion:
  * the conversation keeps its schedules and its channel threads, so anything
- * the user would read arriving in it has to be reachable again. Called from
- * {@link insertMessageCore}, the one seam every message append funnels
- * through, so the rule holds for each ingest path (channel inbound, scheduled
- * run output, assistant-initiated notification body, web and CLI sends)
- * without a per-provider hook.
+ * the user would read arriving in it has to be reachable again. Two seams call
+ * this, which between them cover every ingest path without a per-provider
+ * hook: {@link insertMessageCore}, where each durable append lands (channel
+ * inbound, web and CLI sends, wake tail messages, assistant-initiated
+ * notification bodies), and the turn's finalize effect, where a streamed
+ * assistant reply becomes readable content.
  *
- * Rows the user never reads do not resurface anything: hidden machine signals
- * and the `<background_event>` trigger each wake persists are both excluded by
- * the caller. Retrospectives and memory consolidation are excluded by
- * construction — they run in a fork or in a conversation of their own and
- * never append to the conversation under review.
+ * Rows the user never reads resurface nothing. `insertMessageCore` excludes
+ * the echo-suppressed set (hidden signals, subagent and ACP notifications, and
+ * the `<background_event>` trigger each wake persists) along with the empty
+ * row an LLM call reserves before it runs, so a call that is rejected before
+ * producing anything leaves the conversation Done. Retrospectives and memory
+ * consolidation are excluded by construction: they append to a fork or to a
+ * conversation of their own, never to the conversation under review.
+ *
+ * The clear is conditional on `archived_at <= activityAt` in one statement, so
+ * a Done mark the user makes after this activity (while a turn's deferred tail
+ * is still settling, or from the daemon while a worker runs the turn) wins
+ * instead of being erased by it.
  *
  * No-ops when the gate is off, which is the shipped behavior: nothing but the
  * unarchive route clears `archived_at`.
  */
-export function resurfaceArchivedConversation(conversationId: string): boolean {
+export function resurfaceArchivedConversation(
+  conversationId: string,
+  activityAt: number,
+): boolean {
   if (!isSidebarDoneEnabled(getConfig())) {
     return false;
   }
-  const conv = getConversation(conversationId);
-  if (!conv || conv.archivedAt == null) {
-    return false;
-  }
-  if (!unarchiveConversation(conversationId)) {
+  const now = Date.now();
+  const changed = rawRun(
+    "conversation:resurface",
+    "UPDATE conversations SET archived_at = NULL, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL AND archived_at <= ?",
+    now,
+    conversationId,
+    activityAt,
+  );
+  if (changed === 0) {
     return false;
   }
   publishConversationListAndMetadataChanged("reordered", conversationId);
@@ -4597,6 +4615,7 @@ export async function reserveMessage(
     content: inflightRef ? JSON.stringify({ ref: inflightRef }) : "[]",
     ...(inflightRef ? { finalized: 0 as const } : {}),
     metadata,
+    reserved: true,
   });
 }
 

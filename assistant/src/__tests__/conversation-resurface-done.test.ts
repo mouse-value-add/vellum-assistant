@@ -1,11 +1,13 @@
 /**
- * A Done conversation comes back to the list when a user-visible message
+ * A Done conversation comes back to the list when a message the user reads
  * lands in it.
  *
- * The rule is enforced at `insertMessageCore`, the one seam every message
- * append funnels through, so these tests drive it the way each ingest path
- * does: `addMessage` with that path's row shape. The paths themselves differ
- * only in the metadata they stamp, which is exactly what the seam reads.
+ * Two seams enforce the rule: `insertMessageCore`, where every durable append
+ * lands, and the turn's finalize effect, where a streamed reply becomes
+ * readable. These tests drive the insert seam the way each ingest path does,
+ * with `addMessage` and that path's row shape, and drive the finalize seam
+ * through `resurfaceArchivedConversation` itself, which is all the finalize
+ * effect adds to the reserved row.
  */
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
@@ -47,6 +49,8 @@ import {
   addMessage,
   archiveConversation,
   getConversation,
+  reserveMessage,
+  resurfaceArchivedConversation,
 } from "../persistence/conversation-crud.js";
 import { getDb } from "../persistence/db-connection.js";
 import { initializeDb } from "../persistence/db-init.js";
@@ -141,6 +145,35 @@ describe("Done conversations and new activity", () => {
     ]);
   });
 
+  test("the empty row an LLM call reserves leaves the conversation Done", async () => {
+    const reserved = await reserveMessage(
+      DONE_CONVERSATION_ID,
+      "assistant",
+      undefined,
+      "inflight/ref.jsonl",
+    );
+
+    expect(archivedAtOf(DONE_CONVERSATION_ID)).not.toBeNull();
+    expect(listInvalidations).toHaveLength(0);
+
+    // The finalize seam is what resurfaces it, once the row holds content.
+    expect(
+      resurfaceArchivedConversation(DONE_CONVERSATION_ID, reserved.createdAt),
+    ).toBe(true);
+    expect(archivedAtOf(DONE_CONVERSATION_ID)).toBeNull();
+    expect(listInvalidations).toHaveLength(1);
+  });
+
+  test("a Done mark made after the activity wins over the resurface", () => {
+    const activityAt = Date.now() - 60_000;
+
+    expect(
+      resurfaceArchivedConversation(DONE_CONVERSATION_ID, activityAt),
+    ).toBe(false);
+    expect(archivedAtOf(DONE_CONVERSATION_ID)).not.toBeNull();
+    expect(listInvalidations).toHaveLength(0);
+  });
+
   test("an inbound channel message from a person brings the conversation back", async () => {
     await addMessage(DONE_CONVERSATION_ID, "user", "any updates?", {
       metadata: {
@@ -154,9 +187,17 @@ describe("Done conversations and new activity", () => {
     expect(listInvalidations).toHaveLength(1);
   });
 
-  test("a hidden machine signal leaves the conversation Done", async () => {
+  test("rows that never render leave the conversation Done", async () => {
     await addMessage(DONE_CONVERSATION_ID, "user", "internal signal", {
       metadata: { hidden: true },
+      skipIndexing: true,
+    });
+    await addMessage(DONE_CONVERSATION_ID, "user", "subagent finished", {
+      metadata: { subagentNotification: { subagentId: "sub-1" } },
+      skipIndexing: true,
+    });
+    await addMessage(DONE_CONVERSATION_ID, "user", "acp session update", {
+      metadata: { acpNotification: { sessionId: "acp-1" } },
       skipIndexing: true,
     });
 

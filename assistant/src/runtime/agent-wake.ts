@@ -550,9 +550,9 @@ async function defaultResolveTarget(
     }
     // Under the `sidebar-done` gate an archived conversation is one the user
     // marked Done, not one they half-deleted: its schedules, channel threads
-    // and background tools keep working, and the first user-visible message
-    // the wake produces brings the conversation back to the list
-    // (`resurfaceArchivedConversation`, called from the message-insert seam).
+    // and background tools keep working, and the first message the wake
+    // produces for the user brings the conversation back to the list
+    // (`resurfaceArchivedConversation`).
     if (existing.archivedAt != null && !isSidebarDoneEnabled()) {
       log.info(
         { conversationId },
