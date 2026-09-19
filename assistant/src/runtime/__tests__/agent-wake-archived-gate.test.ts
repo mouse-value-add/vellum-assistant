@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 let sidebarDoneEnabled = false;
 mock.module("../../config/sidebar-done-gate.js", () => ({
-  SIDEBAR_DONE_FLAG: "sidebar-done",
+  SIDEBAR_DONE_FLAG_KEY: "sidebar-done",
   isSidebarDoneEnabled: () => sidebarDoneEnabled,
 }));
 

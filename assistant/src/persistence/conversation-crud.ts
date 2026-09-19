@@ -45,6 +45,7 @@ import { readProviderMetadata } from "../messaging/read-provider-metadata.js";
 import { HOOKS } from "../plugin-api/constants.js";
 import { forkConversationMemory } from "../plugins/defaults/memory/fork-conversation-memory.js";
 import { indexMessageNow } from "../plugins/defaults/memory/indexer.js";
+import { SKILL_CARD_MESSAGE_KIND } from "../plugins/defaults/memory/memory-retrospective-constants.js";
 import { runHook } from "../plugins/pipeline.js";
 import type { ContentBlock } from "../providers/types.js";
 import { getCurrentSeq } from "../runtime/assistant-stream-state.js";
@@ -1188,15 +1189,20 @@ async function insertMessageCore(
   );
 
   // A message the user reads brings a Done conversation back to the list.
-  // Three kinds of insert are not that: the echo-suppressed set, which never
+  // Four kinds of insert are not that: the echo-suppressed set, which never
   // renders in the transcript; the empty row `reserveMessage` books for an LLM
   // call that has not run yet, whose content arrives at the finalize seam and
-  // resurfaces from there; and a deduplicated insert, which wrote no row at
-  // all. Best-effort: a failure here must not escalate into a failed persist.
+  // resurfaces from there; a retrospective's skill card, which the assistant
+  // files about a conversation rather than in it, and which lands exactly when
+  // a conversation has gone idle, so resurfacing on it would bounce a chat the
+  // user has just marked done straight back into the sidebar; and a
+  // deduplicated insert, which wrote no row at all. Best-effort: a failure
+  // here must not escalate into a failed persist.
   if (
     !inserted.deduplicated &&
     !reserved &&
-    !isEchoSuppressedUserMessage(metadata)
+    !isEchoSuppressedUserMessage(metadata) &&
+    metadata?.kind !== SKILL_CARD_MESSAGE_KIND
   ) {
     try {
       resurfaceArchivedConversation(conversationId, inserted.createdAt);

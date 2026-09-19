@@ -27,7 +27,7 @@ mock.module("../persistence/embeddings/qdrant-client.js", () => ({
 
 let sidebarDoneEnabled = true;
 mock.module("../config/sidebar-done-gate.js", () => ({
-  SIDEBAR_DONE_FLAG: "sidebar-done",
+  SIDEBAR_DONE_FLAG_KEY: "sidebar-done",
   isSidebarDoneEnabled: () => sidebarDoneEnabled,
 }));
 
@@ -55,7 +55,10 @@ import {
 import { getDb } from "../persistence/db-connection.js";
 import { initializeDb } from "../persistence/db-init.js";
 import { conversations, messages } from "../persistence/schema/index.js";
-import { MEMORY_RETROSPECTIVE_INSTRUCTION_KIND } from "../plugins/defaults/memory/memory-retrospective-constants.js";
+import {
+  MEMORY_RETROSPECTIVE_INSTRUCTION_KIND,
+  SKILL_CARD_MESSAGE_KIND,
+} from "../plugins/defaults/memory/memory-retrospective-constants.js";
 import { setConfig } from "./helpers/set-config.js";
 
 setConfig("memory", { extraction: { useLLM: false } });
@@ -216,6 +219,39 @@ describe("Done conversations and new activity", () => {
       metadata: { automated: true },
       skipIndexing: true,
     });
+
+    expect(archivedAtOf(DONE_CONVERSATION_ID)).not.toBeNull();
+    expect(listInvalidations).toHaveLength(0);
+  });
+
+  test("a retrospective's skill card leaves the source conversation Done", async () => {
+    // The one row a retrospective does append to the conversation it reviewed.
+    // A pass runs when the conversation goes idle, which is exactly when the
+    // user has just marked it done, so the card must not bounce it back.
+    await addMessage(
+      DONE_CONVERSATION_ID,
+      "assistant",
+      JSON.stringify([
+        {
+          type: "ui_surface",
+          surfaceId: "surface-1",
+          surfaceType: "skill_card",
+          title: "I just learned how to do expense filing",
+          display: "inline",
+          data: { skills: [] },
+        },
+        {
+          type: "text",
+          text: "I just learned how to do expense filing",
+          _surfaceFallback: true,
+        },
+      ]),
+      {
+        metadata: { kind: SKILL_CARD_MESSAGE_KIND, automated: true },
+        skipIndexing: true,
+        clientMessageId: "surface-1",
+      },
+    );
 
     expect(archivedAtOf(DONE_CONVERSATION_ID)).not.toBeNull();
     expect(listInvalidations).toHaveLength(0);
