@@ -231,6 +231,15 @@ export const Empty: Story = {
   args: { conversations: [], groups: [] },
 };
 
+/**
+ * A view with no match in the loaded window while the server still holds
+ * older pages. The chips and the search run over what is loaded, so this
+ * keeps paging rather than claiming the view is empty.
+ */
+export const SearchingOlderPages: Story = {
+  args: { conversations: [], hasMore: true },
+};
+
 /** The first read still out. */
 export const Loading: Story = {
   args: { isLoading: true },

@@ -59,7 +59,15 @@ export interface OldChatsData {
   retry: () => void;
 }
 
-export function useOldChatsData(assistantId: string | null): OldChatsData {
+/**
+ * @param enabled Whether the page is actually going to render. The route
+ * gates this on the feature flag, since hooks run before its redirect and a
+ * flag-off visit must not spend a whole-history request on its way out.
+ */
+export function useOldChatsData(
+  assistantId: string | null,
+  enabled: boolean = true,
+): OldChatsData {
   const queryClient = useQueryClient();
 
   /* Which assistant refused the combined read, so the refusal survives the
@@ -70,7 +78,10 @@ export function useOldChatsData(assistantId: string | null): OldChatsData {
   const [refusedBy, setRefusedBy] = useState<string | null>(null);
   const refused = refusedBy !== null && refusedBy === assistantId;
 
-  const combined = useAllHistoryConversationListQuery(assistantId, !refused);
+  const combined = useAllHistoryConversationListQuery(
+    assistantId,
+    enabled && !refused,
+  );
   const combinedError = combined.error;
   useEffect(() => {
     if (assistantId && isUnsupportedCombinedRead(combinedError)) {
@@ -82,10 +93,17 @@ export function useOldChatsData(assistantId: string | null): OldChatsData {
 
   /* Mounted disabled on the supported path, where they subscribe to the
      caches the sidebar fills without issuing a request of their own. */
-  const foreground = useConversationListQuery(assistantId, degraded);
-  const background = useBackgroundConversationListQuery(assistantId, degraded);
-  const scheduled = useScheduledConversationListQuery(assistantId, degraded);
-  const archived = useArchivedConversationListQuery(assistantId, degraded);
+  const fetchBuckets = enabled && degraded;
+  const foreground = useConversationListQuery(assistantId, fetchBuckets);
+  const background = useBackgroundConversationListQuery(
+    assistantId,
+    fetchBuckets,
+  );
+  const scheduled = useScheduledConversationListQuery(
+    assistantId,
+    fetchBuckets,
+  );
+  const archived = useArchivedConversationListQuery(assistantId, fetchBuckets);
 
   const fallbackRows = useMemo(
     () =>
@@ -145,11 +163,14 @@ export function useOldChatsData(assistantId: string | null): OldChatsData {
         background.isLoading ||
         scheduled.isLoading ||
         archived.isLoading,
+      /* Guarded by `hasData` for the same reason the combined path below is:
+         React Query keeps the last successful page, so a transient failure on
+         a refetch must not replace a complete history with an error panel. */
       isError:
-        foreground.isError ||
-        background.isError ||
-        scheduled.isError ||
-        archived.isError,
+        (foreground.isError && !foreground.hasData) ||
+        (background.isError && !background.hasData) ||
+        (scheduled.isError && !scheduled.hasData) ||
+        (archived.isError && !archived.hasData),
       retry: retryDegraded,
     };
   }

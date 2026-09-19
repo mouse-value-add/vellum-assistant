@@ -31,7 +31,6 @@ import { useOldChatsData } from "@/domains/chat/hooks/use-old-chats-data";
 import { OldChatsPage } from "@/domains/chat/pages/old-chats-page";
 import {
   filterFromSearchParams,
-  oldChatsFilters,
   oldChatsSearchFor,
   type OldChatsFilter,
 } from "@/domains/chat/utils/old-chats-filters";
@@ -55,13 +54,21 @@ export function OldChatsPageRoute() {
   const enabled = useClientFeatureFlagStore.use.sidebarDone();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const history = useOldChatsData(assistantId);
-  const { conversationGroups } = useConversationGroupsQuery(assistantId);
+  /* Hooks run before either early return below, so the reads are gated on the
+     flag as well: a visit with the flag off renders nothing but would still
+     have issued a whole-history request on its way to the redirect, and an
+     unhydrated store reads as off. */
+  const live = flagsHydrated && enabled;
+  const history = useOldChatsData(assistantId, live);
+  const { conversationGroups } = useConversationGroupsQuery(assistantId, live);
 
   /* The foreground list the sidebar already holds. `useConversationActions`
      reads it to pick the conversation to land on when the one being marked
      done is the open one; this page mounts no request of its own for it. */
-  const { conversations: foreground } = useConversationListQuery(assistantId);
+  const { conversations: foreground } = useConversationListQuery(
+    assistantId,
+    live,
+  );
   const activeConversationId = useConversationStore.use.activeConversationId();
   const prePinGroupIdsRef = useRef<Map<string, string | undefined>>(new Map());
 
@@ -142,19 +149,13 @@ export function OldChatsPageRoute() {
     [conversationGroups],
   );
 
-  /* The chips the loaded rows justify, so a link naming a channel or group
-     with nothing behind it falls back to All rather than opening empty. */
-  const available = useMemo(() => {
-    const chips = oldChatsFilters(history.conversations, customGroups);
-    return {
-      channelIds: chips.flatMap((chip) =>
-        chip.kind === "channel" ? [chip.channelId] : [],
-      ),
-      groupIds: chips.flatMap((chip) =>
-        chip.kind === "group" ? [chip.groupId] : [],
-      ),
-    };
-  }, [history.conversations, customGroups]);
+  /* The groups that exist, not the ones the loaded window happens to show:
+     a link into a group whose chats are all older than the first page is a
+     good link, and only a deleted group should fall back to All. */
+  const available = useMemo(
+    () => ({ groupIds: customGroups.map((group) => group.id) }),
+    [customGroups],
+  );
 
   const filter = useMemo(
     () => filterFromSearchParams(searchParams, available),

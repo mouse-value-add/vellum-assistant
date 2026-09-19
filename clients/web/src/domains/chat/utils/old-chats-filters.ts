@@ -48,16 +48,23 @@ export function oldChatsFilterKey(filter: OldChatsFilter): string {
 }
 
 /**
- * The chip a link preselected, or All when the URL names none. A channel or
- * group that no longer exists falls back to All rather than rendering a view
- * with nothing in it: the link is stale, not the history.
+ * The chip a link preselected, or All when the URL names none.
+ *
+ * Validated against what exists, never against the rows loaded so far: the
+ * page holds a window onto the history, so a group whose chats are all older
+ * than the first page is a perfectly good link. `groupIds` is the groups
+ * query's own list, which is authoritative, so only a deleted group falls
+ * back to All. A channel is taken at its word, since `origin_channel` is an
+ * open set (a plugin channel's id is its plugin name) and there is no list to
+ * check it against; the native origin is the exception, because chats started
+ * in Vellum are what All already shows.
  */
 export function filterFromSearchParams(
   params: URLSearchParams,
-  available: { channelIds: readonly string[]; groupIds: readonly string[] },
+  available: { groupIds: readonly string[] },
 ): OldChatsFilter {
   const channelId = params.get(OLD_CHATS_CHANNEL_PARAM);
-  if (channelId && available.channelIds.includes(channelId)) {
+  if (channelId && isExternalChannelOrigin(channelId)) {
     return { kind: "channel", channelId };
   }
   const groupId = params.get(OLD_CHATS_GROUP_PARAM);
@@ -176,13 +183,24 @@ export function searchOldChats(
  * for it would read as a second All. Automated rows contribute none, since
  * every chip but Background hides them. Groups keep the order the groups query
  * returned, which is the order the sidebar draws them.
+ *
+ * `selected` is added when the loaded rows do not justify it, so a link into a
+ * view whose chats are all older than the loaded window still shows the chip
+ * it selected rather than a row of chips with none of them pressed.
  */
 export function oldChatsFilters(
   conversations: readonly Conversation[],
   groups: readonly ConversationGroup[],
+  selected: OldChatsFilter = ALL_CHATS_FILTER,
 ): OldChatsFilter[] {
   const channelIds = new Set<string>();
   const groupIds = new Set<string>();
+  if (selected.kind === "channel") {
+    channelIds.add(selected.channelId);
+  }
+  if (selected.kind === "group") {
+    groupIds.add(selected.groupId);
+  }
   for (const conversation of conversations) {
     if (isBackgroundConversation(conversation)) {
       continue;

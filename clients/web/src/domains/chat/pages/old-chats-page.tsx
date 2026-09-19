@@ -45,6 +45,7 @@ import {
   ConversationActionsSheet,
   renderConversationMenuItems,
 } from "@/domains/chat/components/conversation-actions-menu";
+import { LoadMoreSentinel } from "@/domains/chat/components/load-more-sentinel";
 import { useLongPressSheet } from "@/hooks/use-long-press-sheet";
 import {
   filterOldChats,
@@ -235,8 +236,8 @@ export function OldChatsPage({
   const [searchText, setSearchText] = useState("");
 
   const chips = useMemo(
-    () => oldChatsFilters(conversations, groups),
-    [conversations, groups],
+    () => oldChatsFilters(conversations, groups, filter),
+    [conversations, groups, filter],
   );
 
   const rows = useMemo(
@@ -359,6 +360,7 @@ export function OldChatsPage({
           searchText={searchText}
           listContext={listContext}
           renderItem={renderItem}
+          hasMore={hasMore}
           endReached={endReached}
         />
       </div>
@@ -366,9 +368,20 @@ export function OldChatsPage({
   );
 }
 
+/** The page's spinner, shared by the first read and the search for a match. */
+function OldChatsSpinner({ label }: { label: string }) {
+  return (
+    <div
+      className="size-6 animate-spin rounded-full border-2 border-[var(--border-base)] border-t-[var(--primary-base)]"
+      role="status"
+      aria-label={label}
+    />
+  );
+}
+
 /**
- * The list region and the three states that replace it. Split out so each
- * branch's copy is explicit and the page above stays the layout alone.
+ * The list region and the states that replace it. Split out so each branch's
+ * copy is explicit and the page above stays the layout alone.
  */
 function OldChatsBody({
   items,
@@ -378,6 +391,7 @@ function OldChatsBody({
   searchText,
   listContext,
   renderItem,
+  hasMore,
   endReached,
 }: {
   items: OldChatsListItem[];
@@ -387,6 +401,7 @@ function OldChatsBody({
   searchText: string;
   listContext: ConversationListContextValue;
   renderItem: (index: number, item: OldChatsListItem) => ReactNode;
+  hasMore: boolean;
   endReached: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -394,11 +409,7 @@ function OldChatsBody({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div
-          className="size-6 animate-spin rounded-full border-2 border-[var(--border-base)] border-t-[var(--primary-base)]"
-          role="status"
-          aria-label={t("oldChatsPage.loading")}
-        />
+        <OldChatsSpinner label={t("oldChatsPage.loading")} />
       </div>
     );
   }
@@ -418,6 +429,20 @@ function OldChatsBody({
   }
 
   if (items.length === 0) {
+    /* The chips and the search run over the loaded window, while the window
+       itself is one global recency page, so a view with no match here may
+       still have plenty further back. The list is what fires `endReached`,
+       and it is not on screen, so a sentinel keeps the pages coming until a
+       match arrives or the server says there are none left. Only then is the
+       empty state the truth. */
+    if (hasMore) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-4">
+          <OldChatsSpinner label={t("oldChatsPage.loading")} />
+          <LoadMoreSentinel onVisible={endReached} />
+        </div>
+      );
+    }
     return (
       <div className="flex h-full flex-col items-center justify-center px-4">
         <p className="text-body-medium-lighter text-[var(--content-tertiary)]">

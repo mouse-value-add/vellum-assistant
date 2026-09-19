@@ -107,6 +107,30 @@ describe("oldChatsFilters", () => {
       "background",
     ]);
   });
+
+  // A deep link can select a view whose chats are all older than the loaded
+  // window; without this the chip row would draw with nothing pressed.
+  test("offers the selected chip even when no loaded row justifies it", () => {
+    expect(
+      oldChatsFilters([], GROUPS, {
+        kind: "channel",
+        channelId: "telegram",
+      }).map(oldChatsFilterKey),
+    ).toEqual(["all", "done", "channel:telegram", "background"]);
+    expect(
+      oldChatsFilters([], GROUPS, { kind: "group", groupId: "group-b" }).map(
+        oldChatsFilterKey,
+      ),
+    ).toEqual(["all", "done", "group:group-b", "background"]);
+  });
+
+  test("does not duplicate a selected chip the rows already justify", () => {
+    expect(
+      oldChatsFilters(ROWS, GROUPS, { kind: "channel", channelId: "slack" })
+        .map(oldChatsFilterKey)
+        .filter((key) => key === "channel:slack"),
+    ).toEqual(["channel:slack"]);
+  });
 });
 
 describe("searchOldChats", () => {
@@ -139,7 +163,7 @@ describe("searchOldChats", () => {
 });
 
 describe("filterFromSearchParams", () => {
-  const available = { channelIds: ["slack"], groupIds: ["group-a"] };
+  const available = { groupIds: ["group-a"] };
 
   test("reads a channel, a group and a named view off the URL", () => {
     expect(
@@ -159,13 +183,32 @@ describe("filterFromSearchParams", () => {
     ).toEqual({ kind: "background" });
   });
 
-  test("falls back to All for a stale channel or group", () => {
+  // A window is not a catalog: the rows a channel's chats live in may all be
+  // older than the first page, so the link is honoured whatever is loaded.
+  test("keeps a channel the loaded window does not show", () => {
     expect(
       filterFromSearchParams(
         new URLSearchParams("channel=telegram"),
         available,
       ),
+    ).toEqual({ kind: "channel", channelId: "telegram" });
+  });
+
+  test("keeps a plugin channel, which is outside any closed set", () => {
+    expect(
+      filterFromSearchParams(new URLSearchParams("channel=my-plugin"), {
+        groupIds: [],
+      }),
+    ).toEqual({ kind: "channel", channelId: "my-plugin" });
+  });
+
+  test("falls back to All for the native origin, which All already shows", () => {
+    expect(
+      filterFromSearchParams(new URLSearchParams("channel=vellum"), available),
     ).toEqual({ kind: "all" });
+  });
+
+  test("falls back to All for a group that no longer exists", () => {
     expect(
       filterFromSearchParams(new URLSearchParams("group=gone"), available),
     ).toEqual({ kind: "all" });
@@ -183,7 +226,7 @@ describe("filterFromSearchParams", () => {
 
 describe("oldChatsSearchFor", () => {
   test("round-trips every filter through the URL", () => {
-    const available = { channelIds: ["slack"], groupIds: ["group-a"] };
+    const available = { groupIds: ["group-a"] };
     for (const filter of oldChatsFilters(ROWS, GROUPS)) {
       const search = oldChatsSearchFor(filter);
       expect(
