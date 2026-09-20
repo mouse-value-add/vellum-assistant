@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import type { WorkspaceMigration } from "./types.js";
 
+// Retained for existing migration references; desktop initialization owns launcher setup.
 export const migrateDesktopDockMigration: WorkspaceMigration = {
   id: "154-migrate-desktop-dock",
   description:
