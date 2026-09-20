@@ -9,11 +9,17 @@ const post = ROUTES.find(
   (route) => route.operationId === "desktop_apps_action",
 )!;
 const originalContainer = process.env.IS_CONTAINERIZED;
+const originalPlatform = process.env.IS_PLATFORM;
 afterEach(() => {
   if (originalContainer === undefined) {
     delete process.env.IS_CONTAINERIZED;
   } else {
     process.env.IS_CONTAINERIZED = originalContainer;
+  }
+  if (originalPlatform === undefined) {
+    delete process.env.IS_PLATFORM;
+  } else {
+    process.env.IS_PLATFORM = originalPlatform;
   }
   setOverridesForTesting({});
 });
@@ -33,6 +39,7 @@ test("disabled desktops reject actions without installing", async () => {
 
 test("unknown apps, commands and invalid actions are rejected before package work", async () => {
   process.env.IS_CONTAINERIZED = "true";
+  process.env.IS_PLATFORM = "true";
   setOverridesForTesting({ "assistant-desktop": true });
   const add = spyOn(desktopAppManager, "add");
   const setup = spyOn(desktopDependencyInstaller, "getStatus").mockReturnValue({
@@ -54,3 +61,25 @@ test("unknown apps, commands and invalid actions are rejected before package wor
     setup.mockRestore();
   }
 });
+
+for (const route of ROUTES.filter(
+  (route) => route.endpoint === "desktop/apps",
+)) {
+  test(`${route.method} rejects self-hosted desktop apps without inspecting or installing apps`, async () => {
+    process.env.IS_CONTAINERIZED = "true";
+    process.env.IS_PLATFORM = "false";
+    setOverridesForTesting({ "assistant-desktop": true });
+    const list = spyOn(desktopAppManager, "list");
+    const add = spyOn(desktopAppManager, "add");
+    try {
+      await expect(
+        route.handler({ body: { appId: "calculator", action: "add" } }),
+      ).rejects.toThrow("not available");
+      expect(list).not.toHaveBeenCalled();
+      expect(add).not.toHaveBeenCalled();
+    } finally {
+      list.mockRestore();
+      add.mockRestore();
+    }
+  });
+}

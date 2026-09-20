@@ -9,7 +9,6 @@ import {
   INSUFFICIENT_CREDITS_PATTERNS,
 } from "../../util/provider-error-patterns.js";
 import { extractRetryAfterMs } from "../../util/retry.js";
-import { stripOrphanedSurrogatesDeep } from "../../util/unicode.js";
 import {
   clampProviderString,
   isDecodableTextMimeType,
@@ -199,43 +198,6 @@ export function deriveAnthropicReason(
     return "bad_request";
   }
   return "unknown";
-}
-
-/** Rate-limit the orphaned-surrogate warning so a single bad stream can't flood logs. */
-const ORPHAN_WARNING_THROTTLE_MS = 60_000;
-let lastOrphanWarningMs = 0;
-
-function logOrphanedSurrogateWarning(
-  fixedStringCount: number,
-  messages: Anthropic.MessageParam[],
-): void {
-  const now = Date.now();
-  if (now - lastOrphanWarningMs < ORPHAN_WARNING_THROTTLE_MS) {
-    return;
-  }
-  lastOrphanWarningMs = now;
-  const blockTypes = new Set<string>();
-  for (const msg of messages) {
-    if (!Array.isArray(msg.content)) {
-      continue;
-    }
-    for (const block of msg.content) {
-      if (typeof block !== "object" || block == null) {
-        continue;
-      }
-      const type = (block as { type?: string }).type;
-      if (type) {
-        blockTypes.add(type);
-      }
-    }
-  }
-  log.warn(
-    {
-      fixedStringCount,
-      blockTypes: Array.from(blockTypes),
-    },
-    "stripped orphaned UTF-16 surrogates from outbound Anthropic request — upstream truncation is not surrogate-aware",
-  );
 }
 
 /**
@@ -996,6 +958,7 @@ export class AnthropicProvider implements Provider {
     // (30 min default) from an external transport abort (bun fetch deadline,
     // edge LB, NAT idle) — only the latter should be retried.
     let innerTimeoutSignal: AbortSignal | undefined;
+    let inspectableRequest: unknown | undefined;
     try {
       sentMessages = await this.buildSentMessages(messages);
       const {
@@ -1299,15 +1262,6 @@ export class AnthropicProvider implements Provider {
       // previous turn exists to anchor). At most two message-level
       // breakpoints are placed, so the total can't drift past 4.
 
-      // Strip orphaned UTF-16 surrogates so the Anthropic JSON parser never
-      // sees invalid strings produced by upstream surrogate-splitting `.slice()` calls.
-      const sanitized = stripOrphanedSurrogatesDeep(params);
-      if (sanitized.changed) {
-        logOrphanedSurrogateWarning(sanitized.fixedStringCount, sentMessages);
-        params = sanitized.value;
-        sentMessages = params.messages;
-      }
-
       // Callers can stamp `cache_control` on message blocks before the
       // provider sees them. Two repairs apply:
       // - `disableCache`: strip the marker entirely — this call opted out of
@@ -1391,6 +1345,7 @@ export class AnthropicProvider implements Provider {
         const streamOnce = async (
           streamParams: Anthropic.MessageStreamParams,
         ): Promise<Anthropic.Message> => {
+          inspectableRequest = streamParams;
           const stream: UnifiedStream = useFastMode
             ? (this.client.beta.messages.stream(
                 {
@@ -1815,6 +1770,7 @@ export class AnthropicProvider implements Provider {
               statusCode: error.status,
               reason: "context_overflow",
               cause: error,
+              rawRequest: inspectableRequest,
             },
           );
         }
@@ -1826,7 +1782,11 @@ export class AnthropicProvider implements Provider {
           reason?: ProviderErrorReason;
           apiErrorType?: string;
           apiErrorCode?: string;
+          rawRequest?: unknown;
         } = {};
+        if (inspectableRequest !== undefined) {
+          errorOptions.rawRequest = inspectableRequest;
+        }
         if (retryAfterMs !== undefined) {
           errorOptions.retryAfterMs = retryAfterMs;
         }
@@ -1879,7 +1839,9 @@ export class AnthropicProvider implements Provider {
         }`,
         "anthropic",
         undefined,
-        abortReason ? { cause: error, abortReason } : { cause: error },
+        abortReason
+          ? { cause: error, abortReason, rawRequest: inspectableRequest }
+          : { cause: error, rawRequest: inspectableRequest },
       );
     }
   }

@@ -7,9 +7,15 @@ export type WebSearchProviderId =
   | "tavily"
   | "keenable"
   | "firecrawl"
-  | "fastcrw";
+  | "fastcrw"
+  | "searxng"
+  | "tinyfish";
 
-export type WebFetchProviderId = "default" | "firecrawl" | "fastcrw";
+export type WebFetchProviderId =
+  | "default"
+  | "firecrawl"
+  | "fastcrw"
+  | "tinyfish";
 
 export interface WebSearchResultItem {
   rank: number;

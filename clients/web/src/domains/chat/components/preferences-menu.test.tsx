@@ -72,11 +72,14 @@ stubModule(
   },
 );
 
+// Whether the org store can supply the `Vellum-Organization-Id` header, which
+// is the half of the billing gate a test can switch off from here.
+const orgReadyRef = { value: true };
 stubModule(
   "@/hooks/use-is-org-ready",
   await import("@/hooks/use-is-org-ready"),
   {
-    useIsOrgReady: () => true,
+    useIsOrgReady: () => orgReadyRef.value,
   },
 );
 
@@ -160,11 +163,11 @@ const billingRef = {
  */
 const activationProgressRef: { data: unknown } = { data: undefined };
 
-/** Whether a query's options name the activation progress read. */
-function isActivationProgressQuery(options: unknown): boolean {
+/** The `_id` the generated factory puts at the head of a query key. */
+function queryId(options: unknown): string | undefined {
   const key = (options as { queryKey?: Array<{ _id?: string }> } | undefined)
     ?.queryKey;
-  return key?.[0]?._id === "activationProgressGet";
+  return key?.[0]?._id;
 }
 
 // Spread the real module so shared utilities that import other exports
@@ -176,14 +179,17 @@ stubModule("@tanstack/react-query", reactQueryModule, {
   // The menu reads `data`, `isLoading` and `isError` only, so the answer is
   // asserted against `useQuery`'s type rather than built out to its full
   // result shape.
-  useQuery: ((options: unknown) =>
-    isActivationProgressQuery(options)
-      ? { data: activationProgressRef.data, isLoading: false, isError: false }
-      : {
-          data: billingRef.data,
-          isLoading: false,
-          isError: false,
-        }) as unknown as typeof reactQueryModule.useQuery,
+  useQuery: ((options: unknown) => {
+    const id = queryId(options);
+    if (id === "activationProgressGet") {
+      return {
+        data: activationProgressRef.data,
+        isLoading: false,
+        isError: false,
+      };
+    }
+    return { data: billingRef.data, isLoading: false, isError: false };
+  }) as unknown as typeof reactQueryModule.useQuery,
 });
 
 const generatedQueriesModule =
@@ -229,6 +235,15 @@ stubModule(
   },
 );
 
+// Records the paths the menu warms. Which chunks a path pulls in is
+// `prefetch-route.test.ts`'s business; this suite owns only when the menu asks.
+const prefetchedPaths: string[] = [];
+stubModule("@/lib/prefetch-route", await import("@/lib/prefetch-route"), {
+  prefetchRoute: (href?: string) => {
+    prefetchedPaths.push(href ?? "");
+  },
+});
+
 // The panel owns its own reads (subscription, plan catalog, usage totals),
 // which this suite's partial `@tanstack/react-query` mock cannot host. Its
 // rendering is covered by `preferences-usage-panel.test.tsx`; what the menu
@@ -273,6 +288,20 @@ stubModule(
     AddCreditsModal: ({ open }: { open: boolean }) =>
       open
         ? createElement("div", { "data-testid": "add-credits-modal" })
+        : createElement(Fragment),
+  },
+);
+
+// The modal owns its own referral read, which this suite's partial
+// `@tanstack/react-query` mock cannot host and which `referral-modal.test.tsx`
+// covers. What the menu owns is when the modal is mounted at all.
+stubModule(
+  "@/components/referral-modal",
+  await import("@/components/referral-modal"),
+  {
+    ReferralModal: ({ open }: { open: boolean }) =>
+      open
+        ? createElement("div", { "data-testid": "referral-modal" })
         : createElement(Fragment),
   },
 );
@@ -405,11 +434,13 @@ beforeEach(() => {
     lastName: "",
   };
   billingRef.data = undefined;
+  orgReadyRef.value = true;
   usageRef.value = null;
   usageRef.settled = true;
   usageRef.opts = undefined;
   panelPropsRef.conversationId = undefined;
   feedbackRef.prefetches = 0;
+  prefetchedPaths.length = 0;
 });
 
 afterEach(() => {
@@ -601,6 +632,25 @@ describe("PreferencesMenu", () => {
     expect(feedbackRef.prefetches).toBe(1);
   });
 
+  test("opening the menu warms the Settings route, once", async () => {
+    expect(prefetchedPaths).toEqual([]);
+
+    // GIVEN the menu opens, which is the first moment Settings is a plausible
+    // next tap
+    await openMenu();
+
+    // THEN its route is warmed, so the two chunks it needs are usually in
+    // hand before the tap that navigates to it
+    expect(prefetchedPaths).toEqual([routes.settings.root]);
+
+    // AND closing the menu does not ask again
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Usage settings" }));
+      await Promise.resolve();
+    });
+    expect(prefetchedPaths).toEqual([routes.settings.root]);
+  });
+
   test("native Android keeps the panel's add-credits action, same as iOS", async () => {
     nativeAndroidRef.value = true;
     await openMenu();
@@ -782,6 +832,40 @@ describe("PreferencesMenu credits row", () => {
     // The real panel renders nothing without a reading, so the row is the only
     // balance and the only way to buy more.
     expect(screen.getByTestId("credits-card")).toBeTruthy();
+  });
+});
+
+describe("PreferencesMenu earn credits row", () => {
+  test("the row shows whenever the billing rows do", async () => {
+    await openMenu();
+
+    // The modal says whether the account can earn, so the menu asks nothing
+    // ahead of time.
+    expect(screen.getByText("Earn Free Credits")).toBeTruthy();
+  });
+
+  test("the row goes down with the billing gate", async () => {
+    orgReadyRef.value = false;
+    await openMenu();
+
+    // Without the org header the billing summary never fires, and every row
+    // riding that gate goes down with it.
+    expect(screen.queryByText("Earn Free Credits")).toBeNull();
+  });
+
+  test("the row opens the referral modal and closes the menu", async () => {
+    await openMenu();
+    expect(screen.queryByTestId("referral-modal")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Earn Free Credits"));
+      await Promise.resolve();
+    });
+
+    // The menu closes as it goes, so the modal has to outlive the surface it
+    // was opened from.
+    expect(await screen.findByTestId("referral-modal")).toBeTruthy();
+    expect(screen.queryByTestId("preferences-usage")).toBeNull();
   });
 });
 

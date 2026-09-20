@@ -16,7 +16,7 @@ When you introduce a new env var that the assistant process needs to read at run
 
 **Default to including it.** If the var doesn't contain secrets (e.g. a URL, a feature flag, a path, a mode string), add it. Only omit it if it carries credential material (tokens, passwords, private keys) — those must stay isolated to CES.
 
-`CES_LOCAL_SOCKET` is intentionally included despite the socket exposing credential RPCs: assistant subprocesses are expected to reach CES. Credential protection is rules-based access control inside CES, not socket-path secrecy (see root `AGENTS.md`). Do not forward `CES_SERVICE_TOKEN` or `CES_CREDENTIAL_URL`: the HTTP bearer is a vault secret and must stay in the assistant process.
+`CES_BOOTSTRAP_SOCKET_DIR` is forwarded so children can reach CES over IPC. `CES_SERVICE_TOKEN` and `CES_CREDENTIAL_URL` are also forwarded so children can fail over to CES HTTP until that transport is removed. Credential protection is rules-based access control inside CES, not socket-path secrecy (see root `AGENTS.md`).
 
 ## Daemon startup philosophy
 

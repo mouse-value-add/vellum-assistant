@@ -4,16 +4,21 @@ import {
   app,
   clipboard,
   screen,
+  shell,
   systemPreferences,
   type Display,
   type MenuItemConstructorOptions,
   type Rectangle,
+  type WebContents,
 } from "electron";
 import { z } from "zod";
 
 import {
   companionCapturePickSchema,
   companionContextSchema,
+  companionPickerSchema,
+  companionPopoverAnswerSchema,
+  companionPopoverHasRow,
   watchCaptureTargetSchema,
   voiceActivityContentSchema,
   voiceActivityControlSchema,
@@ -27,8 +32,10 @@ import {
   VOICE_START_REQUEST_TTL_MS,
   COMPANION_INTRO_ACTIONS,
   COMPANION_INTRO_BEATS,
+  COMPANION_INTRO_VERSION,
   companionBoxFor,
   companionCardSideFor,
+  companionDockIsSide,
   companionGapFor,
   companionNearEdgeFor,
   companionPadFor,
@@ -44,10 +51,15 @@ import {
   type CompanionAnnotationTool,
   type CompanionCardGrowth,
   type CompanionCoachmark,
+  type CompanionDock,
   type CompanionGrowth,
   type CompanionContext,
   type CompanionIntroAction,
   type CompanionIntroBeat,
+  type CompanionIntroEvent,
+  type CompanionIntroReport,
+  type CompanionPopover,
+  type CompanionPopoverView,
   type CompanionSize,
   type CompanionSizeAxis,
   type CompanionSurfaceState,
@@ -61,9 +73,12 @@ import {
   readSetting,
 } from "@vellumai/electron-desktop/settings";
 import {
+  clearCompanionIntroSeen,
+  readCompanionCallDock,
   readCompanionHidden,
-  readCompanionIntroSeen,
+  readCompanionIntroSeenVersion,
   readCompanionSize,
+  writeCompanionCallDock,
   writeCompanionIntroSeen,
   writeCompanionSize,
   writeCompanionHidden,
@@ -97,9 +112,23 @@ import {
   type CoachmarkPressRect,
 } from "./coachmark-press-watch";
 import { setPointerOnCompanion } from "./companion-pointer";
+import {
+  closeCompanionPopover,
+  POPOVER_KIND,
+  setCompanionPopoverSize,
+  syncCompanionPopover,
+  type CompanionPopoverAnchor,
+  type PopoverSide,
+} from "./companion-popover-window";
 import { unwatchFrameScroll, watchFrameScroll } from "./frame-scroll-watch";
 import { handle, on } from "./ipc";
 import log from "./logger";
+import { getPermissionsService } from "./permissions-service";
+import {
+  answerScreenRecordingRefusal,
+  isScreenRecordingRefusal,
+  screenRecordingGranted,
+} from "./screen-recording-permission";
 import {
   current as currentMainWindow,
   dispatchToMain,
@@ -231,10 +260,22 @@ export interface CompanionGeometry {
  * process, which is what the fixed canvas exists to avoid. It *is* resized when
  * the user picks a different size on either axis, which is a deliberate,
  * one-off event rather than something that happens mid-gesture.
+ *
+ * A call docked to a side of the display is the other such event. The bar
+ * stands up as a column centred on the avatar, and a column reaches as far
+ * below the avatar as above it, where the canvas above keeps only the near
+ * edge below. So for a side dock the canvas is symmetric about the avatar
+ * instead: as tall each way as the column's half length, the gap, the creature
+ * standing at the column's end and the pad. Taller below than the ordinary
+ * canvas, which the window server allows (the canvas may hang off the bottom
+ * of a display), and shorter above, which is what keeps the avatar reachable
+ * near the top on a display shorter than the ordinary canvas is wide.
  */
 export const geometryFor = (
   avatar: CompanionSize,
   options: CompanionSize,
+  dock: CompanionDock = "bottom",
+  attachedRise = 0,
 ): CompanionGeometry => {
   const avatarBox = companionBoxFor("avatar", avatar);
   const optionsBox = companionBoxFor("options", options);
@@ -266,15 +307,36 @@ export const geometryFor = (
   // drawing the creature on another, and a card side is a ceiling with slack in
   // it where a near edge is the line itself.
   const riseAbove = canvasHeight - dropBelow;
+  // Twice a whole half rather than a whole total. The renderer puts the
+  // avatar on the canvas's centre line, so an odd width would stand the
+  // creature on a half point and a resize would not land back on it.
+  const canvasWidth = Math.round(maxReach + pad) * 2;
+  if (companionDockIsSide(dock)) {
+    // Half the column's greatest length, then the gap and the whole of the
+    // creature standing at its end, then the pad: the same reach the width
+    // holds for the row, read up from the avatar's centre. Whole for the
+    // reason the width is twice a whole half.
+    const sideHalf = Math.round(maxPillWidth / 2 + gap + avatarBox + pad);
+    return {
+      avatarBox,
+      optionsBox,
+      canvasWidth,
+      canvasHeight: sideHalf * 2,
+      riseAbove: sideHalf,
+      dropBelow: sideHalf,
+      maxReach,
+    };
+  }
+  // A popover drawn on a call's bar stands on the bar's centre line and can
+  // be taller than the card the canvas keeps room for, so the card's side
+  // grows to hold it. Only that side: the near edge is the bar's, unchanged.
+  const heldRise = Math.max(riseAbove, Math.round(attachedRise));
   return {
     avatarBox,
     optionsBox,
-    // Twice a whole half rather than a whole total. The renderer puts the
-    // avatar on the canvas's centre line, so an odd width would stand the
-    // creature on a half point and a resize would not land back on it.
-    canvasWidth: Math.round(maxReach + pad) * 2,
-    canvasHeight,
-    riseAbove,
+    canvasWidth,
+    canvasHeight: heldRise + dropBelow,
+    riseAbove: heldRise,
     dropBelow,
     maxReach,
   };
@@ -317,12 +379,49 @@ let growth: CompanionGrowth = "right";
 let cardGrowth: CompanionCardGrowth = "up";
 
 /**
+ * Which edge of the display a call takes the bar to. See `CompanionDock`.
+ *
+ * Read from the store at startup and replaced when the user drops the bar on
+ * another edge mid-call. Held beside {@link growth} for the same reason: it is
+ * a fact about where the window is put, and the renderer has to be told it to
+ * draw the bar the way the window was placed for.
+ */
+let dock: CompanionDock = readCompanionCallDock();
+
+/**
+ * The edge a call's drag would drop the bar on if the hand let go now, or
+ * `null` while no such drag is in flight.
+ *
+ * Set on each move of a drag during a call and cleared by the release. The
+ * window showing the four edges reads it off the pushed state to light one,
+ * and the release reads it to know where to send the bar.
+ */
+let docking: CompanionDock | null = null;
+
+/**
+ * How far a press has carried the bar since it began, in points, while a
+ * call has the surface.
+ *
+ * A press is a drag once it has travelled this far and a click until then,
+ * the same slop the renderer keeps for its own click. The renderer reports
+ * every move of a held button, jitter included, so without this a click on
+ * the creature mid-call would flash the four edges for a frame and glide the
+ * bar a point back to its dock.
+ */
+const DOCK_DRAG_SLOP = 3;
+let dockDragTravel = 0;
+
+/**
  * The canvas the surface is currently drawn in.
  *
  * Read from the store at startup and replaced when the user picks a different
- * size. Held rather than derived per call because it is what every position
+ * size, and when a call docks the bar to a side of the display or ends there.
+ * Held rather than derived per call because it is what every position
  * computed here is measured in, and reading the store on each mouse-move of a
  * drag would be a file read per frame.
+ *
+ * Built for the bottom at startup whatever the remembered dock: no call is
+ * running, and the canvas a side dock needs is the call's alone.
  */
 let geometry: CompanionGeometry = geometryFor(
   readCompanionSize("avatar"),
@@ -342,10 +441,271 @@ let geometry: CompanionGeometry = geometryFor(
 let intro: CompanionIntroBeat | null = null;
 
 /**
+ * Whether the surface is parked over the app's own window for the
+ * introduction, rather than sitting where it lives.
+ *
+ * The surface steps off the screen while Vellum is frontmost with its window
+ * showing (see {@link syncFrontmost}), which is exactly the moment a new user
+ * is looking at the app: the introduction ran on a window nobody could see,
+ * and users reported not knowing the companion existed. So a due run holds the
+ * surface on screen and stands it in the middle of the app's window, where the
+ * user already is, and the run ends by taking it home.
+ *
+ * Held apart from {@link introScrim}, which is the app's own dimming: the two
+ * start together and stop at different moments, because the surface has to stay
+ * in front while it flies home and the app must be usable again the instant the
+ * flight begins.
+ */
+let introStaged = false;
+
+/**
+ * Whether the app's own window should currently be dimmed for a run.
+ *
+ * **What the renderer is told, and what it can ask for.** A scrim that read
+ * {@link introStaged} would go opaque for a window that mounted during the
+ * landing grace, and the timer that ends that grace sends nothing, so the app
+ * would stay dark and unclickable until the next reload. This is the fact the
+ * scrim is actually about, so it is the fact both the push and the pull carry.
+ */
+let introScrim = false;
+
+/**
+ * How long the surface stays put after landing before the ordinary
+ * frontmost rule takes it off the screen again.
+ *
+ * The flight is the answer to "where did it go": landing and vanishing in the
+ * same moment would tell the user where it lives and then take it away before
+ * they had looked at it.
+ */
+const INTRO_LANDING_GRACE_MS = 1_500;
+
+/** The timer that unstages the surface after it has landed, if one is set. */
+let introLanding: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * How many reports are kept for an app window that is not there to take them.
+ *
+ * Room for a whole run: one crossing of each of the eight beats, the exposure
+ * that opened it, the offer if it was taken, and the ending, with a margin.
+ * That bound is {@link holdIntroReport}'s to keep, not a property of the run
+ * itself: a reader can walk back and forth across the same cards as long as
+ * they like, and with the app's window closed every one of those presses would
+ * otherwise be held.
+ *
+ * The buffer exists for the one ending that genuinely happens with no window to
+ * send to: the tray's hide, which a user reaches with the app's window closed.
+ */
+const INTRO_REPORT_BUFFER = 16;
+
+/** Reports the app's window has not been handed yet, oldest first. */
+const introReports: CompanionIntroReport[] = [];
+
+/**
+ * Hold a report for a window that is not listening.
+ *
+ * **A beat already held is not held again.** `back` and `next` walk the run
+ * both ways, so the moments a run makes are not bounded by its cards: a reader
+ * crossing the same three cards for a minute makes dozens. What `advanced`
+ * answers is whether a beat was reached, and that is a fact which cannot become
+ * truer. The reports are read as a distinct count per beat
+ * (`companion-intro-funnel.ts`), so collapsing the repeats loses nothing the
+ * funnel asks for and puts the bound back. The first crossing is the one kept,
+ * since when a beat was reached is the first time it was.
+ *
+ * Only here, and not on the way out to a listening window: a push goes straight
+ * on and costs nothing to keep whole. The count of rows per beat was never the
+ * question either way.
+ *
+ * **The exposure is the last thing evicted.** It is the denominator of every
+ * rate this funnel computes, and dropping it while keeping the ending would
+ * report a conversion out of nothing, which is worse than reporting neither.
+ */
+const holdIntroReport = (report: CompanionIntroReport): void => {
+  if (
+    report.event === "advanced" &&
+    introReports.some(
+      (held) => held.event === "advanced" && held.beat === report.beat,
+    )
+  ) {
+    return;
+  }
+  introReports.push(report);
+  if (introReports.length <= INTRO_REPORT_BUFFER) {
+    return;
+  }
+  const oldest = introReports.findIndex((held) => held.event !== "exposed");
+  introReports.splice(oldest === -1 ? 0 : oldest, 1);
+};
+
+/**
+ * Whether the microphone was already granted when the running run began.
+ *
+ * **Taken once, at the start, and not read again.** The last beat's press asks
+ * for the microphone and waits for the answer before it starts anything, so a
+ * run that began without the grant ends with it: read afresh per report, the
+ * exposure would be stamped ungranted and the offer and the finish granted, and
+ * one run would be counted in two cohorts. The conversions would land in the
+ * cohort with none of the exposures, which is the one comparison this fact
+ * exists to make.
+ *
+ * What the funnel is actually asking is what the user walked in with, which is
+ * also what decides what the Talk and the last beat say on the way past.
+ */
+let introMicGranted = false;
+
+/** The renderer listening for reports, or null while nobody is. */
+let introReportsTo: WebContents | null = null;
+
+/** Stop listening to the renderer that was taking reports. */
+let detachIntroReportsTo: (() => void) | null = null;
+
+/**
+ * Take the app window's word that it is listening, which is the pull it makes
+ * once its subscription is registered.
+ *
+ * **A loaded window is not a listening one.** `did-finish-load` fires when the
+ * bundle has parsed, which is before React has mounted the effect that
+ * subscribes, and `main-window.ts` says as much about its own commands. The
+ * surface is a window of its own and the run walks on its own: a hover on the
+ * creature finishes the first beat with no press at all, so a report really can
+ * fall in that gap. So pushing is armed by the renderer saying it is there
+ * rather than by main guessing, and everything before that is held.
+ *
+ * Disarmed on the ways a subscription can go without the window going: a
+ * crashed renderer, and a full document reload, which leaves the webContents
+ * alive and its listeners gone. The document that comes back pulls again, which
+ * both re-arms this and collects whatever was held meanwhile. Modelled on
+ * {@link ownCall}, which ties the running call to its renderer the same way.
+ */
+const armIntroReports = (owner: WebContents): void => {
+  if (introReportsTo === owner) {
+    return;
+  }
+  detachIntroReportsTo?.();
+  detachIntroReportsTo = null;
+  introReportsTo = owner;
+
+  const disarm = (): void => {
+    if (introReportsTo !== owner) {
+      return;
+    }
+    introReportsTo = null;
+    detachIntroReportsTo?.();
+    detachIntroReportsTo = null;
+  };
+  const disarmOnNavigation = (
+    event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+  ): void => {
+    // A route change inside the app is the same document and the same
+    // subscription; only a fresh document loses it.
+    if (event.isMainFrame && !event.isSameDocument) {
+      disarm();
+    }
+  };
+
+  owner.once("destroyed", disarm);
+  owner.on("render-process-gone", disarm);
+  owner.on("did-start-navigation", disarmOnNavigation);
+  detachIntroReportsTo = () => {
+    owner.off("destroyed", disarm);
+    owner.off("render-process-gone", disarm);
+    owner.off("did-start-navigation", disarmOnNavigation);
+  };
+};
+
+/**
+ * Report a moment of the run to the app's own window, which sends it on.
+ *
+ * **Main decides, the app's window transports.** Main is the only side that
+ * sees every moment: the run is due before the surface's window exists, the
+ * tray's hide is answered here, and a session started by a double tap on the
+ * voice key reaches neither renderer. But main has no telemetry path of its own
+ * and no way to read the consent the user gave, which lives in the app
+ * window's storage. So main names what happened and the app's window is what
+ * decides whether and how to report it.
+ *
+ * The app's window and not the surface's. The surface's route is registered
+ * outside the app's auth middleware, so it has no user to attribute a row to
+ * and its own session id for a funnel that would then not join to the rest of
+ * onboarding, and the consent it would read is a default rather than an answer.
+ *
+ * A report with no window listening is held rather than dropped, since the
+ * moment worth holding is exactly the one that happens with the app put away.
+ * What is held is handed over by the pull the renderer makes once it is
+ * subscribed, which is also what arms pushing (see {@link armIntroReports}).
+ */
+const reportIntro = (
+  event: CompanionIntroEvent,
+  beat: CompanionIntroBeat,
+): void => {
+  const report: CompanionIntroReport = {
+    event,
+    beat,
+    introVersion: COMPANION_INTRO_VERSION,
+    micGranted: introMicGranted,
+    // Main's clock, not the reporting window's. A held report can be handed
+    // over a launch later, and an ending dated to the launch that collected it
+    // rather than to the run it ended would be the one row here nobody could
+    // place.
+    at: Date.now(),
+  };
+  const win = currentMainWindow();
+  // Held unless the window that is here is the one that said it is listening.
+  // `null` fails that on its own, so an unarmed push needs no case of its own.
+  if (win === null || win.isDestroyed() || win.webContents !== introReportsTo) {
+    holdIntroReport(report);
+    return;
+  }
+  win.webContents.send("vellum:companion:introReport", report);
+};
+
+/**
+ * Tell the app's window whether a run is staged on it, so it can dim itself
+ * for the length of one.
+ *
+ * Sent on every change and never inferred from anything the renderer holds:
+ * the window can reload mid-run, and a dimmed window with nothing staged over
+ * it is an app nobody can use.
+ */
+const setIntroScrim = (on: boolean): void => {
+  introScrim = on;
+  const win = currentMainWindow();
+  if (win === null || win.isDestroyed()) {
+    return;
+  }
+  win.webContents.send("vellum:companion:introStage", on);
+};
+
+/**
+ * Take the surface out of the staged run, whether it ended by being watched,
+ * by being put away, or by the window going. The app's window is told either
+ * way, so nothing is left dimmed.
+ */
+const unstageIntro = (): void => {
+  cancelIntroLanding();
+  if (!introStaged && !introScrim) {
+    return;
+  }
+  introStaged = false;
+  setIntroScrim(false);
+};
+
+const cancelIntroLanding = (): void => {
+  if (introLanding === null) {
+    return;
+  }
+  clearTimeout(introLanding);
+  introLanding = null;
+};
+
+/**
  * The introduction after a press, which is `null` once it is over.
  *
  * `dismiss` ends it wherever it is; `next` walks to the following beat and
- * falls off the end into `null`. Resolved against the beat main is actually on
+ * falls off the end into `null`; `back` walks the other way and holds at the
+ * first beat rather than falling off that end, since a step back that ended the
+ * run would be the one press here nobody could undo; `try` leaves it exactly
+ * where it is. Resolved against the beat main is actually on
  * rather than one the renderer names, so a press from a renderer a beat behind
  * lands where the user could see that it would.
  *
@@ -355,12 +715,95 @@ export const introOnAdvance = (
   current: CompanionIntroBeat | null,
   action: CompanionIntroAction,
 ): CompanionIntroBeat | null => {
+  // `try` is an offer taken up, not a step: the beat stays, so the card comes
+  // back on it when the session it started is over.
+  //
+  // Except on the last beat, which *is* the offer: a user who has taken it has
+  // done the one thing the run was for, and a card waiting for them when the
+  // call ends would be the introduction asking for another press after the
+  // finish. So it ends the run, and main records it as seen.
+  if (action === "try") {
+    return current === COMPANION_INTRO_BEATS[COMPANION_INTRO_BEATS.length - 1]
+      ? null
+      : current;
+  }
   if (current === null || action === "dismiss") {
     return null;
   }
-  const next =
-    COMPANION_INTRO_BEATS[COMPANION_INTRO_BEATS.indexOf(current) + 1];
-  return next ?? null;
+  const at = COMPANION_INTRO_BEATS.indexOf(current);
+  // Held at the first beat rather than walked off it: `back` is the one control
+  // here that reads as recoverable, and ending the run on it would be the press
+  // that proves otherwise.
+  if (action === "back") {
+    return COMPANION_INTRO_BEATS[Math.max(0, at - 1)] ?? current;
+  }
+  return COMPANION_INTRO_BEATS[at + 1] ?? null;
+};
+
+/**
+ * Whether a session starting now finishes the run.
+ *
+ * The rule is the last beat's own: it is the beat whose offer *is* a
+ * conversation, which {@link introOnAdvance} already states by ending the run
+ * on a `try` there. Read from that rather than restated, so a beat added after
+ * it cannot leave the two disagreeing about which card is the finish.
+ *
+ * Exported for its tests, as {@link introOnAdvance} is.
+ */
+export const introEndsOnSession = (beat: CompanionIntroBeat | null): boolean =>
+  beat !== null && introOnAdvance(beat, "try") === null;
+
+/**
+ * A real conversation has started, so finish a run whose last beat was the
+ * offer of one.
+ *
+ * **The last card advertises two ways in, and only one of them is a press on
+ * it.** A double tap on the key reaches the window that owns the voice key and
+ * starts a session directly: nothing about it comes back through the run, so
+ * without this the beat survives the call, the card returns when it ends, and
+ * the install is never recorded as introduced. Either gesture is the user doing
+ * the thing the run exists to teach, so either one finishes it.
+ *
+ * Only the last beat. A session started from an earlier one is the run being
+ * interrupted by the user's own business, and main holds the beat so the card
+ * picks up where it left off once the call is over.
+ */
+const finishIntroOnSession = (): void => {
+  if (!introEndsOnSession(intro)) {
+    return;
+  }
+  // **The offer taken the other way.** The press on the last beat is counted
+  // where the press lands; this is the same offer accepted by a double tap on
+  // the key, and the beat it names is the same one, so the two read as one
+  // number that the path is not lost from.
+  if (intro !== null) {
+    reportIntro("offer_taken", intro);
+  }
+  finishIntro("offer");
+};
+
+/**
+ * How a run ended, which is the one fact about the ending that the beat it
+ * ended on cannot say.
+ *
+ * `end` is the last card walked off; `offer` is that card's offer taken
+ * instead, by a press on it or by a session started while it was up; `dismiss`
+ * is the run's own way out; `hidden` is the surface put away from the tray
+ * mid-run, which is an answer to the introduction rather than a step in it.
+ */
+type IntroEnding = "end" | "offer" | "dismiss" | "hidden";
+
+/**
+ * The ending a press that ran the run out of beats makes.
+ *
+ * `back` cannot reach here, since it holds at the first beat rather than
+ * walking off it, so it takes the same answer as `next`: a card walked off.
+ */
+const introEndingFor = (action: CompanionIntroAction): IntroEnding => {
+  if (action === "dismiss") {
+    return "dismiss";
+  }
+  return action === "try" ? "offer" : "end";
 };
 
 /**
@@ -370,13 +813,27 @@ export const introOnAdvance = (
  * that are not a press on it: hiding the surface from the tray is an answer to
  * the introduction as much as skipping it is, and a user who has just put the
  * thing away must not be introduced to it again when they bring it back.
+ *
+ * Which is why the ending is passed in rather than worked out here: from inside
+ * this function every one of them looks the same, and the difference between a
+ * run somebody finished and a run somebody switched off is the whole of what
+ * the funnel is for.
  */
-const finishIntro = (): void => {
+const finishIntro = (ending: IntroEnding): void => {
   if (intro === null) {
     return;
   }
+  // Reported before the beat is cleared, since the beat a run ended on is what
+  // makes an ending a place rather than a count.
+  reportIntro(
+    ending === "end" || ending === "offer" ? "completed" : "dismissed",
+    intro,
+  );
   intro = null;
-  writeCompanionIntroSeen();
+  writeCompanionIntroSeen(COMPANION_INTRO_VERSION);
+  if (introStaged) {
+    landIntroHome();
+  }
 };
 
 /**
@@ -388,6 +845,12 @@ const finishIntro = (): void => {
  * read as "the call dropped and came back".
  */
 let call: VoiceActivityState | null = null;
+
+/** The renderer document whose socket and microphone drive `call`. */
+let callOwner: WebContents | null = null;
+
+/** Detach the lifecycle listeners installed on {@link callOwner}. */
+let detachCallOwner: (() => void) | null = null;
 
 /**
  * How long a dial is drawn with no session answering it.
@@ -458,6 +921,15 @@ export const callSurfaceFor = (
  */
 const WATCH_FRAME_KIND = "companion-watch-frame";
 const WATCH_FRAME_ROUTE = "/floating/companion-watch-frame";
+
+/**
+ * The edges a call's drag can drop the bar on, drawn over the display the
+ * drag is on for as long as it is in flight. Its own click-through window the
+ * size of the work area, like the frame and for the same reason: the surface's
+ * canvas is sized for the pill, and the edges are the display's.
+ */
+const DOCK_ZONES_KIND = "companion-dock-zones";
+const DOCK_ZONES_ROUTE = "/floating/companion-dock-zones";
 
 /**
  * How often the frame asks where a picked window is.
@@ -566,6 +1038,7 @@ let context: CompanionContext = {
   working: false,
   watching: false,
   captureCount: 0,
+  voiceKeyTaps: 0,
 };
 
 /**
@@ -582,6 +1055,9 @@ const currentState = (): CompanionSurfaceState => {
   return {
     growth,
     cardGrowth,
+    dock,
+    // Absent rather than null between drags, as the contract has it.
+    docking: docking ?? undefined,
     avatarBox: geometry.avatarBox,
     optionsBox: geometry.optionsBox,
     character: character === null ? undefined : character,
@@ -604,10 +1080,21 @@ const currentState = (): CompanionSurfaceState => {
     // is a claim that something was said, and absence is the only way to say
     // nothing was.
     dictationOffer: context.dictationOffer,
+    // Passed through as it arrived, for the reason `dictationOffer` is.
+    popover: currentPopover(),
+    // Settled the way `watching` is: a chevron offered on an unknown answer
+    // opens nothing.
+    voicesPickable: context.voicesPickable === true,
+    // Main's own: the call's bar and the popover's window both draw it.
+    popoverView: currentPopoverView(),
     // Settled the same way, and to zero rather than to anything carried over:
     // a publisher that reports no count has taken no reads this surface can
     // vouch for.
     captureCount: context.captureCount ?? 0,
+    // Settled to zero the same way, and for the same reason: the introduction
+    // reads a step in this as the real key having been pressed, and a publisher
+    // that reports no taps has reported none.
+    voiceKeyTaps: context.voiceKeyTaps ?? 0,
     // Passed through as it arrived, for the reason `watchRetro` is: every
     // shape it can hold names something being read, and absence is the whole
     // screen.
@@ -818,6 +1305,85 @@ export const defaultAvatarCentre = (
 });
 
 /**
+ * Where the avatar's centre goes for a call docked to an edge of the display.
+ *
+ * The bottom is {@link defaultAvatarCentre}, which is where every call has
+ * ever put the bar. The top is asked for at the work area's own top line and
+ * left to {@link placeCanvas} to settle as high as the window server allows,
+ * since the canvas above the avatar is what decides that and the clamp already
+ * knows it. The sides stand the bar up as a column centred on the avatar, so
+ * the avatar goes to the display's vertical centre and the same margin in from
+ * the edge the bottom keeps up from its own: the column's cross reach is the
+ * bar's half box and its lit edge, which is the same number the bottom
+ * measures its margin from (see `companionLowerReachFor`).
+ *
+ * Exported for its tests and pure for the same reason as {@link placeCanvas}.
+ */
+export const dockedAvatarCentre = (
+  dock: CompanionDock,
+  workArea: { x: number; y: number; width: number; height: number },
+  geometry: CompanionGeometry,
+): { x: number; y: number } => {
+  const reach = companionLowerReachFor(geometry.avatarBox, geometry.optionsBox);
+  switch (dock) {
+    case "bottom":
+      return defaultAvatarCentre(workArea, geometry);
+    case "top":
+      return { x: workArea.x + workArea.width / 2, y: workArea.y };
+    case "left":
+      return {
+        x: workArea.x + DEFAULT_MARGIN + reach,
+        y: workArea.y + workArea.height / 2,
+      };
+    case "right":
+      return {
+        x: workArea.x + workArea.width - DEFAULT_MARGIN - reach,
+        y: workArea.y + workArea.height / 2,
+      };
+  }
+};
+
+/**
+ * The edge a bar dropped at a point would dock to: whichever of the four is
+ * closest to it.
+ *
+ * Plain distance rather than a fraction of the display's size, so the answer
+ * is the edge the hand is nearest, which is the edge it was dragging toward.
+ * A point equally far from two edges goes to the earlier of the two in the
+ * order the docks are named, which puts the bottom first: it is the edge the
+ * bar is designed around, so a tie resolves to the shape the user already
+ * knows.
+ *
+ * Exported for its tests, as {@link growthFor} is.
+ */
+export const nearestDock = (
+  point: { x: number; y: number },
+  workArea: { x: number; y: number; width: number; height: number },
+): CompanionDock => {
+  const distances: [CompanionDock, number][] = [
+    ["bottom", workArea.y + workArea.height - point.y],
+    ["top", point.y - workArea.y],
+    ["left", point.x - workArea.x],
+    ["right", workArea.x + workArea.width - point.x],
+  ];
+  return distances.reduce((nearest, candidate) =>
+    candidate[1] < nearest[1] ? candidate : nearest,
+  )[0];
+};
+
+/**
+ * Which dock the canvas is currently built for: the remembered one while a
+ * call has the surface, and the bottom otherwise.
+ *
+ * The bottom outside a call whatever the user last dropped the bar on, because
+ * the side dock's canvas is the column's and the idle pill is a row hanging
+ * off the creature with the introduction's card above it, which is the shape
+ * the ordinary canvas is sized for.
+ */
+const canvasDock = (): CompanionDock =>
+  callSurfaceFor(call, dialing) ? dock : "bottom";
+
+/**
  * Where the surface opens with no remembered position: the bottom centre of
  * the display under the cursor.
  *
@@ -837,17 +1403,331 @@ const defaultCanvasOrigin = (): { x: number; y: number } => {
   return placed.origin;
 };
 
+/**
+ * Where the canvas opens for a staged introduction: the middle of the app's
+ * own window, so the surface is the thing the user is already looking at.
+ *
+ * The centre of the window rather than of the display, because onboarding runs
+ * in a small window that is not itself centred, and a surface in the middle of
+ * the screen beside it would read as unrelated to it. Falls back to where the
+ * surface would ordinarily open when there is no window to stand in, which is
+ * a real state: the tray can ask for a replay with the window closed.
+ */
+const stagedCanvasOrigin = (): { x: number; y: number } => {
+  const win = currentMainWindow();
+  if (win === null || win.isDestroyed()) {
+    return defaultCanvasOrigin();
+  }
+  const bounds = win.getBounds();
+  const centre = {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2,
+  };
+  const { workArea } = screen.getDisplayNearestPoint({
+    x: Math.round(centre.x),
+    y: Math.round(centre.y),
+  });
+  const placed = placeCanvas(centre, workArea, geometry);
+  cardGrowth = placed.cardGrowth;
+  return placed.origin;
+};
+
+/**
+ * Take the surface from where the introduction ran to where it lives, and let
+ * the ordinary frontmost rule have it back once it is there.
+ *
+ * The same glide a call's dock uses, so the move the user watches here is the
+ * move they will see every time the bar goes home.
+ */
+const landIntroHome = (): void => {
+  const win = getFloatingWindow(COMPANION_KIND);
+  cancelIntroLanding();
+  if (win === null || win.isDestroyed()) {
+    unstageIntro();
+    return;
+  }
+  // The dimming goes as the flight begins, so the desktop the surface is
+  // heading for is the thing lit while it travels. The surface itself stays in
+  // front until it has landed, which is what `introStaged` still being set
+  // holds it there for.
+  setIntroScrim(false);
+  const { workArea } = displayUnder(avatarCentre(win));
+  glideAvatarTo(win, defaultAvatarCentre(workArea, geometry), workArea);
+  introLanding = setTimeout(() => {
+    introLanding = null;
+    introStaged = false;
+    syncFrontmost();
+  }, COMPANION_GLIDE_MS + INTRO_LANDING_GRACE_MS);
+};
+
 const pushState = (): void => {
   const state = currentState();
   // The glow reads the same state the surface does, for the same reason the
   // surface holds none of it: one push, two windows, no second idea of which
-  // call is running or what colour it is.
-  for (const kind of [COMPANION_KIND, WATCH_FRAME_KIND]) {
+  // call is running or what colour it is. The edges a call's drag can drop
+  // the bar on read it the same way, for which of them to light.
+  for (const kind of [
+    COMPANION_KIND,
+    WATCH_FRAME_KIND,
+    DOCK_ZONES_KIND,
+    POPOVER_KIND,
+  ]) {
     const win = getFloatingWindow(kind);
     if (win) {
       win.webContents.send("vellum:companion:state", state);
     }
   }
+  syncPopover();
+};
+
+/**
+ * Whether an answer is for the popover standing. An approval is answered by
+ * its own request id, so a press on one row of a list still lands after
+ * another request joins it; everything else names the whole popover.
+ */
+export const answersThePopover = (
+  popover: CompanionPopover | undefined,
+  popoverId: string,
+  answer: { kind: string; itemId?: string },
+): boolean => {
+  if (popover === undefined) {
+    return false;
+  }
+  if (answer.itemId !== undefined) {
+    return (
+      popover.kind === "approvals" &&
+      popover.items.some((item) => item.id === answer.itemId)
+    );
+  }
+  return popover.id === popoverId;
+};
+
+/** The side of a docked call bar the popover hangs from: away from the edge. */
+const POPOVER_SIDE_FOR_DOCK: Record<CompanionDock, PopoverSide> = {
+  bottom: "above",
+  top: "below",
+  left: "right",
+  right: "left",
+};
+
+/**
+ * Where the popover hangs from, or null when there is no surface on screen to
+ * draw it beside.
+ *
+ * A call's bar is centred on the avatar's point, so the popover goes on the
+ * bar's far side from the edge it is docked to, clear of the bar's reach. Off
+ * a call it goes on the side the card grows toward, clear of the creature.
+ * Measured from where the surface rests, which for a glide in flight is where
+ * the glide is headed.
+ */
+const popoverAnchor = (): CompanionPopoverAnchor | null => {
+  const win = getFloatingWindow(COMPANION_KIND);
+  if (win === null || win.isDestroyed() || surfaceAway) {
+    return null;
+  }
+  const centre = glide === null ? avatarCentre(win) : glide.to;
+  const { workArea } = displayUnder(centre);
+  const reach = companionLowerReachFor(geometry.avatarBox, geometry.optionsBox);
+  if (callSurfaceFor(call, dialing)) {
+    return {
+      centre,
+      workArea,
+      side: POPOVER_SIDE_FOR_DOCK[dock],
+      clearance: reach,
+    };
+  }
+  const up = cardGrowth === "up";
+  return {
+    centre,
+    workArea,
+    side: up ? "above" : "below",
+    clearance: up ? Math.max(geometry.avatarBox / 2, reach) : reach,
+  };
+};
+
+/**
+ * How the companion is showing the popover, as the user last left it: put
+ * off, drawn whole, or in its short form.
+ *
+ * Put off holds for the popover that was put off and no other, so a new
+ * approval or credential arriving shows itself again. Drawn whole holds for
+ * as long as the same kind of popover stands, so answering one approval in
+ * the list leaves the list open on the rest. A card or a surface has no short
+ * form, so it is always drawn whole.
+ */
+/**
+ * How long a pressed answer keeps its prompt off the popover while the window
+ * holding it submits, in milliseconds.
+ *
+ * A press takes the approval, the credential form or the card away at once,
+ * rather than once the submission lands and the window publishes the prompt
+ * gone, which is long enough to press again. A prompt still standing when
+ * the hold runs out is one whose submission did not land, so it shows again.
+ */
+export const COMPANION_POPOVER_ANSWER_HOLD_MS = 10_000;
+
+/** Answered prompts held off the popover, by approval or popover id. */
+const answered = new Map<string, ReturnType<typeof setTimeout>>();
+
+const holdAnswered = (id: string): void => {
+  clearTimeout(answered.get(id));
+  answered.set(
+    id,
+    setTimeout(() => {
+      answered.delete(id);
+      pushState();
+    }, COMPANION_POPOVER_ANSWER_HOLD_MS),
+  );
+};
+
+/** Let go of held answers the published popover no longer carries. */
+const releaseAnswered = (popover: CompanionPopover | undefined): void => {
+  const standing = new Set<string>();
+  if (popover?.kind === "approvals") {
+    for (const item of popover.items) {
+      standing.add(item.id);
+    }
+  } else if (popover !== undefined) {
+    standing.add(popover.id);
+  }
+  for (const [id, timer] of answered) {
+    if (!standing.has(id)) {
+      clearTimeout(timer);
+      answered.delete(id);
+    }
+  }
+};
+
+/**
+ * The popover as the companion shows it: what the app's window published,
+ * less what the user has already answered. An approval list loses the rows
+ * answered and is named for the rows left, so the rest reads as a list of
+ * its own; anything else answered is nothing to show.
+ */
+export const shownPopover = (
+  popover: CompanionPopover | undefined,
+  isAnswered: (id: string) => boolean,
+): CompanionPopover | undefined => {
+  if (popover === undefined) {
+    return undefined;
+  }
+  if (popover.kind !== "approvals") {
+    return isAnswered(popover.id) ? undefined : popover;
+  }
+  const items = popover.items.filter((item) => !isAnswered(item.id));
+  if (items.length === 0) {
+    return undefined;
+  }
+  if (items.length === popover.items.length) {
+    return popover;
+  }
+  return { ...popover, id: items.map((item) => item.id).join(","), items };
+};
+
+const currentPopover = (): CompanionPopover | undefined =>
+  shownPopover(context.popover, (id) => answered.has(id));
+
+let popoverViewFor: {
+  id: string;
+  kind: CompanionPopover["kind"];
+  view: CompanionPopoverView;
+} | null = null;
+
+const currentPopoverView = (): CompanionPopoverView | undefined => {
+  const popover = currentPopover();
+  if (popover === undefined) {
+    return undefined;
+  }
+  if (popoverViewFor?.view === "deferred") {
+    return popoverViewFor.id === popover.id ? "deferred" : "row";
+  }
+  if (
+    !companionPopoverHasRow(popover) ||
+    (popoverViewFor?.view === "expanded" &&
+      popoverViewFor.kind === popover.kind)
+  ) {
+    return "expanded";
+  }
+  return "row";
+};
+
+/**
+ * Whether a call's bar carries the popover, joined to it as one shape, which
+ * is whenever the bar is a row (docked to the top or bottom) and the popover
+ * is not put off. The popover's own window stays away then.
+ */
+const popoverRidesTheBar = (): boolean => {
+  const view = currentPopoverView();
+  return (
+    callSurfaceFor(call, dialing) &&
+    !companionDockIsSide(dock) &&
+    view !== undefined &&
+    view !== "deferred"
+  );
+};
+
+/**
+ * How tall the popover on the bar stands above the bar's centre line, in
+ * points, as the surface last measured it for the popover it is drawing.
+ */
+let attached: { id: string; height: number } | null = null;
+
+/**
+ * The canvas room above the avatar the popover on the bar needs: its height
+ * and the canvas's own pad, or nothing while the bar carries none.
+ */
+const attachedRise = (): number => {
+  const popover = currentPopover();
+  if (
+    attached === null ||
+    popover === undefined ||
+    attached.id !== popover.id ||
+    !popoverRidesTheBar()
+  ) {
+    return 0;
+  }
+  return (
+    attached.height + companionPadFor(geometry.avatarBox, geometry.optionsBox)
+  );
+};
+
+/** Whether the surface's window has been lent key status for a form. */
+let surfaceKeyLent = false;
+
+/**
+ * Lend the surface's window the keyboard while the credential form is on the
+ * bar, and take it back after. `setFocusable` both ways and never `blur()`:
+ * on macOS `blur` flashes a panel and drops its mouse forwarding.
+ */
+const syncSurfaceKey = (wanted: boolean): void => {
+  const win = getFloatingWindow(COMPANION_KIND);
+  if (win === null || win.isDestroyed()) {
+    surfaceKeyLent = false;
+    return;
+  }
+  if (wanted && !surfaceKeyLent) {
+    surfaceKeyLent = true;
+    win.setFocusable(true);
+    win.focus();
+  } else if (!wanted && surfaceKeyLent) {
+    surfaceKeyLent = false;
+    win.setFocusable(false);
+  }
+};
+
+const syncPopover = (): void => {
+  const view = currentPopoverView();
+  const popover = currentPopover();
+  const riding = popoverRidesTheBar();
+  const form = popover?.kind === "secret" && view === "expanded";
+  syncCompanionPopover(popover, popoverAnchor(), {
+    show: view !== "deferred" && !riding,
+    keyboard: form && !riding,
+  });
+  syncSurfaceKey(form && riding && popoverAnchor() !== null);
+  // The canvas holds what the bar carries, and gives the room back once it
+  // carries nothing. A rebuild pushes, and this runs again with it settled.
+  syncCanvas();
 };
 
 /**
@@ -1140,6 +2020,12 @@ const framesTheShare = (): boolean =>
 let frameScrolling = false;
 
 /**
+ * The frame window that has not painted yet, so nothing shows it before its
+ * first paint does. See `showWhenReady` in {@link placeWatchFrame}.
+ */
+let frameAwaitingPaint: BrowserWindow | null = null;
+
+/**
  * Give the frame the mouse, or give it back to the desktop.
  *
  * Forwarded mouse-move only while the frame has stepped aside for a scroll:
@@ -1176,7 +2062,11 @@ const applyFrameMouse = (): void => {
   }
   frame.setIgnoreMouseEvents(false);
   frame.setFocusable(true);
-  frame.focus();
+  // `focus` puts a window on screen, and a frame still waiting on its first
+  // paint must stay off it. The paint runs this again.
+  if (frame !== frameAwaitingPaint) {
+    frame.focus();
+  }
 };
 
 /**
@@ -1765,7 +2655,9 @@ const placeWatchFrame = (bounds: Rectangle): void => {
       // frame, so the presses are measured out again on the new bounds.
       armCoachmarkPressWatch();
     }
-    if (!existing.isVisible()) {
+    // A frame still waiting on its first paint is shown by that paint.
+    // Shown any earlier, it is the frame that never reaches the screen.
+    if (!existing.isVisible() && existing !== frameAwaitingPaint) {
       existing.showInactive();
     }
     return;
@@ -1775,6 +2667,13 @@ const placeWatchFrame = (bounds: Rectangle): void => {
     route: WATCH_FRAME_ROUTE,
     width: bounds.width,
     height: bounds.height,
+    // **Shown once its page has painted, never before.** A frame put on
+    // screen while its page is still loading stays blank on a whole display:
+    // the page draws the border and the label, and the screen keeps showing
+    // the empty window until something makes macOS take it again (Mission
+    // Control, or showing the window a second time). Moving it, resizing it
+    // and repainting the page do not.
+    showWhenReady: true,
     ignoreMouseEvents: true,
     position: { x: bounds.x, y: bounds.y },
     browserWindow: {
@@ -1796,6 +2695,15 @@ const placeWatchFrame = (bounds: Rectangle): void => {
     },
   });
   win.setAlwaysOnTop(true, "floating", -1);
+  frameAwaitingPaint = win;
+  win.once("ready-to-show", () => {
+    if (frameAwaitingPaint === win) {
+      frameAwaitingPaint = null;
+    }
+    // Key status is lent with a `focus` that would have shown the window
+    // early, so a mode that was on when this frame opened takes it now.
+    applyFrameMouse();
+  });
   // A frame opened while the mode is already on is one the user is expecting
   // to draw on: the mode outlives the window, which is replaced whenever the
   // share moves to another target. A scroll the old window stepped aside for
@@ -2019,10 +2927,16 @@ const syncCallSurface = (): void => {
     // arrives on the way home must send the pill back to that home when it
     // ends, not to wherever it was passing through when the call came.
     callHome = glide === null ? avatarCentre(win) : glide.to;
+    // The column's canvas before the glide to a side, so the bar arrives
+    // already standing in a canvas that can hold it.
+    syncCanvas();
     const display = displayUnder(callHome);
+    // The edges, loaded now and kept hidden, so the first drag of the call
+    // has a window to show rather than one to build.
+    readyDockZones(display.workArea);
     glideAvatarTo(
       win,
-      defaultAvatarCentre(display.workArea, geometry),
+      dockedAvatarCentre(dock, display.workArea, geometry),
       display.workArea,
     );
     return;
@@ -2032,10 +2946,193 @@ const syncCallSurface = (): void => {
   }
   const home = callHome;
   callHome = null;
+  // A drag the call ends under has nothing left to dock.
+  docking = null;
+  dockDragTravel = 0;
+  closeDockZones();
   if (win === null) {
     return;
   }
+  syncCanvas();
   glideAvatarTo(win, home, displayUnder(home).workArea);
+};
+
+/** Stop listening to the renderer that owns the current call. */
+const releaseCallOwner = (): void => {
+  detachCallOwner?.();
+  detachCallOwner = null;
+  callOwner = null;
+};
+
+/**
+ * Drop the running call and invalidate work that belongs to its row.
+ *
+ * The caller owns the surface synchronization and state push so it can combine
+ * this change with any other claims that end in the same transition.
+ */
+const clearCall = (): boolean => {
+  if (call === null) {
+    return false;
+  }
+  releaseCallOwner();
+  call = null;
+  pickGeneration += 1;
+  return true;
+};
+
+/**
+ * Tie the call snapshot to the renderer document that drives it.
+ *
+ * A window close is handled by the main-window lifecycle below. These signals
+ * also cover a renderer crash or full document reload inside the same window.
+ */
+const ownCall = (owner: WebContents): void => {
+  if (callOwner === owner) {
+    return;
+  }
+  releaseCallOwner();
+  callOwner = owner;
+
+  const endOwnedCall = (): void => {
+    if (callOwner !== owner || !clearCall()) {
+      return;
+    }
+    syncCallSurface();
+    pushState();
+  };
+  const endOnNavigation = (
+    event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+  ): void => {
+    if (event.isMainFrame && !event.isSameDocument) {
+      endOwnedCall();
+    }
+  };
+
+  owner.once("destroyed", endOwnedCall);
+  owner.on("render-process-gone", endOwnedCall);
+  owner.on("did-start-navigation", endOnNavigation);
+  detachCallOwner = () => {
+    owner.off("destroyed", endOwnedCall);
+    owner.off("render-process-gone", endOwnedCall);
+    owner.off("did-start-navigation", endOnNavigation);
+  };
+};
+
+/**
+ * Have the edges' window built and hidden over a display, ready to show.
+ *
+ * Built when the call takes the surface rather than on the first move of a
+ * drag: a window has to load its page before it can draw, and a drag that
+ * had to wait for that would be halfway to the edge before the edges
+ * appeared. Hidden straight after it is built; its page draws nothing until
+ * a drag is in flight anyway, so nothing is seen either way.
+ */
+const readyDockZones = (bounds: Rectangle): BrowserWindow => {
+  const existing = getFloatingWindow(DOCK_ZONES_KIND);
+  if (existing !== null) {
+    const current = existing.getBounds();
+    if (
+      current.x !== bounds.x ||
+      current.y !== bounds.y ||
+      current.width !== bounds.width ||
+      current.height !== bounds.height
+    ) {
+      existing.setBounds(bounds);
+    }
+    return existing;
+  }
+  const win = createFloatingWindow({
+    kind: DOCK_ZONES_KIND,
+    route: DOCK_ZONES_ROUTE,
+    width: bounds.width,
+    height: bounds.height,
+    ignoreMouseEvents: true,
+    position: { x: bounds.x, y: bounds.y },
+    browserWindow: {
+      hasShadow: false,
+      focusable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      backgroundColor: "#00000000",
+    },
+  });
+  // Under the surface being dragged over it, so the bar is never hidden by
+  // the edge it is about to land on.
+  win.setAlwaysOnTop(true, "floating", -1);
+  win.hide();
+  return win;
+};
+
+/**
+ * Show the edges over a display, or move them to it.
+ *
+ * On each move of a drag during a call, so the edges follow the drag from
+ * display to display. Hidden again by the release, and closed by the call
+ * ending.
+ */
+const placeDockZones = (bounds: Rectangle): void => {
+  const win = readyDockZones(bounds);
+  if (!win.isVisible()) {
+    win.showInactive();
+  }
+};
+
+const hideDockZones = (): void => {
+  getFloatingWindow(DOCK_ZONES_KIND)?.hide();
+};
+
+const closeDockZones = (): void => {
+  getFloatingWindow(DOCK_ZONES_KIND)?.close();
+};
+
+/**
+ * Note where a drag during a call would drop the bar, and show the edges.
+ *
+ * Run after each move of such a drag, against the display the avatar is now
+ * over: a drag across displays docks to an edge of the display it ends on.
+ * Pushed only when the answer changes, since the surface is pushed the same
+ * state and a drag is a message per pixel.
+ */
+const armDock = (centre: { x: number; y: number }): void => {
+  const { workArea } = displayUnder(centre);
+  placeDockZones(workArea);
+  const next = nearestDock(centre, workArea);
+  if (next === docking) {
+    return;
+  }
+  docking = next;
+  pushState();
+};
+
+/**
+ * Drop the bar on an edge: remember it, and glide the bar there in a canvas
+ * that fits it.
+ *
+ * The release of a drag during a call, and the mid-call reset. The edge is
+ * the user's stated placement of the call's bar, so it is written to the store
+ * the way a size pick is and every call after this one takes the bar there.
+ */
+const dropOnDock = (next: CompanionDock): void => {
+  docking = null;
+  hideDockZones();
+  writeCompanionCallDock(next);
+  dock = next;
+  const win = getFloatingWindow(COMPANION_KIND);
+  if (win === null || win.isDestroyed()) {
+    pushState();
+    return;
+  }
+  const resting = glide === null ? avatarCentre(win) : glide.to;
+  // Before the glide, as on the way into a call: the canvas is rebuilt
+  // around where the bar rests now, and the glide then crosses to the edge
+  // in the canvas the edge needs. A rebuild pushes the surface itself; the
+  // push is owed either way, since the dock and the drag both moved.
+  if (!syncCanvas()) {
+    pushState();
+  }
+  const { workArea } = displayUnder(resting);
+  glideAvatarTo(win, dockedAvatarCentre(dock, workArea, geometry), workArea);
 };
 
 /**
@@ -2117,21 +3214,37 @@ const mainWindowShowing = (): boolean => {
  * forwarding that makes the canvas hit-testable, which is what `blur` would
  * not have (see the note at `openCompanionWindow`).
  */
+/**
+ * Whether the surface belongs off the screen: the app is in front with its own
+ * window showing, and no introduction is being staged on it.
+ *
+ * Exported for its tests, as {@link shouldShowCompanionSurface} is. The rule
+ * has two inputs that pull opposite ways, and the one case worth pinning is
+ * the overlap: a due run holds the surface in front of the very window that
+ * would otherwise hide it.
+ */
+export const surfaceAwayFor = (
+  appInFront: boolean,
+  mainShowing: boolean,
+  staged: boolean,
+): boolean => appInFront && mainShowing && !staged;
+
 const syncFrontmost = (): void => {
   const win = getFloatingWindow(COMPANION_KIND);
   if (!win || win.isDestroyed()) {
     return;
   }
-  const away = appActive && mainWindowShowing();
+  const away = surfaceAwayFor(appActive, mainWindowShowing(), introStaged);
   if (away === surfaceAway) {
     return;
   }
   surfaceAway = away;
   if (away) {
     win.hide();
-    return;
+  } else {
+    win.showInactive();
   }
-  win.showInactive();
+  syncPopover();
 };
 
 /**
@@ -2141,20 +3254,35 @@ const syncFrontmost = (): void => {
  * **A window that exists is not raised, and one that does not is created.** A
  * user reaching for a floating avatar has chosen not to go back to Vellum, and
  * what they asked for shows itself on this surface, so an existing window is
- * left exactly where it was. But closing the main window destroys it while this
- * surface stays on screen, and a command dispatched into that gap lands
- * nowhere: the press would read as broken. There is no way to act without a
- * renderer to act in, so that case builds one, which necessarily shows it.
+ * left exactly where it was, hidden or not. The close button only hides the
+ * main window, so it is missing only before the first one has been built, and
+ * a command dispatched into that gap lands nowhere: the press would read as
+ * broken. There is no way to act without a renderer to act in, so that case
+ * builds one, which necessarily shows it.
+ *
+ * **Answers whether the command reached a renderer**: true once it has been
+ * sent, false when the build finished with no window to send to. A window
+ * that goes away while it loads (a quit mid-load) releases the wait, and the
+ * send is a no-op there. Almost every press is done at the hand-off and
+ * ignores the answer; the introduction's last beat reads it, because what it
+ * does next is only true of a press a renderer actually has (see the
+ * `advanceIntro` handler).
  */
-export const dispatchWithoutRaising = (command: VellumCommand): void => {
+export const dispatchWithoutRaising = (
+  command: VellumCommand,
+): Promise<boolean> => {
   if (currentMainWindow() !== null) {
     dispatchToMain(command);
-    return;
+    return Promise.resolve(true);
   }
   // Resolves once the renderer has loaded and the window has shown, so the
   // command arrives at a page that can receive it.
-  void ensureMainWindowVisible().then(() => {
+  return ensureMainWindowVisible().then(() => {
+    if (currentMainWindow() === null) {
+      return false;
+    }
     dispatchToMain(command);
+    return true;
   });
 };
 
@@ -2239,6 +3367,30 @@ export const companionContextMenuTemplate = (
   },
 ];
 
+/**
+ * Whether a share may start, as far as the grant goes. A read that fails
+ * says yes: the capture itself is the final word, and a check that cannot
+ * run is no reason to refuse a share that might work.
+ */
+const screenRecordingAllowed = (): Promise<boolean> =>
+  screenRecordingGranted().catch((err: unknown) => {
+    log.warn("[companion] could not read the Screen Recording grant:", err);
+    return true;
+  });
+
+/**
+ * Send the user to Screen Recording in System Settings, with the helper
+ * listed there to turn on. Settings opening is itself the message: the share
+ * cannot happen until that row is on.
+ */
+const askForScreenRecording = async (): Promise<void> => {
+  try {
+    await getPermissionsService()?.openSettings("screen");
+  } catch (err) {
+    log.warn("[companion] could not open Screen Recording settings:", err);
+  }
+};
+
 export const installCompanionWindow = (): void => {
   if (installed) {
     return;
@@ -2282,8 +3434,29 @@ export const installCompanionWindow = (): void => {
       // clamped to that display's edges instead of being held back at the
       // first one's.
       moveAvatarTo(win, wanted, displayUnder(wanted).workArea);
+      // A drag during a call is a drag toward an edge: the bar moves as
+      // freely as the idle pill does, and the release docks it to whichever
+      // edge it is nearest. Read back off the window rather than from
+      // `wanted`, since the clamp is what decided where the avatar is.
+      if (callSurfaceFor(call, dialing)) {
+        dockDragTravel += Math.abs(dx) + Math.abs(dy);
+        if (dockDragTravel > DOCK_DRAG_SLOP) {
+          armDock(avatarCentre(win));
+        }
+      }
     },
   );
+
+  // The hand letting go. Sent after every press, and what it settles is
+  // main's to know: a drag during a call docks the bar to the edge it was
+  // heading for, and every other release has nothing to do.
+  on("vellum:companion:release", z.tuple([]), () => {
+    dockDragTravel = 0;
+    if (docking === null) {
+      return;
+    }
+    dropOnDock(docking);
+  });
 
   /**
    * Talk, delivered to the renderer that can act on it.
@@ -2302,7 +3475,7 @@ export const installCompanionWindow = (): void => {
     if (dialOnTalk(call)) {
       setDialing(true);
     }
-    dispatchWithoutRaising({ kind: "startVoice" });
+    void dispatchWithoutRaising({ kind: "startVoice" });
   });
 
   /**
@@ -2327,7 +3500,7 @@ export const installCompanionWindow = (): void => {
     ([pick]) => {
       if (pick === undefined) {
         pickGeneration += 1;
-        dispatchWithoutRaising({ kind: "toggleWatch" });
+        void dispatchWithoutRaising({ kind: "toggleWatch" });
         return;
       }
       // A tab is resolved here, before the command leaves: it takes a round
@@ -2346,7 +3519,7 @@ export const installCompanionWindow = (): void => {
         if (target === null || generation !== pickGeneration) {
           return;
         }
-        dispatchWithoutRaising({ kind: "toggleWatch", target });
+        void dispatchWithoutRaising({ kind: "toggleWatch", target });
       });
     },
   );
@@ -2356,11 +3529,17 @@ export const installCompanionWindow = (): void => {
    * on demand: the desktop changes under every push, and the list is only
    * worth anything at the moment it is drawn.
    */
-  handle("vellum:companion:listCaptureSources", z.tuple([]), () => {
+  handle("vellum:companion:listCaptureSources", z.tuple([]), async () => {
     // A picker opening again is the user starting over: whatever pick was
     // still resolving belonged to the choice they just left.
     pickGeneration += 1;
-    return listCaptureSources();
+    // Read beside the list so the picker can ask for the grant in place of
+    // tiles nothing could be shown from.
+    const [sources, granted] = await Promise.all([
+      listCaptureSources(),
+      screenRecordingAllowed(),
+    ]);
+    return { ...sources, screenRecordingGranted: granted };
   });
 
   /**
@@ -2380,16 +3559,33 @@ export const installCompanionWindow = (): void => {
     ([pick]) => {
       if (pick === undefined) {
         pickGeneration += 1;
-        dispatchWithoutRaising({ kind: "setScreenShare" });
+        void dispatchWithoutRaising({ kind: "setScreenShare" });
         return;
       }
       const generation = ++pickGeneration;
-      void resolveCapturePick(pick).then((target) => {
-        if (target === null || generation !== pickGeneration) {
-          return;
-        }
-        dispatchWithoutRaising({ kind: "setScreenShare", target });
-      });
+      // The grant first, before a tab is raised for a share that cannot
+      // start. Without it every frame would be refused and the share would
+      // stop itself a moment after it began, so the press sends the user to
+      // the grant instead. The keyboard's share reaches here with no picker
+      // to have asked, which is why this is not left to the picker.
+      void screenRecordingAllowed()
+        .then(async (granted) => {
+          if (generation !== pickGeneration) {
+            return;
+          }
+          if (!granted) {
+            await askForScreenRecording();
+            return;
+          }
+          const target = await resolveCapturePick(pick);
+          if (target === null || generation !== pickGeneration) {
+            return;
+          }
+          void dispatchWithoutRaising({ kind: "setScreenShare", target });
+        })
+        .catch((err: unknown) => {
+          log.warn("[companion] could not start the share:", err);
+        });
     },
   );
 
@@ -2498,7 +3694,12 @@ export const installCompanionWindow = (): void => {
       if (!annotating && !lettingGo) {
         return;
       }
-      dispatchWithoutRaising({ kind: "annotateShare", phase, strokes, ink });
+      void dispatchWithoutRaising({
+        kind: "annotateShare",
+        phase,
+        strokes,
+        ink,
+      });
     },
   );
 
@@ -2512,7 +3713,15 @@ export const installCompanionWindow = (): void => {
   handle(
     "vellum:companion:captureScreen",
     z.tuple([watchCaptureTargetSchema]),
-    ([target]) => captureTargetFrame(target),
+    ([target]) =>
+      // A refusal for want of the grant is the one miss the user must hear
+      // about: every frame after it would be refused too. The renderer still
+      // gets its null and stops the share.
+      captureTargetFrame(target, (err) => {
+        if (isScreenRecordingRefusal(err)) {
+          void answerScreenRecordingRefusal(askForScreenRecording);
+        }
+      }),
   );
 
   /**
@@ -2564,7 +3773,7 @@ export const installCompanionWindow = (): void => {
    */
   on("vellum:companion:answerWatchRetro", z.tuple([z.boolean()]), ([open]) => {
     if (!open) {
-      dispatchWithoutRaising({ kind: "answerWatchRetro", open: false });
+      void dispatchWithoutRaising({ kind: "answerWatchRetro", open: false });
       return;
     }
     // The same shape `activate` takes, because it is the same request: bring
@@ -2600,13 +3809,161 @@ export const installCompanionWindow = (): void => {
       if (answer === "copy" && offered?.id === offerId) {
         clipboard.writeText(offered.text);
       }
-      dispatchWithoutRaising({
+      void dispatchWithoutRaising({
         kind: "answerDictationOffer",
         answer,
         offerId,
       });
     },
   );
+
+  /**
+   * The answer to the popover, delivered to the window holding what it shows.
+   *
+   * Dropped when it names a popover that is no longer standing: the approval
+   * may have been answered in the app, or the surface replaced, between the
+   * push that drew the buttons and the press. `open` is the one answer that
+   * raises the app, since going to the app is what it asks for; the answer
+   * still travels so the window stops offering a surface the user went to.
+   */
+  on(
+    "vellum:companion:answerPopover",
+    z.tuple([companionPopoverAnswerSchema, z.string()]),
+    ([answer, popoverId]) => {
+      // Against what is shown, so a second press on an answer already on
+      // its way is dropped with the prompt it was pressed on.
+      const shown = currentPopover();
+      if (!answersThePopover(shown, popoverId, answer)) {
+        return;
+      }
+      const command: VellumCommand = {
+        kind: "answerCompanionPopover",
+        popoverId,
+        answer,
+      };
+      // Off the popover at once. `open` leaves the prompt where it is: the app
+      // comes forward to answer it, and the companion steps off with it.
+      if ("itemId" in answer) {
+        holdAnswered(answer.itemId);
+        pushState();
+      } else if (
+        answer.kind !== "open" &&
+        shown !== undefined &&
+        // A voice pick leaves the list up, so several can be tried in a row.
+        !(answer.kind === "pick" && shown.kind === "voices")
+      ) {
+        holdAnswered(shown.id);
+        pushState();
+      }
+      if (answer.kind !== "open") {
+        void dispatchWithoutRaising(command);
+        return;
+      }
+      void ensureMainWindowVisible().then(() => {
+        dispatchToMain(command);
+        dispatchToMain({ kind: "currentConversation" });
+      });
+    },
+  );
+
+  on(
+    "vellum:companion:setPopoverSize",
+    z.tuple([z.string(), z.number().finite(), z.number().finite()]),
+    ([popoverId, width, height]) => {
+      const popover = currentPopover();
+      if (popover?.id !== popoverId) {
+        return;
+      }
+      if (setCompanionPopoverSize(popover, { width, height })) {
+        syncPopover();
+      }
+    },
+  );
+
+  /**
+   * How tall the popover on the call's bar stands above the bar, from the
+   * surface's window, which is the one drawing it. The canvas is rebuilt to
+   * hold it.
+   */
+  on(
+    "vellum:companion:setAttachedPopoverHeight",
+    z.tuple([z.string(), z.number().finite().nonnegative().max(4000)]),
+    ([popoverId, height]) => {
+      const popover = currentPopover();
+      if (popover?.id !== popoverId) {
+        return;
+      }
+      const rounded = Math.ceil(height);
+      if (attached?.id === popoverId && attached.height === rounded) {
+        return;
+      }
+      attached = { id: popoverId, height: rounded };
+      syncCanvas();
+    },
+  );
+
+  /**
+   * Review, Enter and Not Now. Held here rather than answered in the app's
+   * window, since they change only what the companion shows, and the call's
+   * bar and the popover's window both draw it. A press for a popover no
+   * longer standing is dropped.
+   */
+  on(
+    "vellum:companion:setPopoverView",
+    z.tuple([z.string(), z.enum(["row", "expanded", "deferred"])]),
+    ([popoverId, view]) => {
+      const popover = currentPopover();
+      if (popover?.id !== popoverId) {
+        return;
+      }
+      popoverViewFor = { id: popover.id, kind: popover.kind, view };
+      pushState();
+    },
+  );
+
+  /**
+   * A chevron on the call bar, for the window holding the call to open its
+   * picker in the popover or close it. Never raises the app: choosing a mic
+   * or a voice is something the user does without leaving their work.
+   */
+  on(
+    "vellum:companion:togglePicker",
+    z.tuple([companionPickerSchema]),
+    ([picker]) => {
+      void dispatchWithoutRaising({ kind: "toggleCompanionPicker", picker });
+    },
+  );
+
+  /**
+   * A link pressed in the popover, opened in the user's browser.
+   *
+   * http and https only. The URL is model output that crossed a renderer, and
+   * any other scheme hands the press to whatever claims it: `file:` opens
+   * anything readable on disk.
+   */
+  on("vellum:companion:openLink", z.tuple([z.string().max(4096)]), ([url]) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return;
+    }
+    void shell.openExternal(parsed.toString()).catch((err: unknown) => {
+      log.warn("[companion] could not open a popover link:", err);
+    });
+  });
+
+  /**
+   * Whether a prompt can be shown beside the surface: there is one on screen
+   * to draw it beside. The app's window asks before bringing itself forward
+   * for an approval.
+   */
+  handle("vellum:companion:takesPrompts", z.tuple([]), () => {
+    return popoverAnchor() !== null;
+  });
 
   /**
    * The assistant's name and what the window holding it knows about the turn
@@ -2625,6 +3982,11 @@ export const installCompanionWindow = (): void => {
     z.tuple([companionContextSchema]),
     ([next]) => {
       context = next;
+      releaseAnswered(context.popover);
+      // What the user last did with a popover goes with it.
+      if (currentPopover() === undefined) {
+        popoverViewFor = null;
+      }
       syncWatchFrame();
       pushState();
     },
@@ -2656,13 +4018,70 @@ export const installCompanionWindow = (): void => {
       if (intro === null) {
         return;
       }
-      const next = introOnAdvance(intro, action);
-      if (next === null) {
-        finishIntro();
-      } else {
-        intro = next;
+      // Resolved against the beat main is on when it runs, not the one this
+      // press arrived on, which is the same rule the handler itself follows:
+      // the hand-off below can put a window build in between, and anything the
+      // user did to the run in that gap is the newer answer.
+      const advance = (): void => {
+        const from = intro;
+        // The run went while the press was in the air, dismissed or put away.
+        // Nothing left to walk, and nothing to count the press against.
+        if (from === null) {
+          return;
+        }
+        const next = introOnAdvance(from, action);
+        // **The offer is counted where it is taken, not where it lands.** A
+        // `try` on the last beat ends the run and a `try` before it does not,
+        // so the beat it was taken on is the only place the two are told
+        // apart, and that beat is gone a line later.
+        if (action === "try") {
+          reportIntro("offer_taken", from);
+        }
+        if (next === null) {
+          finishIntro(introEndingFor(action));
+        } else {
+          intro = next;
+          // `try` mid-run holds the beat, and a beat held is not a beat
+          // reached.
+          if (next !== from) {
+            reportIntro("advanced", next);
+          }
+        }
+        pushState();
+      };
+      if (action !== "try") {
+        advance();
+        return;
       }
-      pushState();
+      // **A `try` is a press on Talk, made from the card.** Started here the
+      // same way the creature's own press starts one, so the dial is drawn in
+      // this beat rather than after a round trip, and the card withdraws
+      // itself for as long as the session lasts.
+      if (dialOnTalk(call)) {
+        setDialing(true);
+      }
+      // **The run ends only on a press a renderer actually has**, because on
+      // the last beat a `try` IS what ends it, and ending it clears the
+      // staging the app reads (`getIntroStage`). The app's first-run voice
+      // card stands down while a run is on, so that the offer this beat makes
+      // reaches a session rather than a third card (see
+      // `voice-entry-guards.ts`). Told the run is over first, it puts itself
+      // in front of the one press the whole run is building to.
+      //
+      // With the app's window closed the hand-off builds a renderer first, and
+      // that renderer pulls the staging as it mounts, so the wait is what
+      // keeps it reading a run that is still on.
+      //
+      // A hand-off that reaches nothing leaves the run exactly where it is.
+      // The offer has not been taken, the card is still on the surface with
+      // its own way on and way out, and the staging is still the truth: a run
+      // IS on. Ending it here would record an introduction the user never got
+      // and fly the surface home on a press that did nothing.
+      void dispatchWithoutRaising({ kind: "startVoice" }).then((served) => {
+        if (served) {
+          advance();
+        }
+      });
     },
   );
 
@@ -2704,18 +4123,22 @@ export const installCompanionWindow = (): void => {
   on(
     "vellum:voiceActivity:start",
     z.tuple([voiceActivityStartSchema]),
-    ([start]) => {
+    ([start], event) => {
       // Taken whole, redundant or not. The mirror re-syncs on mount and the
       // session controller remounts across layout-level route changes while the
       // store persists, so a second start for a call already on screen is
       // expected traffic; every field it carries is current, so there is
       // nothing on the running call worth preserving against it.
+      ownCall(event.sender);
       call = start;
       // The session is the answer the dial was waiting for. Cleared before the
       // push rather than through `setDialing`, so the surface sees one state
       // with the call on it and not a beat of neither.
       disarmDial();
       dialing = false;
+      // However this session was started, it is the thing the introduction's
+      // last beat asks for. See {@link finishIntroOnSession}.
+      finishIntroOnSession();
       syncCallSurface();
       pushState();
     },
@@ -2739,14 +4162,10 @@ export const installCompanionWindow = (): void => {
     // first-run card to answer, an assistant with no voice, a request spent
     // some other way. Each has shown the user something else, so the dial ends
     // and the pill closes.
-    if (call === null) {
+    if (!clearCall()) {
       setDialing(false);
       return;
     }
-    call = null;
-    // The row the pick was made from is gone with the call, so a pick still
-    // resolving must not start a session over a bar that is not there.
-    pickGeneration += 1;
     syncCallSurface();
     pushState();
   });
@@ -2791,8 +4210,8 @@ export const installCompanionWindow = (): void => {
   );
 
   /**
-   * The window that publishes `watching` is gone, so stop claiming a screen is
-   * being read.
+   * The window that owns the live sessions is gone, so give up every claim tied
+   * to it.
    *
    * The session lives in the app's window: the socket and the microphone go
    * down with the renderer when it is destroyed, which is exactly why nothing
@@ -2807,10 +4226,10 @@ export const installCompanionWindow = (): void => {
    * leaves the renderer alive and its session running, and must not clear
    * anything.
    *
-   * The watch flag and the dictation, which are the two things in the context
-   * that claim a microphone or a socket is open in that window. The name and
-   * the tail are a record of what was said and this surface is still where it
-   * is read, the same bargain `working` is given by `clearCompanionWorking`.
+   * The call, watch flag, share, dictation and pending controls each claim a
+   * microphone, socket or handler is alive in that window. The name and the
+   * tail are a record of what was said and this surface is still where it is
+   * read, the same bargain `working` is given by `clearCompanionWorking`.
    */
   onMainWindowVisibilityChange(() => {
     if (currentMainWindow() !== null) {
@@ -2819,16 +4238,19 @@ export const installCompanionWindow = (): void => {
     // A dial is a claim on that window too: the request it carries is gone
     // with the renderer that parked it.
     const claiming =
+      call !== null ||
       context.watching === true ||
       context.screenShare !== undefined ||
       context.dictating !== undefined ||
       context.dictationOffer !== undefined ||
+      context.popover !== undefined ||
       dialing;
     if (!claiming) {
       return;
     }
     disarmDial();
     dialing = false;
+    clearCall();
     syncCallSurface();
     context = {
       ...context,
@@ -2842,6 +4264,9 @@ export const installCompanionWindow = (): void => {
       // application they would go to went down with it, so an offer left
       // standing is one whose answers do nothing.
       dictationOffer: undefined,
+      // So does the popover: its answers are acted on in that window.
+      popover: undefined,
+      voicesPickable: false,
     };
     syncWatchFrame();
     pushState();
@@ -2893,6 +4318,23 @@ export const installCompanionWindow = (): void => {
   // before its subscription registers is dropped. It pulls this once mounted.
   handle("vellum:companion:getState", z.tuple([]), () => currentState());
 
+  // The app's window is told when to dim itself for a run, and a push that
+  // lands before its scrim has subscribed is dropped the same way a surface
+  // state is: the window can be mid-load when a run starts, and it reloads. It
+  // pulls this on mount, and what it pulls is the dimming rather than the
+  // staging: a window that mounts while the surface is flying home is owed
+  // "not dimmed", because it is not.
+  handle("vellum:companion:getIntroStage", z.tuple([]), () => introScrim);
+
+  // The reports that had no window to go to, handed over on the pull the app's
+  // window makes once it is listening. Taken rather than read: a report handed
+  // over twice is a funnel row counted twice, and the window that asked is the
+  // one that is now subscribed for the rest, which is what arms pushing.
+  handle("vellum:companion:takeIntroReports", z.tuple([]), (_args, event) => {
+    armIntroReports(event.sender);
+    return introReports.splice(0, introReports.length);
+  });
+
   // Registered once here rather than per window: `refreshGrowth` no-ops
   // while no surface exists, and the surface can be closed and reopened from
   // the tray, which must not stack duplicate listeners. A display added,
@@ -2913,8 +4355,17 @@ export const openCompanionWindow = (): void => {
   // being introduced is there to be pointed at. Set before the window is
   // created so the state its route pulls on mount already carries the beat,
   // rather than the surface appearing plain and being annotated a frame later.
-  if (!readCompanionIntroSeen()) {
+  if (readCompanionIntroSeenVersion() < COMPANION_INTRO_VERSION) {
     intro = COMPANION_INTRO_BEATS[0];
+    // Taken once, here, for the whole run. See {@link introMicGranted}: the
+    // last beat can win the grant mid-run, and a run counted in two cohorts is
+    // one whose conversions land where its exposures are not.
+    introMicGranted =
+      systemPreferences.getMediaAccessStatus("microphone") === "granted";
+    // Held in front and stood over the app's window for the run, rather than
+    // opening where it lives and being hidden a frame later by the frontmost
+    // rule (see `introStaged`).
+    introStaged = true;
   }
 
   const win = createFloatingWindow({
@@ -2924,7 +4375,7 @@ export const openCompanionWindow = (): void => {
     height: geometry.canvasHeight,
     // The canvas is a click-through sheet until the pointer reaches the pill.
     ignoreMouseEvents: { forward: true },
-    position: defaultCanvasOrigin,
+    position: introStaged ? stagedCanvasOrigin : defaultCanvasOrigin,
     browserWindow: {
       // The window draws no shadow of its own: `hasShadow` would outline the
       // invisible canvas rect rather than the pill inside it. Same reason the
@@ -2973,18 +4424,53 @@ export const openCompanionWindow = (): void => {
 
   refreshGrowth();
   win.on("move", refreshGrowth);
+  // The popover hangs from the surface, so it follows every move of it.
+  win.on("move", syncPopover);
   // A home remembered for a window that no longer exists is one the next
   // window must not be sent to: it opens where every window opens. A glide
   // still in flight has nothing left to move.
   win.on("closed", () => {
+    // **Only if this was the last surface.** A replay closes the surface and
+    // opens another one at once, and `getFloatingWindow` reports a destroyed
+    // window as gone the moment it is destroyed, so the new surface is built
+    // and staged before the old one's `closed` lands. Tearing down from here
+    // then undoes the run that has just started: the beats play on, staged and
+    // centred, with the app's dimming pulled out from under them. A live
+    // surface here means this event belongs to a window that has already been
+    // replaced, and nothing about it is ours to end.
+    if (getFloatingWindow(COMPANION_KIND) !== null) {
+      return;
+    }
     cancelGlide();
+    // A landing owed to a window that no longer exists is one nothing can
+    // land, and the staging it was going to lift must not outlive it: the
+    // app's window would be left dimmed with nothing staged over it.
+    unstageIntro();
     callHome = null;
+    // A drag on a window that no longer exists has nothing left to drop.
+    docking = null;
+    closeDockZones();
+    // With no surface to hang from, and none coming back until the tray
+    // opens one.
+    closeCompanionPopover();
   });
   // `createFloatingWindow` has already shown it. A surface opened while the
   // app is in front, which is where a sign-in opens it from, goes straight back
   // off the screen: it is due when the user leaves.
   surfaceAway = false;
   syncFrontmost();
+  // Dim the app's window for the run, now that the surface it is staged over
+  // is actually on screen.
+  if (introStaged) {
+    setIntroScrim(true);
+    // **Counted from here rather than from the decision above.** A run is
+    // exposure once the thing it introduces is on the screen, and everything
+    // between the two is a window being built, which can fail. Nothing between
+    // them can move the beat, so this is still the first card.
+    if (intro !== null) {
+      reportIntro("exposed", intro);
+    }
+  }
   // A surface shown mid-call is the call's from its first frame, and one
   // shown mid-session has the frame beside it rather than under the cursor.
   syncCallSurface();
@@ -3020,8 +4506,47 @@ export const setCompanionSurfaceVisible = (visible: boolean): void => {
   // Putting the surface away mid-introduction is an answer to it. Recorded, so
   // bringing it back later does not start explaining it again to someone who
   // has already decided what they think.
-  finishIntro();
+  finishIntro("hidden");
   closeCompanionWindow();
+};
+
+/**
+ * Run the introduction again from the first beat, as a new user gets it.
+ *
+ * For the developer tray item. It goes through the ordinary path rather than
+ * poking the beat straight in: forgetting the record and reopening the surface
+ * is what a first run actually is, staging and flight included, so what is
+ * being tested is the thing users will get. A surface the user has hidden is
+ * brought back first, since there is nothing to introduce otherwise.
+ */
+export const replayCompanionIntro = (): void => {
+  clearCompanionIntroSeen();
+  // A replay during a run is a run ending: the window it was staged over stops
+  // being dimmed for it, and the one opened below dims it for the new run.
+  unstageIntro();
+  const bringBack = (): void => {
+    // A surface the user has hidden comes back through the tray's own path, so
+    // the preference is cleared as well as the window opened; anything else
+    // would open a window the next launch refuses to.
+    if (readCompanionHidden()) {
+      setCompanionSurfaceVisible(true);
+      return;
+    }
+    syncCompanionSurface();
+  };
+  const win = getFloatingWindow(COMPANION_KIND);
+  if (win === null) {
+    bringBack();
+    return;
+  }
+  // **Waited for, not fired and forgotten.** `close()` starts a close; the
+  // window is destroyed a tick later, and until it is, `getFloatingWindow`
+  // still reports it as alive, so an open in this tick sees a live surface and
+  // returns having done nothing. That is one press that only closes the
+  // surface and a second that opens it, which is exactly how this read from
+  // the tray before.
+  win.once("closed", bringBack);
+  win.close();
 };
 
 /**
@@ -3049,10 +4574,50 @@ export const setCompanionSurfaceSize = (
   size: CompanionSize,
 ): void => {
   writeCompanionSize(axis, size);
+  applyGeometry(
+    geometryFor(
+      readCompanionSize("avatar"),
+      readCompanionSize("options"),
+      canvasDock(),
+      attachedRise(),
+    ),
+  );
+};
+
+/**
+ * Rebuild the canvas for the dock the surface is on, if it is not already
+ * built for it.
+ *
+ * The call's way in and out and a drop on another edge all go through here:
+ * each can change which dock the canvas answers for, and only a change that
+ * moves an edge of the canvas is worth a window resize. Answers whether the
+ * canvas was rebuilt, since a rebuild pushes the surface and a caller with a
+ * push of its own to make can then leave it at that.
+ */
+const syncCanvas = (): boolean => {
   const next = geometryFor(
     readCompanionSize("avatar"),
     readCompanionSize("options"),
+    canvasDock(),
+    attachedRise(),
   );
+  if (
+    next.canvasHeight === geometry.canvasHeight &&
+    next.riseAbove === geometry.riseAbove
+  ) {
+    return false;
+  }
+  applyGeometry(next);
+  return true;
+};
+
+/**
+ * Swap the canvas for another one built around the same avatar point.
+ *
+ * The surface is not moved by it: the avatar rests exactly where it was, and
+ * the window is placed in the new canvas around that point.
+ */
+const applyGeometry = (next: CompanionGeometry): void => {
   const win = getFloatingWindow(COMPANION_KIND);
   if (!win || win.isDestroyed()) {
     geometry = next;
@@ -3096,11 +4661,13 @@ export const setCompanionSurfaceSize = (
  * pointer. Where the pill rests, for a glide in flight, is where the glide is
  * headed, as every other reader of its resting place has it.
  *
- * During a call the surface is already at this point unless the user dragged
- * it away, and the call is holding the place the pill goes back to when the
- * call ends. A reset asked for mid-call makes the default that place too:
- * the user has just said where the surface belongs, and a call ending by
- * sending it back to wherever it was before would undo that.
+ * During a call the surface is at the edge the bar is docked to unless the
+ * user dragged it away, and the call is holding the place the pill goes back
+ * to when the call ends. A reset asked for mid-call makes the default that
+ * place too, and the bottom the bar's dock again: the user has just said
+ * where the surface belongs, and a call ending by sending it back to wherever
+ * it was before, or the next call standing the bar up on a side, would undo
+ * that.
  *
  * A glide rather than a jump, the way the call moves it, and instant under
  * "Reduce motion" for the same reason.
@@ -3112,11 +4679,15 @@ export const resetCompanionSurfacePosition = (): void => {
   }
   const resting = glide === null ? avatarCentre(win) : glide.to;
   const { workArea } = displayUnder(resting);
-  const home = defaultAvatarCentre(workArea, geometry);
   if (callHome !== null) {
-    callHome = home;
+    // In the ordinary canvas, which the drop on the bottom rebuilds before
+    // it measures the home: the bottom's margin is the same in both, so the
+    // point is the same either way.
+    callHome = defaultAvatarCentre(workArea, geometry);
+    dropOnDock("bottom");
+    return;
   }
-  glideAvatarTo(win, home, workArea);
+  glideAvatarTo(win, defaultAvatarCentre(workArea, geometry), workArea);
 };
 
 /**

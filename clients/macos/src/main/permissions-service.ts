@@ -4,18 +4,26 @@ import {
   BrowserWindow,
   Notification,
   app,
-  desktopCapturer,
   shell,
   systemPreferences,
   type WebContents,
 } from "electron";
 import { z } from "zod";
 
+import {
+  showNotificationPayloadSchema,
+  type NotificationIdentity,
+  type NotificationSender,
+} from "@vellumai/ipc-contract";
+import { resolveNotificationAvatarPath } from "@vellumai/electron-desktop/notification-avatar-path";
+import { isPreparedNotificationSenderCurrent } from "@vellumai/electron-desktop/notifications";
+
 import { runAppleScript } from "./appleScriptExecutor";
 import {
   queryFreshMacHelperPermission,
   queryMacHelperPermission,
   requestMacHelperInputMonitoringPermission,
+  requestMacHelperScreenRecordingPermission,
   requestMacHelperSpeechRecognitionPermission,
   type MacHelperPermissionKind,
 } from "./hotkey-helper";
@@ -27,6 +35,7 @@ import {
   requestNotifierAuthorization,
   type NotifierAuthorizationResult,
 } from "./notifier";
+import { readScreenRecordingPermission } from "./screen-recording-permission";
 
 export const PERMISSION_KINDS = [
   "accessibility",
@@ -62,6 +71,40 @@ export interface PermissionStateItem {
 export type PermissionsState = Record<PermissionKind, PermissionStateItem>;
 
 const permissionKindSchema = z.enum(PERMISSION_KINDS);
+
+interface NotificationPermissionPresentation {
+  presentation: "assistant";
+  identity: NotificationIdentity;
+  sender: NotificationSender;
+}
+
+const permissionNotificationPresentationSchema = z
+  .unknown()
+  .transform((value): NotificationPermissionPresentation | undefined => {
+    const fields =
+      typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)
+        : {};
+    const parsed = showNotificationPayloadSchema.safeParse({
+      ...fields,
+      category: "notificationIntent",
+      title: "",
+      body: "",
+    });
+    if (
+      !parsed.success ||
+      parsed.data.presentation !== "assistant" ||
+      !parsed.data.identity ||
+      !parsed.data.sender
+    ) {
+      return undefined;
+    }
+    return {
+      presentation: "assistant",
+      identity: parsed.data.identity,
+      sender: parsed.data.sender,
+    };
+  });
 
 const SECURITY_PANE_URL =
   "x-apple.systempreferences:com.apple.preference.security";
@@ -136,6 +179,8 @@ const NOTIFICATION_PROMPT_TIMEOUT_MS = 30_000;
 // The probe posts a real notification, so the user reads this on whichever
 // path delivered it.
 const NOTIFICATION_CONFIRMATION_BODY = "Notifications are enabled.";
+const ASSISTANT_NOTIFICATION_CONFIRMATION_BODY =
+  "You’re all set. I can send you notifications here.";
 
 /**
  * Runs `probe` and resolves whatever it settles on, or `null` once `timeoutMs`
@@ -163,19 +208,53 @@ const settleWithin = <T>(
  * anything, so the native path posts the same banner itself. It carries no
  * category because it has no action buttons to route.
  */
-const postNativeNotificationConfirmation = (): void => {
+const postNativeNotificationConfirmation = (
+  presentation?: NotificationPermissionPresentation,
+): void => {
   const notifier = getNotifier();
   if (!notifier) {
     return;
   }
   try {
+    const sender =
+      presentation &&
+      isPreparedNotificationSenderCurrent(
+        presentation.identity,
+        presentation.sender,
+      )
+        ? presentation.sender
+        : undefined;
+    const avatarPngPath = sender
+      ? resolveNotificationAvatarPath(
+          {
+            id: sender.id,
+            name: sender.name,
+            avatarPng: Buffer.from(sender.avatarBase64, "base64"),
+            avatarHash: sender.avatarHash,
+          },
+          app.getPath("userData"),
+          log,
+        )
+      : null;
+    const resolvedSender =
+      sender && avatarPngPath
+        ? {
+            id: sender.id,
+            name: sender.name,
+            avatarPngPath,
+            conversationId: sender.id,
+          }
+        : undefined;
     notifier.show(
       {
         id: randomUUID(),
-        title: "Vellum",
-        body: NOTIFICATION_CONFIRMATION_BODY,
+        title: resolvedSender?.name ?? "Vellum",
+        body: resolvedSender
+          ? ASSISTANT_NOTIFICATION_CONFIRMATION_BODY
+          : NOTIFICATION_CONFIRMATION_BODY,
         categoryId: "",
         actions: [],
+        ...(resolvedSender ? { sender: resolvedSender } : {}),
       },
       () => undefined,
     );
@@ -217,6 +296,7 @@ export class PermissionsService {
   async request(
     kind: PermissionKind,
     sender?: WebContents,
+    presentation?: NotificationPermissionPresentation,
   ): Promise<PermissionStateItem> {
     try {
       switch (kind) {
@@ -227,10 +307,7 @@ export class PermissionsService {
           await systemPreferences.askForMediaAccess("microphone");
           break;
         case "screen":
-          await desktopCapturer.getSources({
-            types: ["screen"],
-            thumbnailSize: { width: 1, height: 1 },
-          });
+          await requestMacHelperScreenRecordingPermission();
           break;
         case "speechRecognition":
           await requestMacHelperSpeechRecognitionPermission();
@@ -242,7 +319,7 @@ export class PermissionsService {
           await this.requestAutomation();
           break;
         case "notifications":
-          await this.requestNotifications(sender);
+          await this.requestNotifications(sender, presentation);
           break;
       }
     } catch (err) {
@@ -261,8 +338,13 @@ export class PermissionsService {
     kind: PermissionKind,
     sender?: WebContents,
   ): Promise<PermissionStateItem> {
+    // Asking first is what lists the helper in the pane, so there is a row
+    // to turn on when it opens.
     if (kind === "inputMonitoring") {
       await requestMacHelperInputMonitoringPermission();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } else if (kind === "screen") {
+      await requestMacHelperScreenRecordingPermission();
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     await shell.openExternal(settingsPaneUrl(kind));
@@ -294,7 +376,9 @@ export class PermissionsService {
       status,
       canRequest: this.canRequest(kind, status),
       canOpenSettings: status !== "granted",
-      requiresRestart: kind === "screen" && status === "denied",
+      // No grant needs the app relaunched. Screen Recording is the helper's,
+      // and a read that finds it newly granted lets the helper go.
+      requiresRestart: false,
       ...(error ? { error } : {}),
     };
   }
@@ -308,8 +392,9 @@ export class PermissionsService {
         return systemPreferences.isTrustedAccessibilityClient(false)
           ? "granted"
           : "denied";
+      // The helper's grant, not the app's: the helper takes every capture.
       case "screen":
-        return mapMediaStatus(systemPreferences.getMediaAccessStatus("screen"));
+        return await readScreenRecordingPermission();
       case "microphone":
         return mapMediaStatus(
           systemPreferences.getMediaAccessStatus("microphone"),
@@ -358,19 +443,24 @@ export class PermissionsService {
     return this.notificationStatus;
   }
 
-  private requestNotifications(_sender?: WebContents): Promise<void> {
+  private requestNotifications(
+    _sender?: WebContents,
+    presentation?: NotificationPermissionPresentation,
+  ): Promise<void> {
     // An addon that loads but reports unsupported is not a dead end: Electron
     // can still post, so the probe falls back to it rather than calling the
     // permission restricted.
     if (isNotifierSupported()) {
-      return this.requestNativeNotifications();
+      return this.requestNativeNotifications(presentation);
     }
     return this.requestElectronNotifications();
   }
 
   // Prompting through the addon rather than `electron.Notification` is half of
   // what keeps the delegate with the addon; see the delegate rule in README.md.
-  private async requestNativeNotifications(): Promise<void> {
+  private async requestNativeNotifications(
+    presentation?: NotificationPermissionPresentation,
+  ): Promise<void> {
     const result = await settleWithin<NotifierAuthorizationResult>(
       NOTIFICATION_PROMPT_TIMEOUT_MS,
       (settle) => {
@@ -383,7 +473,7 @@ export class PermissionsService {
     }
     this.notificationStatus = result.granted ? "granted" : "denied";
     if (result.granted) {
-      postNativeNotificationConfirmation();
+      postNativeNotificationConfirmation(presentation);
     }
   }
 
@@ -444,16 +534,30 @@ export class PermissionsService {
   }
 }
 
+let installedService: PermissionsService | null = null;
+
+/**
+ * The service the IPC handlers answer from, for a main-process caller that
+ * needs to send the user to a permission. Null before install.
+ */
+export const getPermissionsService = (): PermissionsService | null =>
+  installedService;
+
 export const installPermissionsService = (): PermissionsService => {
   const service = new PermissionsService();
+  installedService = service;
 
   handle("vellum:permissions:getState", z.tuple([]), (_args, event) =>
     service.refresh(event.sender),
   );
   handle(
     "vellum:permissions:request",
-    z.tuple([permissionKindSchema]),
-    ([kind], event) => service.request(kind, event.sender),
+    z.tuple([
+      permissionKindSchema,
+      permissionNotificationPresentationSchema.optional(),
+    ]),
+    ([kind, presentation], event) =>
+      service.request(kind, event.sender, presentation),
   );
   handle(
     "vellum:permissions:openSettings",

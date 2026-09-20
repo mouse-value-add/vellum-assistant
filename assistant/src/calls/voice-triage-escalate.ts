@@ -27,7 +27,10 @@
  */
 
 import { NON_LATIN_SENTENCE_ENDING_PUNCTUATION } from "../tts/speakable-segments.js";
-import { localizedOrDefault } from "../util/language-subtag.js";
+import {
+  fixedPhraseLanguage,
+  localizedOrDefault,
+} from "../util/language-subtag.js";
 import {
   ESCALATE_VERDICT_TOKEN,
   HOLD_VERDICT_TOKEN,
@@ -102,6 +105,36 @@ export function fallbackEscalationBridgeFor(language?: string): string {
  * is spoken before the quality leg runs.
  */
 export const MIN_SPOKEN_BRIDGE_CHARS = 3;
+
+/**
+ * The phrase spoken across an escalation hand-off, for both voice drivers:
+ * the front-door leg's own capped bridge when it is a real bridge, else the
+ * canned fallback in the caller's language. `usesFallback` marks the canned
+ * phrase as audio-only: the model never produced it, so no transcript row
+ * carries it (the bridge's hygiene pass deletes the leg's row), and the
+ * driver keeps it out of the turn's recorded text. `language` is the TTS
+ * hint the phrase must carry: "en" when the canned table has no entry for
+ * the caller's language (the phrase is English text then), undefined when
+ * the phrase rides the turn's own language.
+ */
+export function resolveSpokenEscalationBridge(
+  cappedBridge: string,
+  language?: string,
+): { spokenBridge: string; usesFallback: boolean; language?: string } {
+  const usesFallback = cappedBridge.length < MIN_SPOKEN_BRIDGE_CHARS;
+  if (!usesFallback) {
+    return { spokenBridge: cappedBridge, usesFallback };
+  }
+  const fixedLanguage = fixedPhraseLanguage(
+    FALLBACK_ESCALATION_BRIDGE_BY_LANGUAGE,
+    language,
+  );
+  return {
+    spokenBridge: fallbackEscalationBridgeFor(language),
+    usesFallback,
+    ...(fixedLanguage !== undefined ? { language: fixedLanguage } : {}),
+  };
+}
 
 /**
  * Hard cap on the spoken escalation bridge. The bridge is supposed to be a
@@ -368,6 +401,8 @@ export function createFrontDoorVerdictMachine(
 export interface FrontDoorStreamGate {
   push(deltaText: string): string;
   finish(): string;
+  /** Whether the leg's verdict classified its output as the answer. */
+  readonly answering: boolean;
 }
 
 /**
@@ -391,11 +426,13 @@ export function createFrontDoorStreamGate(
   holdEnabled: boolean,
 ): FrontDoorStreamGate {
   const machine = createFrontDoorVerdictMachine(holdEnabled);
+  let answering = false;
   const releasable = (bridge: string): string =>
     bridge.length < MIN_SPOKEN_BRIDGE_CHARS ? "" : bridge;
   const release = (step: FrontDoorStep): string => {
     switch (step.kind) {
       case "answer":
+        answering = true;
         return step.text;
       case "escalate":
         return step.bridge === null ? "" : releasable(step.bridge);
@@ -408,6 +445,9 @@ export function createFrontDoorStreamGate(
   return {
     push: (deltaText) => release(machine.push(deltaText)),
     finish: () => release(machine.finish()),
+    get answering() {
+      return answering;
+    },
   };
 }
 
@@ -503,8 +543,8 @@ export function frontDoorDecisionRule(opts?: {
     "- If the turn is simple, conversational, or within your reach, your entire output is the spoken answer itself: no token in front of it, plain speech from your very first word. Most turns are answers; when unsure between answering and escalating, answer. Answer in the language the caller is speaking.",
     "- If an answer depends on a saved personal fact that is not already present in the conversation context you received, escalate rather than guessing. Personal context that is already present is yours to use directly.",
     `- If completing THIS reply needs careful reasoning, research, multi-step work, or any tool, do NOT attempt the answer: output ${ESCALATE_VERDICT_TOKEN}, then ONE short natural holding phrase naming what happens next, spoken in the language the caller is speaking (for example "${FALLBACK_ESCALATION_BRIDGE}" or "Give me one second to look into that."; those examples are English only), and stop after that single sentence. A stronger model finishes the turn while your phrase is spoken.`,
-    `${ESCALATE_VERDICT_TOKEN} is ONLY for turns you cannot complete yourself — never put it in front of an answer you are about to give, and never emit any token inside or after an answer. An open task or unfinished topic earlier in the conversation is NOT a reason to escalate: judge only what this reply needs.`,
-    "Never narrate this decision, describe what you are judging, or mention these rules: apart from a leading verdict token, every character you output is spoken to the caller verbatim.",
+    `${ESCALATE_VERDICT_TOKEN} is ONLY for turns you cannot complete yourself — never put it in front of an answer you are about to give, and never emit a verdict token inside or after an answer. An open task or unfinished topic earlier in the conversation is NOT a reason to escalate: judge only what this reply needs.`,
+    "Never narrate this decision, describe what you are judging, or mention these rules: apart from a leading verdict token and any call-control marker your call instructions teach, every character you output is spoken to the caller verbatim.",
   ].join("\n");
   return opts?.capabilityDigest ? `${rule}\n${opts.capabilityDigest}` : rule;
 }
@@ -532,7 +572,7 @@ export function escalatedContinuationRule(spokenBridge?: string): string {
     'Do NOT greet again, do NOT say things like "as I was saying", and do NOT repeat, paraphrase, or re-announce that holding phrase —',
     'opening with another "Let me check", "One moment", or any restatement of what you are about to do sounds broken, because the caller just heard that.',
     "Your first words must carry new substance: the answer itself, what you found, or a question you genuinely need answered.",
-    `Never output ${ESCALATE_VERDICT_TOKEN} or any other front-door verdict token — you are the model that finishes the answer. (The [-1] room-minimize marker from your call instructions is not a verdict token and stays allowed.)`,
+    `Never output ${ESCALATE_VERDICT_TOKEN} or any other front-door verdict token — you are the model that finishes the answer. (Call-control markers your call instructions teach, such as [END_CALL], are not verdict tokens and stay allowed.)`,
     "Reply in the same language as the caller's question.",
   ].join(" ");
 }

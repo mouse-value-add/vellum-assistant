@@ -23,6 +23,7 @@ import type {
   ScreenCaptureFrame,
   WatchCaptureTarget,
   CompanionIntroAction,
+  CompanionIntroReport,
   CompanionSurfaceState,
   ConnectivityState,
   DeepLink,
@@ -31,6 +32,9 @@ import type {
   DictationOverlayState,
   DictationPartialEvent,
   DictationOfferAnswer,
+  CompanionPopoverAnswer,
+  CompanionPopoverView,
+  CompanionPicker,
   DictationPartialsResult,
   DictationTranscribeResult,
   HelperRestartResult,
@@ -82,8 +86,8 @@ import {
   createDownloadsBridge,
   createHotkeysBridge,
   createLaunchAtLoginBridge,
+  createNotificationsBridge,
   createUpdateBridge,
-  createWindowAttentionSubscriber,
 } from "@vellumai/electron-desktop/preload";
 
 export type {
@@ -284,11 +288,20 @@ const bridge: VellumBridge = {
       ipcRenderer.invoke(
         "vellum:permissions:getState",
       ) as Promise<SystemPermissionsState>,
-    request: (kind: SystemPermissionKind): Promise<SystemPermissionStateItem> =>
-      ipcRenderer.invoke(
-        "vellum:permissions:request",
-        kind,
-      ) as Promise<SystemPermissionStateItem>,
+    request: (
+      kind: SystemPermissionKind,
+      presentation?: Parameters<VellumBridge["permissions"]["request"]>[1],
+    ): Promise<SystemPermissionStateItem> =>
+      (presentation
+        ? ipcRenderer.invoke(
+            "vellum:permissions:request",
+            kind,
+            presentation,
+          )
+        : ipcRenderer.invoke(
+            "vellum:permissions:request",
+            kind,
+          )) as Promise<SystemPermissionStateItem>,
     openSettings: (
       kind: SystemPermissionKind,
     ): Promise<SystemPermissionStateItem> =>
@@ -421,28 +434,7 @@ const bridge: VellumBridge = {
         "vellum:connectivity:retry",
       ) as Promise<ConnectivityState>,
   },
-  notifications: {
-    show: (
-      payload: ShowNotificationPayload,
-    ): Promise<{ success: boolean; errorMessage?: string }> =>
-      ipcRenderer.invoke("vellum:notifications:show", payload) as Promise<{
-        success: boolean;
-        errorMessage?: string;
-      }>,
-    onAction: (callback) => {
-      const handler = (
-        _event: IpcRendererEvent,
-        event: NotificationActionEvent,
-      ) => {
-        callback(event);
-      };
-      ipcRenderer.on("vellum:notifications:action", handler);
-      return () => {
-        ipcRenderer.off("vellum:notifications:action", handler);
-      };
-    },
-    onWindowAttention: createWindowAttentionSubscriber(ipcRenderer),
-  },
+  notifications: createNotificationsBridge(ipcRenderer),
   bundleConfirm: createBundleConfirmBridge(ipcRenderer),
   quickInput: {
     submit: (message: string): Promise<void> =>
@@ -543,11 +535,44 @@ const bridge: VellumBridge = {
         ipcRenderer.off("vellum:companion:state", handler);
       };
     },
+    getIntroStage: (): Promise<boolean> =>
+      ipcRenderer.invoke("vellum:companion:getIntroStage") as Promise<boolean>,
+    onIntroStage: (callback) => {
+      const handler = (_event: IpcRendererEvent, staged: boolean) => {
+        callback(staged);
+      };
+      ipcRenderer.on("vellum:companion:introStage", handler);
+      return () => {
+        ipcRenderer.off("vellum:companion:introStage", handler);
+      };
+    },
+    onIntroReport: (callback) => {
+      const handler = (
+        _event: IpcRendererEvent,
+        report: CompanionIntroReport,
+      ) => {
+        callback(report);
+      };
+      ipcRenderer.on("vellum:companion:introReport", handler);
+      return () => {
+        ipcRenderer.off("vellum:companion:introReport", handler);
+      };
+    },
+    // Reports main held because there was no window listening for them, which
+    // is how the run's own ending survives an app the user had closed. Taken,
+    // not read: a second reader would report the same rows again.
+    takeIntroReports: (): Promise<CompanionIntroReport[]> =>
+      ipcRenderer.invoke("vellum:companion:takeIntroReports") as Promise<
+        CompanionIntroReport[]
+      >,
     setInteractive: (interactive: boolean): void => {
       ipcRenderer.send("vellum:companion:setInteractive", interactive);
     },
     moveBy: (dx: number, dy: number): void => {
       ipcRenderer.send("vellum:companion:moveBy", dx, dy);
+    },
+    release: (): void => {
+      ipcRenderer.send("vellum:companion:release");
     },
     startVoice: (): void => {
       ipcRenderer.send("vellum:companion:startVoice");
@@ -626,6 +651,38 @@ const bridge: VellumBridge = {
         offerId,
       );
     },
+    answerPopover: (
+      answer: CompanionPopoverAnswer,
+      popoverId: string,
+    ): void => {
+      ipcRenderer.send("vellum:companion:answerPopover", answer, popoverId);
+    },
+    setPopoverSize: (popoverId: string, width: number, height: number): void => {
+      ipcRenderer.send(
+        "vellum:companion:setPopoverSize",
+        popoverId,
+        width,
+        height,
+      );
+    },
+    setPopoverView: (popoverId: string, view: CompanionPopoverView): void => {
+      ipcRenderer.send("vellum:companion:setPopoverView", popoverId, view);
+    },
+    setAttachedPopoverHeight: (popoverId: string, height: number): void => {
+      ipcRenderer.send(
+        "vellum:companion:setAttachedPopoverHeight",
+        popoverId,
+        height,
+      );
+    },
+    togglePicker: (picker: CompanionPicker): void => {
+      ipcRenderer.send("vellum:companion:togglePicker", picker);
+    },
+    openLink: (url: string): void => {
+      ipcRenderer.send("vellum:companion:openLink", url);
+    },
+    takesPrompts: (): Promise<boolean> =>
+      ipcRenderer.invoke("vellum:companion:takesPrompts") as Promise<boolean>,
     activate: (): void => {
       ipcRenderer.send("vellum:companion:activate");
     },

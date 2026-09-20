@@ -313,6 +313,22 @@ final class MacHelper: @unchecked Sendable {
             }
             return self.readFrontFocus()
         }
+        // Command plus a key, sent to the application in front: the paste
+        // that lands dictation at the cursor and the undo that takes it back.
+        router.register("keys.shortcut") { [weak self] params in
+            guard
+                let object = params as? [String: Any],
+                let name = object["key"] as? String,
+                let key = FrontShortcut.keys[name]
+            else {
+                throw JsonRpcDispatchError.invalidParams(
+                    "keys.shortcut requires key \"v\" or \"z\""
+                )
+            }
+            let outcome = FrontShortcut.post(key: key)
+            self?.log("front shortcut: cmd+\(name) \(outcome.rawValue)")
+            return ["outcome": outcome.rawValue]
+        }
         router.register("permission.status") { [weak self] params in
             guard let self else {
                 throw JsonRpcDispatchError.internalError("Helper is shutting down")
@@ -735,6 +751,9 @@ final class MacHelper: @unchecked Sendable {
             case "cu.perform":
                 dispatchCuPerform(line: line)
                 return
+            case "cu.cancel":
+                dispatchCuCancel(line: line)
+                return
             case "capture.frame":
                 dispatchCaptureFrame(line: line)
                 return
@@ -781,6 +800,27 @@ final class MacHelper: @unchecked Sendable {
             self?.writeResponse(
                 JsonRpcCodec.successResponse(id: id, result: CaptureSources.raise(windowId: windowId))
             )
+        }
+    }
+
+    /// Stop a `cu.perform` still in flight. Runs on the main actor with the
+    /// runner, and returns at once: the running request notices before its
+    /// next action.
+    private func dispatchCuCancel(line: String) {
+        Task { @MainActor in
+            let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+            let id = object?["id"] ?? NSNull()
+            let params = object?["params"] as? [String: Any] ?? [:]
+            guard let requestId = params["requestId"] as? String else {
+                self.writeResponse(JsonRpcCodec.errorResponse(
+                    id: id,
+                    code: JsonRpcErrorCode.invalidParams,
+                    message: "cu.cancel requires requestId"
+                ))
+                return
+            }
+            HostCuActionRunner.cancel(requestId: requestId)
+            self.writeResponse(JsonRpcCodec.successResponse(id: id, result: ["cancelled": true]))
         }
     }
 
@@ -1017,9 +1057,14 @@ final class MacHelper: @unchecked Sendable {
                     "height": result.metadata?.screenshotHeightPx ?? 0,
                 ]))
             } catch {
+                let code = if case CaptureError.permissionDenied = error {
+                    JsonRpcErrorCode.permissionDenied
+                } else {
+                    JsonRpcErrorCode.internalError
+                }
                 self.writeResponse(JsonRpcCodec.errorResponse(
                     id: id,
-                    code: JsonRpcErrorCode.internalError,
+                    code: code,
                     message: error.localizedDescription
                 ))
             }
@@ -1488,6 +1533,7 @@ final class MacHelper: @unchecked Sendable {
     private enum PermissionKind: String {
         case speechRecognition
         case inputMonitoring
+        case screen
     }
 
     private func parsePermissionKind(_ params: Any?) throws -> PermissionKind {
@@ -1509,6 +1555,8 @@ final class MacHelper: @unchecked Sendable {
             return speechRecognitionStatus()
         case .inputMonitoring:
             return inputMonitoringStatus()
+        case .screen:
+            return screenRecordingStatus()
         }
     }
 
@@ -1547,6 +1595,18 @@ final class MacHelper: @unchecked Sendable {
         default:
             return "unknown"
         }
+    }
+
+    /// Screen Recording as this process holds it. The helper disclaims
+    /// responsibility, so this is the helper's own grant and not the app's:
+    /// the two are separate rows in System Settings.
+    ///
+    /// Never "not-determined": the preflight answers only yes or no, and a
+    /// helper that has never asked reads the same as one that was refused.
+    /// The answer is fixed for the life of a process, so a fresh read comes
+    /// from a fresh launch.
+    private func screenRecordingStatus() -> String {
+        CGPreflightScreenCaptureAccess() ? "granted" : "denied"
     }
 
     /// The keyboard tap the hold detector reads. Installed when a binding asks
@@ -1769,6 +1829,17 @@ if CommandLine.arguments.contains("--front-selection") {
         NSApplication.shared.setActivationPolicy(.prohibited)
         if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
             _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        }
+        NSApplication.shared.terminate(nil)
+    }
+} else if CommandLine.arguments.contains("--request-screen-recording") {
+    // Asking is also what lists the helper under Screen Recording in System
+    // Settings, so this runs before Settings is opened even where macOS will
+    // not show its prompt again.
+    MainActor.assumeIsolated {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        if !CGPreflightScreenCaptureAccess() {
+            _ = CGRequestScreenCaptureAccess()
         }
         NSApplication.shared.terminate(nil)
     }

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Vellum Assistant API
-  version: 0.11.10
+  version: 0.12.2
   description: Auto-generated OpenAPI specification for the Vellum Assistant runtime HTTP server.
 servers:
   - url: http://127.0.0.1:7821
@@ -469,6 +469,33 @@ paths:
                           type: string
                         authErrorCode:
                           type: string
+                        model:
+                          type: string
+                        availableModels:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              value:
+                                type: string
+                              label:
+                                type: string
+                              description:
+                                type: string
+                              group:
+                                type: string
+                            required:
+                              - value
+                              - label
+                            additionalProperties: false
+                        modelRevisionEpoch:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        modelRevision:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
                         usedTokens:
                           type: number
                         contextSize:
@@ -548,6 +575,9 @@ paths:
                 cwd:
                   type: string
                   description: Working directory
+                model:
+                  description: Optional model id or alias to request for the session.
+                  type: string
               required:
                 - agent
                 - task
@@ -566,10 +596,25 @@ paths:
                     type: string
                   agent:
                     type: string
+                  requestedModel:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                    description: The model explicitly requested for this spawn, if any.
+                  effectiveModel:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                    description: The top-level session model reported by the ACP adapter, if any.
+                  modelWarning:
+                    description: Why the requested model was not applied. The session is running on the agent's own model.
+                    type: string
                 required:
                   - acpSessionId
                   - protocolSessionId
                   - agent
+                  - requestedModel
+                  - effectiveModel
                 additionalProperties: false
   /v1/activation/dismiss:
     post:
@@ -4101,6 +4146,8 @@ paths:
                 conversationId:
                   type: string
                   minLength: 1
+                desktop:
+                  type: boolean
               required:
                 - operation
       responses:
@@ -4136,7 +4183,7 @@ paths:
     post:
       operationId: browser_tabs_post
       summary: Manage browser tabs
-      description: List, create, select, or close browser tabs via the Chrome extension backend.
+      description: List, create, select, or close browser tabs in the Chrome extension or streamed desktop browser.
       tags:
         - browser
       requestBody:
@@ -4160,6 +4207,10 @@ paths:
                 conversationId:
                   type: string
                   minLength: 1
+                desktop:
+                  type: boolean
+                browserMode:
+                  type: string
                 tabId:
                   type: number
                 url:
@@ -4991,7 +5042,7 @@ paths:
                           type: string
                       required:
                         - type
-                    slackBotMentioned:
+                    botMentioned:
                       type: boolean
                     slackEditedTs:
                       type: string
@@ -5441,9 +5492,7 @@ paths:
     post:
       operationId: channels_send_post
       summary: Send text to a channel chat
-      description:
-        Deliver text to a chat or person on a channel through the channel's transport, recorded after the channel
-        acknowledges it.
+      description: Deliver text to a chat on a channel through the channel's transport, recorded after the channel acknowledges it.
       tags:
         - channels
       requestBody:
@@ -5468,36 +5517,22 @@ paths:
                     - plugin
                   description: Channel to send on
                 target:
-                  oneOf:
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: chat
-                        chatId:
-                          type: string
-                          minLength: 1
-                          description: Chat id in the channel's own id space
-                        threadId:
-                          description: Thread within the chat, in the channel's own id space
-                          type: string
-                          minLength: 1
-                      required:
-                        - kind
-                        - chatId
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: person
-                        userId:
-                          type: string
-                          minLength: 1
-                          description: Person to reach in their DM, in the channel's own id space
-                      required:
-                        - kind
-                        - userId
                   type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: chat
+                    chatId:
+                      type: string
+                      minLength: 1
+                      description: Chat id in the channel's own id space
+                    threadId:
+                      description: Thread within the chat, in the channel's own id space
+                      type: string
+                      minLength: 1
+                  required:
+                    - kind
+                    - chatId
                 text:
                   type: string
                   minLength: 1
@@ -5611,6 +5646,64 @@ paths:
                     description: Number of disposed subscribers.
                 required:
                   - disconnected
+                additionalProperties: false
+  /v1/clients/history:
+    get:
+      operationId: clients_history_get
+      summary: List client connection history
+      description:
+        Return persisted client subscribe/dispose events and coalesced sessions. Reconnects shorter than 60 seconds
+        are flaps, not outages.
+      tags:
+        - clients
+      parameters:
+        - name: clientId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Restrict history to one client UUID.
+        - name: interfaceId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Restrict history to one interface (e.g. chrome-extension).
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+          description: ISO-8601 or epoch-ms lower bound. Sessions already open at this time are included.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Max coalesced sessions to return (1-500, default 50).
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties: {}
+                      additionalProperties: {}
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties: {}
+                      additionalProperties: {}
+                required:
+                  - sessions
+                  - events
                 additionalProperties: false
   /v1/clients/presence:
     post:
@@ -11344,7 +11437,9 @@ paths:
     post:
       operationId: credentials_list_post
       summary: List all credentials with metadata
-      description: Return all stored credentials with metadata, OAuth connection info, and platform-managed credentials.
+      description:
+        Return credentials from the live credential vault, with OAuth connection info and platform-managed
+        credentials. Fails if the vault is unreachable.
       tags:
         - credentials
       requestBody:
@@ -11679,54 +11774,6 @@ paths:
                   - schedules
                   - timestamp
                 additionalProperties: false
-  /v1/debug/bash:
-    post:
-      operationId: debug_bash_post
-      summary: Execute a shell command in the assistant process
-      description: Developer debugging tool. Requires the assistant to be running with VELLUM_DEBUG=1.
-      tags:
-        - debug
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                command:
-                  type: string
-                  description: Shell command to execute via bash -c
-                timeoutMs:
-                  description: "Execution timeout in milliseconds (default: 30000)"
-                  type: number
-              required:
-                - command
-      responses:
-        "200":
-          description: Successful response
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  stdout:
-                    type: string
-                  stderr:
-                    type: string
-                  exitCode:
-                    anyOf:
-                      - type: number
-                      - type: "null"
-                  timedOut:
-                    type: boolean
-                  error:
-                    type: string
-                required:
-                  - stdout
-                  - stderr
-                  - exitCode
-                  - timedOut
-                additionalProperties: false
   /v1/debug/database:
     get:
       operationId: debug_database_get
@@ -12031,7 +12078,7 @@ paths:
   /v1/desktop/setup:
     get:
       operationId: desktop_setup_get
-      summary: Get desktop setup status
+      summary: Get virtual desktop setup status
       tags:
         - desktop
       responses:
@@ -12050,6 +12097,8 @@ paths:
                       - ready
                       - failed
                       - unsupported
+                  automationActive:
+                    type: boolean
                   stage:
                     type: string
                     enum:
@@ -12061,7 +12110,7 @@ paths:
                 additionalProperties: false
     post:
       operationId: desktop_setup_post
-      summary: Install desktop components
+      summary: Install virtual desktop components
       tags:
         - desktop
       responses:
@@ -12080,6 +12129,8 @@ paths:
                       - ready
                       - failed
                       - unsupported
+                  automationActive:
+                    type: boolean
                   stage:
                     type: string
                     enum:
@@ -16096,6 +16147,13 @@ paths:
                   type: string
                 userGuidance:
                   type: string
+                timings:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties:
+                    type: number
+                  description: Per-phase helper timings in milliseconds
               required:
                 - requestId
       responses:
@@ -16315,7 +16373,7 @@ paths:
     post:
       operationId: imagegeneration_generate_post
       summary: Generate or edit images using AI
-      description: Calls the configured image-generation provider (Gemini or OpenAI) to produce one or more images.
+      description: Calls the configured image-generation provider (Gemini, OpenAI, or OpenRouter) to produce one or more images.
       tags:
         - image-generation
       requestBody:
@@ -16654,7 +16712,8 @@ paths:
             type: string
           description:
             "Filter by provider id. One of: anthropic, openai, gemini, ollama, fireworks, together, openrouter,
-            vercel-ai-gateway, litellm, opencode, openai-compatible, minimax, atlascloud, baseten, poolside, vellum"
+            vercel-ai-gateway, litellm, opencode, openai-compatible, minimax, atlascloud, baseten, poolside, typesafe,
+            vellum"
       responses:
         "200":
           description: Successful response
@@ -16926,8 +16985,8 @@ paths:
             type: string
           description:
             "Filter by provider. One of: anthropic, openai, gemini, ollama, fireworks, together, openrouter,
-            vercel-ai-gateway, litellm, opencode, openai-compatible, minimax, atlascloud, baseten, poolside, vellum,
-            chatgpt"
+            vercel-ai-gateway, litellm, opencode, openai-compatible, minimax, atlascloud, baseten, poolside, typesafe,
+            vellum, chatgpt"
       responses:
         "200":
           description: Successful response
@@ -18534,7 +18593,7 @@ paths:
     get:
       operationId: internal_mcp_list_get
       summary: List MCP servers with health status
-      description: Returns configured MCP servers with live health-check results (connected, needs auth, error).
+      description: Returns configured MCP servers with recorded runtime status without opening new connections.
       tags:
         - internal
       responses:
@@ -21041,6 +21100,12 @@ paths:
           schema:
             type: integer
           description: Maximum number of messages to return.
+        - name: modeSessionIds
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated mode-session IDs to include with summaries for loaded active groups outside this page.
       responses:
         "200":
           description: Successful response
@@ -21056,6 +21121,38 @@ paths:
                       properties:
                         id:
                           type: string
+                        modeSession:
+                          type: object
+                          properties:
+                            mode:
+                              type: string
+                              enum:
+                                - computer_use
+                                - browser
+                                - live_vision
+                                - ambient
+                            id:
+                              type: string
+                              minLength: 1
+                          required:
+                            - mode
+                            - id
+                          additionalProperties: false
+                        modeSessionActivity:
+                          type: object
+                          properties:
+                            firstAt:
+                              type: integer
+                              minimum: 0
+                              maximum: 8640000000000000
+                            lastAt:
+                              type: integer
+                              minimum: 0
+                              maximum: 8640000000000000
+                          required:
+                            - firstAt
+                            - lastAt
+                          additionalProperties: false
                         mergedMessageIds:
                           type: array
                           items:
@@ -21089,6 +21186,8 @@ paths:
                               thumbnailData:
                                 type: string
                               fileBacked:
+                                type: boolean
+                              computerUseScreenshot:
                                 type: boolean
                             required:
                               - id
@@ -21215,6 +21314,8 @@ paths:
                                           - keenable
                                           - firecrawl
                                           - fastcrw
+                                          - searxng
+                                          - tinyfish
                                       resultCount:
                                         type: number
                                       durationMs:
@@ -21268,6 +21369,7 @@ paths:
                                           - default
                                           - firecrawl
                                           - fastcrw
+                                          - tinyfish
                                       status:
                                         type: number
                                       contentType:
@@ -21417,6 +21519,9 @@ paths:
                                             additionalProperties: false
                                         freeTextPlaceholder:
                                           type: string
+                                        presentation:
+                                          type: string
+                                          const: virtual_desktop
                                       required:
                                         - id
                                         - question
@@ -21459,6 +21564,9 @@ paths:
                                             additionalProperties: false
                                         freeTextPlaceholder:
                                           type: string
+                                        presentation:
+                                          type: string
+                                          const: virtual_desktop
                                       required:
                                         - id
                                         - question
@@ -21726,6 +21834,8 @@ paths:
                                                   - keenable
                                                   - firecrawl
                                                   - fastcrw
+                                                  - searxng
+                                                  - tinyfish
                                               resultCount:
                                                 type: number
                                               durationMs:
@@ -21779,6 +21889,7 @@ paths:
                                                   - default
                                                   - firecrawl
                                                   - fastcrw
+                                                  - tinyfish
                                               status:
                                                 type: number
                                               contentType:
@@ -21928,6 +22039,9 @@ paths:
                                                     additionalProperties: false
                                                 freeTextPlaceholder:
                                                   type: string
+                                                presentation:
+                                                  type: string
+                                                  const: virtual_desktop
                                               required:
                                                 - id
                                                 - question
@@ -21970,6 +22084,9 @@ paths:
                                                     additionalProperties: false
                                                 freeTextPlaceholder:
                                                   type: string
+                                                presentation:
+                                                  type: string
+                                                  const: virtual_desktop
                                               required:
                                                 - id
                                                 - question
@@ -22097,6 +22214,8 @@ paths:
                                         type: string
                                       fileBacked:
                                         type: boolean
+                                      computerUseScreenshot:
+                                        type: boolean
                                     required:
                                       - id
                                       - filename
@@ -22183,6 +22302,9 @@ paths:
                           type: boolean
                         noResponse:
                           type: boolean
+                        cameraFrame:
+                          type: boolean
+                          const: true
                         assistantTextVisibility:
                           type: string
                           enum:
@@ -22353,6 +22475,223 @@ paths:
                       locally but the server reports `processing: false`, the turn has ended (or died) and the UI should
                       stop waiting rather than spin indefinitely. Absent on older daemons that predate this field."
                     type: boolean
+                  modeSessions:
+                    description: Conversation-owned mode-session summaries referenced by this page or explicitly requested by ID.
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        summary:
+                          oneOf:
+                            - type: object
+                              properties:
+                                id:
+                                  type: string
+                                  minLength: 1
+                                conversationId:
+                                  type: string
+                                  minLength: 1
+                                mode:
+                                  type: string
+                                  enum:
+                                    - computer_use
+                                    - browser
+                                    - live_vision
+                                    - ambient
+                                sourceStartedAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                firstIncludedAt:
+                                  anyOf:
+                                    - type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    - type: "null"
+                                firstIncludedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                lastActivityAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                lastOwnedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                revision:
+                                  type: integer
+                                  exclusiveMinimum: 0
+                                  maximum: 9007199254740991
+                                status:
+                                  type: string
+                                  const: active
+                                endedAt:
+                                  type: "null"
+                                endReason:
+                                  type: "null"
+                              required:
+                                - id
+                                - conversationId
+                                - mode
+                                - sourceStartedAt
+                                - firstIncludedAt
+                                - firstIncludedMessageId
+                                - lastActivityAt
+                                - lastOwnedMessageId
+                                - revision
+                                - status
+                                - endedAt
+                                - endReason
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                id:
+                                  type: string
+                                  minLength: 1
+                                conversationId:
+                                  type: string
+                                  minLength: 1
+                                mode:
+                                  type: string
+                                  enum:
+                                    - computer_use
+                                    - browser
+                                    - live_vision
+                                    - ambient
+                                sourceStartedAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                firstIncludedAt:
+                                  anyOf:
+                                    - type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    - type: "null"
+                                firstIncludedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                lastActivityAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                lastOwnedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                revision:
+                                  type: integer
+                                  exclusiveMinimum: 0
+                                  maximum: 9007199254740991
+                                status:
+                                  type: string
+                                  const: completed
+                                endedAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                endReason:
+                                  type: string
+                                  minLength: 1
+                              required:
+                                - id
+                                - conversationId
+                                - mode
+                                - sourceStartedAt
+                                - firstIncludedAt
+                                - firstIncludedMessageId
+                                - lastActivityAt
+                                - lastOwnedMessageId
+                                - revision
+                                - status
+                                - endedAt
+                                - endReason
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                id:
+                                  type: string
+                                  minLength: 1
+                                conversationId:
+                                  type: string
+                                  minLength: 1
+                                mode:
+                                  type: string
+                                  enum:
+                                    - computer_use
+                                    - browser
+                                    - live_vision
+                                    - ambient
+                                sourceStartedAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                firstIncludedAt:
+                                  anyOf:
+                                    - type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    - type: "null"
+                                firstIncludedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                lastActivityAt:
+                                  type: integer
+                                  minimum: 0
+                                  maximum: 9007199254740991
+                                lastOwnedMessageId:
+                                  anyOf:
+                                    - type: string
+                                      minLength: 1
+                                    - type: "null"
+                                revision:
+                                  type: integer
+                                  exclusiveMinimum: 0
+                                  maximum: 9007199254740991
+                                status:
+                                  type: string
+                                  const: interrupted
+                                endedAt:
+                                  anyOf:
+                                    - type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    - type: "null"
+                                endReason:
+                                  type: string
+                                  minLength: 1
+                              required:
+                                - id
+                                - conversationId
+                                - mode
+                                - sourceStartedAt
+                                - firstIncludedAt
+                                - firstIncludedMessageId
+                                - lastActivityAt
+                                - lastOwnedMessageId
+                                - revision
+                                - status
+                                - endedAt
+                                - endReason
+                              additionalProperties: false
+                          type: object
+                        runtimeState:
+                          type: string
+                          enum:
+                            - waiting
+                            - finishing
+                      required:
+                        - summary
+                      additionalProperties: false
                 required:
                   - messages
                 additionalProperties: false
@@ -23312,6 +23651,14 @@ paths:
                 description:
                   description: Human-readable export description.
                   type: string
+                profile:
+                  description:
+                    "Export profile. 'migration' (default) builds a teleport bundle. 'debug' builds a bundle for Vellum staff
+                    to open on a debug clone: no credentials, plus the gateway's database and logs under gateway/."
+                  type: string
+                  enum:
+                    - migration
+                    - debug
               required:
                 - upload_url
       responses:
@@ -24467,11 +24814,58 @@ paths:
                     type: boolean
                   reason:
                     type: string
+                  selectedChannels:
+                    type: array
+                    items:
+                      type: string
+                  deliveryResults:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        channel:
+                          type: string
+                        destination:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                            - pending
+                            - sent
+                            - failed
+                            - skipped
+                        errorCode:
+                          type: string
+                        errorMessage:
+                          type: string
+                        sentAt:
+                          type: number
+                        conversationId:
+                          type: string
+                        messageId:
+                          type: string
+                        conversationStrategy:
+                          type: string
+                      required:
+                        - channel
+                        - destination
+                        - status
+                      additionalProperties: false
+                  receiptClass:
+                    type: string
+                    enum:
+                      - provider_accepted
+                      - gateway_accepted
+                      - client_os_posted
+                      - unknown
                 required:
                   - signalId
                   - dispatched
                   - deduplicated
                   - reason
+                  - selectedChannels
+                  - deliveryResults
+                  - receiptClass
                 additionalProperties: false
   /v1/notifications/events:
     post:
@@ -24586,6 +24980,38 @@ paths:
                             anyOf:
                               - type: string
                               - type: "null"
+                          category:
+                            anyOf:
+                              - type: string
+                                enum:
+                                  - productivity
+                                  - communication
+                                  - meetings
+                                  - sales
+                                  - marketing
+                                  - finance
+                                  - commerce
+                                  - engineering
+                                  - knowledge
+                                  - recruiting
+                              - type: "null"
+                            description: Where the integrations catalog files the provider; null for a provider without a seed entry.
+                          tenant_host:
+                            anyOf:
+                              - type: object
+                                properties:
+                                  pattern:
+                                    type: string
+                                  label:
+                                    type: string
+                                  placeholder:
+                                    type: string
+                                required:
+                                  - pattern
+                                  - label
+                                  - placeholder
+                                additionalProperties: false
+                              - type: "null"
                           acts_as:
                             type: string
                             enum:
@@ -24602,6 +25028,8 @@ paths:
                           - supports_managed_mode
                           - managed_service_is_paid
                           - feature_flag
+                          - category
+                          - tenant_host
                           - acts_as
                         additionalProperties: false
                       - type: "null"
@@ -25120,6 +25548,38 @@ paths:
                           anyOf:
                             - type: string
                             - type: "null"
+                        category:
+                          anyOf:
+                            - type: string
+                              enum:
+                                - productivity
+                                - communication
+                                - meetings
+                                - sales
+                                - marketing
+                                - finance
+                                - commerce
+                                - engineering
+                                - knowledge
+                                - recruiting
+                            - type: "null"
+                          description: Where the integrations catalog files the provider; null for a provider without a seed entry.
+                        tenant_host:
+                          anyOf:
+                            - type: object
+                              properties:
+                                pattern:
+                                  type: string
+                                label:
+                                  type: string
+                                placeholder:
+                                  type: string
+                              required:
+                                - pattern
+                                - label
+                                - placeholder
+                              additionalProperties: false
+                            - type: "null"
                         acts_as:
                           type: string
                           enum:
@@ -25136,6 +25596,8 @@ paths:
                         - supports_managed_mode
                         - managed_service_is_paid
                         - feature_flag
+                        - category
+                        - tenant_host
                         - acts_as
                       additionalProperties: false
                 required:
@@ -25784,6 +26246,9 @@ paths:
                                     additionalProperties: false
                                 freeTextPlaceholder:
                                   type: string
+                                presentation:
+                                  type: string
+                                  const: virtual_desktop
                               required:
                                 - id
                                 - question
@@ -26615,6 +27080,12 @@ paths:
                   target:
                     type: string
                     description: Absolute path that was removed on the assistant host. Useful for audit logs and confirmation toasts.
+                  warnings:
+                    description: Stable keys for non-fatal cleanup limitations that should be localized at the presentation edge.
+                    type: array
+                    items:
+                      type: string
+                      const: plugin.uninstall.mcp_oauth_credentials_unchecked
                 required:
                   - name
                   - target
@@ -26681,26 +27152,44 @@ paths:
                     description: Resolved version (installed copy first, then repo `package.json`).
                   source:
                     anyOf:
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            const: github
-                          repo:
-                            type: string
-                            description: "`owner/repo` of the external plugin repository."
-                          path:
-                            description: Directory within the repo, when the plugin is not at the root.
-                            type: string
-                          ref:
-                            type: string
-                            description: Pinned git ref the plugin is fetched from.
-                        required:
-                          - kind
-                          - repo
-                          - ref
-                        additionalProperties: false
-                        description: "Origin of the match: a whitelisted external plugin repository."
+                      - oneOf:
+                          - type: object
+                            properties:
+                              kind:
+                                type: string
+                                const: github
+                              repo:
+                                type: string
+                                description: "`owner/repo` of the external plugin repository."
+                              path:
+                                description: Directory within the repo, when the plugin is not at the root.
+                                type: string
+                              ref:
+                                type: string
+                                description: Pinned git ref the plugin is fetched from.
+                            required:
+                              - kind
+                              - repo
+                              - ref
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              kind:
+                                type: string
+                                const: local
+                              path:
+                                type: string
+                                description: Package key in the assistant bundle.
+                              version:
+                                type: string
+                                description: Bundled package version.
+                            required:
+                              - kind
+                              - path
+                              - version
+                            additionalProperties: false
+                        description: Reviewed source of the marketplace entry.
+                        type: object
                       - type: "null"
                     description: Pinned origin from the marketplace entry, or null when an installed copy has no catalog entry.
                   readme:
@@ -27055,28 +27544,42 @@ paths:
                             description: ISO-8601 install timestamp from the sidecar; null when absent.
                           source:
                             anyOf:
-                              - type: object
-                                properties:
-                                  kind:
-                                    type: string
-                                    description: Source kind. Only `github` is written today.
-                                  owner:
-                                    type: string
-                                  repo:
-                                    type: string
-                                  path:
-                                    description: Repo-relative directory holding the plugin root; absent = repo root.
-                                    type: string
-                                  ref:
-                                    type: string
-                                    description: Ref the install resolved through (the pinned commit SHA for marketplace installs).
-                                required:
-                                  - kind
-                                  - owner
-                                  - repo
-                                  - ref
-                                additionalProperties: false
+                              - oneOf:
+                                  - type: object
+                                    properties:
+                                      kind:
+                                        type: string
+                                        const: github
+                                      owner:
+                                        type: string
+                                      repo:
+                                        type: string
+                                      path:
+                                        type: string
+                                      ref:
+                                        type: string
+                                    required:
+                                      - kind
+                                      - owner
+                                      - repo
+                                      - ref
+                                    additionalProperties: false
+                                  - type: object
+                                    properties:
+                                      kind:
+                                        type: string
+                                        const: local
+                                      path:
+                                        type: string
+                                      version:
+                                        type: string
+                                    required:
+                                      - kind
+                                      - path
+                                      - version
+                                    additionalProperties: false
                                 description: Source coordinates recorded in the install-time provenance sidecar.
+                                type: object
                               - type: "null"
                             description: Source recorded at install time; null when no sidecar exists.
                           localChanges:
@@ -27135,6 +27638,9 @@ paths:
                     anyOf:
                       - type: object
                         properties:
+                          kind:
+                            type: string
+                            const: local
                           repo:
                             type: string
                             description: "`owner/repo` of the external plugin repository."
@@ -27170,6 +27676,9 @@ paths:
                           marketplaceRef:
                             type: string
                             description: Ref of the canonical repo the marketplace manifest was read from.
+                          version:
+                            description: Bundled package version.
+                            type: string
                         required:
                           - repo
                           - path
@@ -27606,7 +28115,7 @@ paths:
                           description: Install name. Matches `assistant plugins install <name>`.
                         path:
                           type: string
-                          description: "Human-readable origin: a `github:owner/repo@ref` locator for the external plugin."
+                          description: Human-readable catalog origin locator.
                         description:
                           description: Short description, when known (external entries only today).
                           type: string
@@ -27620,27 +28129,92 @@ paths:
                             - type: string
                             - type: "null"
                           description: Marketplace category slug (Skills taxonomy); null when the entry declares none.
-                        source:
+                        integration:
                           type: object
                           properties:
                             kind:
                               type: string
-                              const: github
-                            repo:
+                              const: mcp
+                            displayName:
                               type: string
-                              description: "`owner/repo` of the external plugin repository."
-                            path:
-                              description: Directory within the repo, when the plugin is not at the root.
+                            documentationUrl:
                               type: string
-                            ref:
+                            verifiedAt:
                               type: string
-                              description: Pinned git ref the plugin is fetched from.
+                            verification:
+                              type: string
+                              const: documentation-only
+                            setup:
+                              type: object
+                              properties:
+                                mode:
+                                  type: string
+                                  enum:
+                                    - oauth
+                                    - manual
+                                instructions:
+                                  type: string
+                              required:
+                                - mode
+                                - instructions
+                              additionalProperties: false
+                            logo:
+                              type: string
+                            oauthProvider:
+                              type: string
+                            category:
+                              description:
+                                "Where the integrations catalog files the entry: a slug from the shared integration-category vocabulary,
+                                passed through as the catalog declares it."
+                              type: string
                           required:
                             - kind
-                            - repo
-                            - ref
+                            - displayName
+                            - documentationUrl
+                            - verifiedAt
+                            - verification
+                            - setup
+                            - logo
                           additionalProperties: false
-                          description: "Origin of the match: a whitelisted external plugin repository."
+                        source:
+                          oneOf:
+                            - type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  const: github
+                                repo:
+                                  type: string
+                                  description: "`owner/repo` of the external plugin repository."
+                                path:
+                                  description: Directory within the repo, when the plugin is not at the root.
+                                  type: string
+                                ref:
+                                  type: string
+                                  description: Pinned git ref the plugin is fetched from.
+                              required:
+                                - kind
+                                - repo
+                                - ref
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                kind:
+                                  type: string
+                                  const: local
+                                path:
+                                  type: string
+                                  description: Package key in the assistant bundle.
+                                version:
+                                  type: string
+                                  description: Bundled package version.
+                              required:
+                                - kind
+                                - path
+                                - version
+                              additionalProperties: false
+                          description: Reviewed source of the marketplace entry.
+                          type: object
                       required:
                         - name
                         - path
@@ -28748,8 +29322,8 @@ paths:
       operationId: roadmap_by_slug_patch
       summary: Update a roadmap item
       description:
-        Updates a roadmap item. At least one field is required; the roadmap service decides which items this
-        assistant may edit.
+        Updates the title or description of a roadmap item this assistant filed, while the item is still open.
+        Status and tags are set by Vellum staff.
       tags:
         - roadmap
       parameters:
@@ -28769,13 +29343,7 @@ paths:
                   type: string
                 description:
                   type: string
-                status:
-                  type: string
-                tags:
-                  description: Tag slugs
-                  type: array
-                  items:
-                    type: string
+              additionalProperties: false
       responses:
         "200":
           description: Successful response
@@ -29095,6 +29663,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -29164,6 +29734,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -29343,6 +29914,8 @@ paths:
                           - single_channel
                           - multi_channel
                           - all_channels
+                      quiet:
+                        type: boolean
                       reuseConversation:
                         type: boolean
                       wakeConversationId:
@@ -29412,6 +29985,7 @@ paths:
                       - mode
                       - status
                       - routingIntent
+                      - quiet
                       - reuseConversation
                       - wakeConversationId
                       - workflowName
@@ -29543,6 +30117,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -29612,6 +30188,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -29740,6 +30317,8 @@ paths:
                           - single_channel
                           - multi_channel
                           - all_channels
+                      quiet:
+                        type: boolean
                       reuseConversation:
                         type: boolean
                       wakeConversationId:
@@ -29809,6 +30388,7 @@ paths:
                       - mode
                       - status
                       - routingIntent
+                      - quiet
                       - reuseConversation
                       - wakeConversationId
                       - workflowName
@@ -29997,6 +30577,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -30066,6 +30648,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -30197,6 +30780,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -30266,6 +30851,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -30400,6 +30986,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -30469,6 +31057,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -30739,6 +31328,8 @@ paths:
                             - single_channel
                             - multi_channel
                             - all_channels
+                        quiet:
+                          type: boolean
                         reuseConversation:
                           type: boolean
                         wakeConversationId:
@@ -30808,6 +31399,7 @@ paths:
                         - mode
                         - status
                         - routingIntent
+                        - quiet
                         - reuseConversation
                         - wakeConversationId
                         - workflowName
@@ -37162,8 +37754,18 @@ paths:
           schema:
             type: string
           description:
-            "Compute recursive byte size for each directory entry (true/false). Budget-bounded — large subtrees may
-            return size: null."
+            "Compute recursive byte size for each directory entry (true/false). Budget-bounded: large subtrees may
+            return size: null. Not applied to a recursive listing, which carries every file for the client to sum."
+        - name: recursive
+          in: query
+          required: false
+          schema:
+            type: string
+          description:
+            "List the whole subtree in one response (true/false). Depth-first, each directory's entries in listing
+            order, so grouping by parent path recovers per-directory listings. Bounded: sets truncated when the entry
+            cap or deadline stops the walk, and does not enter directories the workspace gitignore rules exclude, which
+            are named in skipped."
       responses:
         "200":
           description: Successful response
@@ -37207,6 +37809,19 @@ paths:
                         - modifiedAt
                       additionalProperties: false
                     description: Directory entry objects
+                  truncated:
+                    description:
+                      A recursive walk stopped at its entry cap or deadline, so deeper entries are missing. Absent from
+                      assistants that predate recursive listings.
+                    type: boolean
+                  skipped:
+                    description:
+                      Directories a recursive walk listed but did not enter, whether because a workspace gitignore rule excludes
+                      them, they are symlinks, or they could not be read. Each can still be listed on its own. Absent
+                      from assistants that predate recursive listings.
+                    type: array
+                    items:
+                      type: string
                 required:
                   - path
                   - entries
@@ -38290,6 +38905,7 @@ components:
         - atlascloud
         - baseten
         - poolside
+        - typesafe
         - vellum
         - chatgpt
     Auth:

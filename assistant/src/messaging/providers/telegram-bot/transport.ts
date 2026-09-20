@@ -55,29 +55,15 @@ function draftText(text: string, plan: StreamPlan | undefined): string {
   return [body, planText].filter(Boolean).join("\n\n");
 }
 
-/**
- * Telegram's draft id is minted by the caller, unlike a stream id a platform
- * hands back, and only has to be non-zero and stable for the life of one
- * draft. The clock supplies that without any state to keep between calls.
- */
-function mintDraftId(): number {
-  return Date.now();
-}
-
 export const telegramTransport: ChannelTransport = {
   channel: "telegram",
 
   /**
    * A chat is a chat id, with `threadId` naming a forum topic. A person's DM
-   * chat id is their user id, so a person is addressed as that chat.
+   * chat id is their user id on Telegram, so reaching one is naming that
+   * chat and needs no resolution of its own.
    */
   addressFor(target) {
-    if (target.kind === "person") {
-      return {
-        ctx: directDeliveryContext("telegram"),
-        chatId: target.userId,
-      };
-    }
     const threadId = target.threadId?.trim();
     return {
       ctx: directDeliveryContext("telegram", threadId ? { threadId } : {}),
@@ -171,7 +157,9 @@ export const telegramTransport: ChannelTransport = {
     if (op.action === "stop") {
       return { ok: true, ts: op.streamId };
     }
-    const draftId = op.action === "start" ? mintDraftId() : Number(op.streamId);
+    // Telegram mints draft ids on the caller. A non-zero clock tick is enough
+    // for the life of one draft.
+    const draftId = op.action === "start" ? Date.now() : Number(op.streamId);
     if (!Number.isFinite(draftId) || draftId === 0) {
       return { ok: false };
     }

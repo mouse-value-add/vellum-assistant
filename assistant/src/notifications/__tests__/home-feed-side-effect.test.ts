@@ -26,6 +26,15 @@ const messageRewrites: Array<{ messageId: string; content: string }> = [];
 /** messageId -> the conversation it belongs to, for the scoped lookup. */
 const messageOwners = new Map<string, string>();
 let conversationRow: { conversationType: string } | null = null;
+/**
+ * Rows for specific ids, consulted before the catch-all `conversationRow`,
+ * so a test can hand the signal's source and the delivery's paired
+ * conversation different shapes.
+ */
+const conversationRowsById = new Map<
+  string,
+  { conversationType: string; source?: string }
+>();
 let conversationLookupShouldThrow = false;
 let messageAppendShouldThrow = false;
 let messageRewriteShouldThrow = false;
@@ -71,7 +80,7 @@ mock.module("../../persistence/conversation-crud.js", () => ({
     if (conversationLookupShouldThrow) {
       throw new Error("simulated conversation lookup failure");
     }
-    return conversationRow;
+    return conversationRowsById.get(id) ?? conversationRow;
   },
   addMessage: async (
     conversationId: string,
@@ -164,6 +173,7 @@ beforeEach(() => {
   messageRewrites.length = 0;
   messageOwners.clear();
   conversationRow = null;
+  conversationRowsById.clear();
   conversationLookupShouldThrow = false;
   messageAppendShouldThrow = false;
   messageRewriteShouldThrow = false;
@@ -258,7 +268,11 @@ describe("writeHomeFeedItemForSignal", () => {
       },
     });
 
-    const item = await writeHomeFeedItemForSignal(signal, decision);
+    const item = await writeHomeFeedItemForSignal(
+      signal,
+      decision,
+      makeVellumDelivery(),
+    );
 
     expect(item).not.toBeNull();
     expect(appendCalls).toHaveLength(1);
@@ -267,7 +281,12 @@ describe("writeHomeFeedItemForSignal", () => {
       "The deployment completed successfully.",
     );
     expect(appendCalls[0]!.conversationId).toBe("conv-source-1");
-    expect(conversationLookups).toEqual(["conv-source-1"]);
+    expect(
+      appendCalls[0]!.metadata?.notificationConversationMessageId,
+    ).toBeUndefined();
+    expect(messageAppends).toEqual([]);
+    expect(messagesInvalidated).toEqual([]);
+    expect(conversationLookups).toEqual(["conv-source-1", "conv-source-1"]);
   });
 
   test("isAsyncBackground hint writes even when sourceContextId does not resolve", async () => {
@@ -330,6 +349,93 @@ describe("writeHomeFeedItemForSignal", () => {
     expect(item).not.toBeNull();
     expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.title).toBe("Shared from CLI");
+    expect(appendCalls[0]!.noteworthy).toBe(true);
+    expect(appendCalls[0]!.conversationId).toBeUndefined();
+    expect(conversationLookups).toEqual(["cli-12345"]);
+  });
+
+  test("assistant_tool source skips the automatic Home mirror when channelAllowlist omits vellum", async () => {
+    conversationRow = null;
+    const signal = makeSignal({
+      sourceChannel: "assistant_tool",
+      sourceEventName: "assistant.share",
+      sourceContextId: "cli-12345",
+      contextPayload: {
+        title: "Telegram only",
+        channelAllowlist: ["telegram"],
+      },
+      attentionHints: {
+        requiresAction: false,
+        urgency: "critical",
+        isAsyncBackground: false,
+        visibleInSourceNow: false,
+      },
+    });
+    const decision = makeDecision({
+      selectedChannels: ["telegram"],
+      renderedCopy: {
+        telegram: { title: "Telegram only", body: "Alarm body" },
+      },
+    });
+
+    const item = await writeHomeFeedItemForSignal(signal, decision);
+
+    expect(item).toBeNull();
+    expect(appendCalls).toHaveLength(0);
+  });
+
+  test("assistant_tool source still mirrors when channelAllowlist includes vellum", async () => {
+    conversationRow = null;
+    const signal = makeSignal({
+      sourceChannel: "assistant_tool",
+      sourceEventName: "assistant.share",
+      sourceContextId: "cli-12345",
+      contextPayload: {
+        title: "Inbox and telegram",
+        channelAllowlist: ["vellum", "telegram"],
+      },
+    });
+    const decision = makeDecision({
+      selectedChannels: ["vellum", "telegram"],
+      renderedCopy: {
+        vellum: { title: "Inbox and telegram", body: "Shared body" },
+      },
+    });
+
+    const item = await writeHomeFeedItemForSignal(signal, decision);
+
+    expect(item).not.toBeNull();
+    expect(appendCalls).toHaveLength(1);
+  });
+
+  test("assistant_tool exclusive allowlist still mirrors when isAsyncBackground is set", async () => {
+    conversationRow = null;
+    const signal = makeSignal({
+      sourceChannel: "assistant_tool",
+      sourceEventName: "assistant.share",
+      sourceContextId: "cli-12345",
+      contextPayload: {
+        title: "Background telegram",
+        channelAllowlist: ["telegram"],
+      },
+      attentionHints: {
+        requiresAction: false,
+        urgency: "low",
+        isAsyncBackground: true,
+        visibleInSourceNow: false,
+      },
+    });
+    const decision = makeDecision({
+      selectedChannels: ["telegram"],
+      renderedCopy: {
+        telegram: { title: "Background telegram", body: "Still a feed item" },
+      },
+    });
+
+    const item = await writeHomeFeedItemForSignal(signal, decision);
+
+    expect(item).not.toBeNull();
+    expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.noteworthy).toBe(true);
     expect(appendCalls[0]!.conversationId).toBeUndefined();
     expect(conversationLookups).toEqual(["cli-12345"]);
@@ -400,6 +506,139 @@ describe("writeHomeFeedItemForSignal", () => {
     expect(item).not.toBeNull();
     expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.conversationId).toBe("paired-delivery-conv-id");
+  });
+
+  describe("assistant-initiated thread deliveries", () => {
+    // Under the assistant-initiated-threads flag, conversation pairing
+    // promotes a background assistant.share into a standard conversation
+    // stamped `assistant_initiated`, which the sidebar's assistant section
+    // renders. That thread is the share's surface; a feed item for the
+    // same signal put it in the bell a second time.
+    const assistantThreadDelivery = () =>
+      makeVellumDelivery({ conversationId: "assistant-thread-1" });
+
+    function stampAssistantThread(): void {
+      conversationRowsById.set("assistant-thread-1", {
+        conversationType: "standard",
+        source: "assistant_initiated",
+      });
+    }
+
+    function shareFromHeartbeat(): NotificationSignal {
+      return makeSignal({
+        sourceChannel: "assistant_tool",
+        sourceEventName: "assistant.share",
+        sourceContextId: "conv-source-1",
+        contextPayload: { title: "Doctor checklist built" },
+      });
+    }
+
+    const shareDecision = () =>
+      makeDecision({
+        selectedChannels: ["vellum"],
+        renderedCopy: {
+          vellum: {
+            title: "Doctor checklist built",
+            body: "Your doctor-visit one-pager is ready.",
+          },
+        },
+      });
+
+    test("a background share promoted into an assistant thread does not mirror", async () => {
+      conversationRow = { conversationType: "background" };
+      stampAssistantThread();
+
+      const item = await writeHomeFeedItemForSignal(
+        shareFromHeartbeat(),
+        shareDecision(),
+        assistantThreadDelivery(),
+      );
+
+      expect(item).toBeNull();
+      expect(appendCalls).toHaveLength(0);
+      expect(messageAppends).toHaveLength(0);
+    });
+
+    test("the async-background hint does not override the assistant-thread suppression", async () => {
+      conversationRow = null;
+      stampAssistantThread();
+      const signal = makeSignal({
+        sourceChannel: "assistant_tool",
+        sourceEventName: "assistant.share",
+        sourceContextId: "heartbeat",
+        contextPayload: { title: "Bilbao solo trip is planned" },
+        attentionHints: {
+          requiresAction: false,
+          urgency: "medium",
+          isAsyncBackground: true,
+          visibleInSourceNow: false,
+        },
+      });
+
+      const item = await writeHomeFeedItemForSignal(
+        signal,
+        shareDecision(),
+        assistantThreadDelivery(),
+      );
+
+      expect(item).toBeNull();
+      expect(appendCalls).toHaveLength(0);
+    });
+
+    test("a share paired with an ordinary notification thread still mirrors", async () => {
+      // Flag off, or any producer that did not promote: pairing writes a
+      // `notification`-sourced row, which stays in Chats and the bell.
+      conversationRow = { conversationType: "background" };
+      conversationRowsById.set("assistant-thread-1", {
+        conversationType: "standard",
+        source: "notification",
+      });
+
+      const item = await writeHomeFeedItemForSignal(
+        shareFromHeartbeat(),
+        shareDecision(),
+        assistantThreadDelivery(),
+      );
+
+      expect(item).not.toBeNull();
+      expect(appendCalls).toHaveLength(1);
+    });
+
+    test("a guardian request keeps its bell item even when paired with an assistant thread", async () => {
+      // The bell is the request's canonical home: nothing else renders the
+      // pending card, so the assistant-thread suppression must not reach it.
+      conversationRow = { conversationType: "standard" };
+      stampAssistantThread();
+      const signal = makeSignal({
+        sourceChannel: "assistant_tool",
+        sourceEventName: "guardian.question",
+        contextPayload: {
+          title: "Approve this?",
+          questionText: "May I send the email?",
+          requestId: "req-1",
+        },
+        attentionHints: {
+          requiresAction: true,
+          urgency: "medium",
+          isAsyncBackground: false,
+          visibleInSourceNow: false,
+        },
+      });
+
+      const item = await writeHomeFeedItemForSignal(
+        signal,
+        makeDecision({
+          selectedChannels: ["vellum"],
+          renderedCopy: {
+            vellum: { title: "Approve this?", body: "May I send the email?" },
+          },
+        }),
+        assistantThreadDelivery(),
+      );
+
+      expect(item).not.toBeNull();
+      expect(appendCalls).toHaveLength(1);
+    });
   });
 
   test("source conversation id wins over the paired delivery fallback when both are available", async () => {
@@ -806,7 +1045,7 @@ describe("writeHomeFeedItemForSignal", () => {
     conversationRow = { conversationType: "background" };
     const signal = makeSignal({
       sourceChannel: "assistant_tool",
-      sourceEventName: "user.send_notification",
+      sourceEventName: "assistant.share",
       contextPayload: { title: "Tool share", body: "Body" },
     });
 
@@ -820,7 +1059,7 @@ describe("writeHomeFeedItemForSignal", () => {
     conversationRow = { conversationType: "background" };
     const signal = makeSignal({
       sourceChannel: "assistant_tool",
-      sourceEventName: "user.send_notification",
+      sourceEventName: "assistant.share",
       contextPayload: { title: "Tool share", body: "Body" },
     });
 
@@ -976,7 +1215,7 @@ describe("writeHomeFeedItemForSignal", () => {
     conversationRow = { conversationType: "background" };
     const signal = makeSignal({
       sourceChannel: "assistant_tool",
-      sourceEventName: "user.send_notification",
+      sourceEventName: "assistant.share",
       contextPayload: { title: "Tool share", body: "Body" },
     });
 

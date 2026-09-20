@@ -1,4 +1,9 @@
 {
+  "documentChat": {
+    "saveFailed": "無法儲存文件。你的訊息仍在這裡。請重新傳送。",
+    "viewConversation": "查看對話",
+    "reopenDocument": "重新開啟文件"
+  },
   "acpChatPlanBlock": {
     "plan": "計畫"
   },
@@ -18,6 +23,7 @@
   },
   "acpConnectAffordance": {
     "connectButton": "連線",
+    "dismissButton": "關閉",
     "errorFallback": "連線 Claude 失敗。請再試一次。",
     "pastePlaceholder": "貼上您的金鑰",
     "saveButton": "儲存",
@@ -35,6 +41,7 @@
     "closeRunDetail": "關閉執行詳細資料",
     "goToNewest": "前往最新",
     "inputLabel": "輸入",
+    "modelLabel": "模型",
     "objective": "目標",
     "outputLabel": "輸出",
     "sendSteerAria": "傳送引導指令",
@@ -54,12 +61,24 @@
     "takingLonger": "您的助理回應時間超出預期。",
     "tryAgain": "再試一次"
   },
+  "mobileDetailSheet": {
+    "title": "活動詳細資訊"
+  },
   "activityStepsPanel": {
     "backAria": "返回所有步驟",
     "backTooltip": "所有步驟",
     "closeSteps": "關閉步驟",
+    "screenshotAria": "預覽來自「{activity}」的螢幕截圖",
+    "screenshotFallbackAria": "預覽電腦螢幕截圖",
+    "screenshotFallbackTitle": "電腦螢幕截圖",
+    "screenshotTitle": "來自「{activity}」的螢幕截圖",
     "thinkingTitle": "思考中",
     "viewThinkingAria": "檢視思考過程"
+  },
+  "computerUseScreenshotPreview": {
+    "unavailable": "最新螢幕截圖無法使用。",
+    "unavailableShowingPrevious": "最新螢幕截圖無法使用。正在顯示上一張螢幕截圖。",
+    "updating": "正在更新螢幕截圖..."
   },
   "addToChatSheet": {
     "camera": "相機",
@@ -87,25 +106,72 @@
   "assistantContentDisclosure": {
     "earlierActivity": "較早的活動"
   },
+  "actionDisplay": {
+    "click": "點擊",
+    "type": "輸入",
+    "keyPress": "按鍵",
+    "scroll": "捲動",
+    "drag": "拖曳",
+    "hover": "懸停",
+    "observe": "查看",
+    "navigate": "導覽",
+    "terminal": "執行命令"
+  },
+  "sessionGroupRow": {
+    "mode": {
+      "computerUse": "電腦工作階段",
+      "browser": "瀏覽器工作階段",
+      "liveVision": "即時視覺工作階段",
+      "ambient": "環境工作階段"
+    },
+    "durationSeconds": "{count, plural, other {# 秒}}",
+    "durationMinutes": "{count, plural, other {# 分鐘}}",
+    "working": "處理中",
+    "workingWithDuration": "處理中 · {duration}",
+    "waiting": "等待中",
+    "waitingWithDuration": "等待中 · {duration}",
+    "finishing": "即將完成",
+    "finishingWithDuration": "即將完成 · {duration}",
+    "completedWithDurationAndEnd": "{duration} · 結束於 {endTime}",
+    "completedWithDuration": "{duration}",
+    "completedWithEnd": "結束於 {endTime}",
+    "interrupted": "已中斷",
+    "interruptedWithDurationAndEnd": "已中斷 · {duration} · 結束於 {endTime}",
+    "interruptedWithDurationAndLastActivity": "已中斷 · {duration} · 上次活動於 {lastActivityTime}",
+    "interruptedWithLastActivity": "已中斷 · 上次活動於 {lastActivityTime}",
+    "interruptedWithEnd": "已中斷 · 結束於 {endTime}",
+    "disconnected": "連線已中斷",
+    "disconnectedWithDurationAndLastActivity": "連線已中斷 · {duration} · 最後活動時間 {lastActivityTime}",
+    "disconnectedWithLastActivity": "連線已中斷 · 最後活動時間 {lastActivityTime}",
+    "timingUnavailable": "時間資訊無法使用"
+  },
   "assistantDesktop": {
-    "busy": "桌面正由其他使用者使用中。",
-    "connecting": "正在連線至桌面…",
-    "failed": "桌面無法啟動。",
-    "lost": "與桌面的連線已中斷。",
-    "openAria": "開啟桌面",
+    "fitView": "符合螢幕",
+    "panView": "平移",
+    "controlView": "控制",
+    "panHint": "拖曳以平移，輕點以按一下。",
+    "hideAria": "隱藏虛擬桌面",
+    "closeAria": "關閉虛擬桌面預覽",
+    "moveAria": "移動虛擬桌面預覽（方向鍵）",
+    "resizeAria": "調整虛擬桌面預覽大小（方向鍵）",
+    "expandAria": "展開虛擬桌面",
+    "busy": "虛擬桌面正由其他使用者使用中。",
+    "connecting": "正在連線至虛擬桌面…",
+    "failed": "虛擬桌面無法啟動。",
+    "lost": "與虛擬桌面的連線已中斷。",
+    "openAria": "開啟 {name} 的虛擬桌面",
+    "openUnnamedAria": "開啟虛擬桌面",
     "reconnectButton": "重新連線",
     "title": "桌面",
-    "unavailable": "此助理不支援桌面。",
-    "installButton": "安裝桌面",
-    "installDescription": "安裝 Google Chrome 和助理桌面所需的元件。這可能需要幾分鐘。",
-    "checkingSetup": "正在檢查桌面設定…",
-    "installingPackages": "正在安裝桌面元件…",
+    "unavailable": "此助理不支援虛擬桌面。",
+    "installButton": "安裝虛擬桌面",
+    "checkingSetup": "正在檢查虛擬桌面設定…",
+    "installingPackages": "正在安裝虛擬桌面元件…",
     "installingChrome": "正在安裝 Google Chrome…",
     "checkingInstall": "正在檢查安裝…",
-    "installBackground": "關閉此視窗後，安裝仍會繼續。",
     "installFailed": "安裝失敗。請重試以完成設定。",
-    "setupRequestFailed": "無法檢查桌面設定。請重新連線後再試。",
-    "setupUnsupported": "桌面安裝需要具有管理員權限的 Linux x64 或 ARM64 容器。"
+    "setupRequestFailed": "無法檢查虛擬桌面設定。請重新連線後再試。",
+    "setupUnsupported": "虛擬桌面安裝需要具有管理員權限的 Linux x64 或 ARM64 容器。"
   },
   "assistantNavItem": {
     "newChat": "新增聊天"
@@ -415,7 +481,17 @@
     "seeAllAppsAria": "查看全部應用程式",
     "seeAllFilesAria": "查看全部文件與圖片",
     "seeAllFramesAria": "查看全部相機影格",
-    "title": "聊天資訊"
+    "title": "聊天資訊",
+    "retry": "重試",
+    "retrySourceAria": "重試載入{source}",
+    "documentsSource": "文件",
+    "attachmentsSource": "附件",
+    "sourceLoading": "正在載入{source}…",
+    "sourceLoadFailed": "無法載入{source}。",
+    "sourceRefreshFailed": "無法重新整理{source}。正在顯示已儲存的結果。",
+    "sourcePageFailed": "無法載入更多{source}。",
+    "framesUnsupported": "此助理版本不支援攝影機畫面分類。",
+    "loadedHistory": "附件僅來自已載入的聊天記錄。"
   },
   "chatLayout": {
     "navigationAria": "導覽"
@@ -657,7 +733,12 @@
     "ariaLabelUnavailable": "對話資產，無法載入",
     "ariaLabelUnseen": "對話資產，{count, plural, one {# 個項目} other {# 個項目}} (未檢視的變更)",
     "label": "{count, plural, one {# 個資產} other {# 個資產}}",
-    "labelUnavailable": "無法載入資產"
+    "labelUnavailable": "無法載入資產",
+    "labelPartial": "部分資產無法載入",
+    "ariaLabelPartial": "對話資產，部分無法載入",
+    "labelLoaded": "{count, plural, other {已載入 # 個資產}}",
+    "ariaLabelLoaded": "對話資產，{count, plural, other {已載入 # 個項目}}",
+    "ariaLabelLoadedUnseen": "對話資產，{count, plural, other {已載入 # 個項目}}（有未查看的變更）"
   },
   "conversationStarterDock": {
     "caption": "試試這些建議："
@@ -668,10 +749,6 @@
   "copyBlockSurface": {
     "copied": "已複製",
     "copy": "複製"
-  },
-  "copyButton": {
-    "copied": "已複製",
-    "copyFailed": "無法複製到剪貼簿。"
   },
   "copyIdToClipboard": {
     "conversationCopied": "對話 ID 已複製到剪貼簿。",
@@ -757,6 +834,16 @@
     "saved": "已儲存",
     "saving": "正在儲存…",
     "wordCount": "{count, plural, other {# 個字}}"
+  },
+  "documentConversation": {
+    "unavailable": "無法開啟文件對話。請再試一次。",
+    "updateRequired": "請更新助理以開始連結對話。",
+    "prepareFailed": "無法準備文件對話。你的編輯仍然保留。",
+    "feedbackPrompt": "請查看並處理我對「{title}」的評論。",
+    "missing": "此文件的對話無法使用。你可以繼續編輯或開始新的連結對話。",
+    "start": "開始連結對話",
+    "retry": "再試一次",
+    "back": "返回"
   },
   "documentViewerPage": {
     "exportFailed": "匯出 PDF 失敗",
@@ -846,7 +933,12 @@
     "stepWarmup": "預熱",
     "surfaceVoice": "語音通話攝影機",
     "thresholds": "閾值",
-    "valueAbsent": "無"
+    "valueAbsent": "無",
+    "forcedNoveltyThresholdLabel": "主動請求閾值",
+    "reasonAnswered": "已請求，但上一張相片已包含該內容。",
+    "reasonSettling": "已停止移動，但靜止時間尚不足。",
+    "stepAnswered": "已顯示",
+    "stepSettling": "保持靜止"
   },
   "groupActions": {
     "archiveAll": "全部封存…",
@@ -940,6 +1032,7 @@
     "reconnecting": "正在重新連線…",
     "speaking": "正在說話…",
     "thinking": "正在思考…",
+    "working": "正在處理…",
     "askUnsupported": "該助手尚不支援以此種方式提問。請更新後重試。"
   },
   "llmCallErrorCard": {
@@ -959,7 +1052,13 @@
     "pictureInPictureUnavailable": "子母畫面無法使用"
   },
   "localFileLink": {
-    "unavailable": "此檔案在此處無法使用"
+    "closePreview": "關閉預覽：{filename}",
+    "fileOptions": "檔案選項：{filename}",
+    "openInWorkspace": "在工作區中開啟：{filename}",
+    "openPreview": "開啟預覽：{filename}",
+    "unavailable": "此檔案在此處無法使用",
+    "unavailableLabel": "檔案無法使用：{filename}",
+    "viewImage": "檢視圖片：{filename}"
   },
   "localFileMenu": {
     "download": "下載",
@@ -1251,6 +1350,7 @@
     "defaultDescription": "連線 {name}，以便我能將其用於此任務。",
     "dismiss": "關閉",
     "missingDetails": "缺少助理或供應商詳細資訊。",
+    "tenantHostInvalid": "請輸入有效的{label}，例如 {placeholder}",
     "thisAccount": "此帳號",
     "waiting": "等待中...",
     "yourAssistant": "您的助理"
@@ -1333,6 +1433,7 @@
   },
   "preferencesMenu": {
     "admin": "管理員",
+    "earnCredits": "賺取免費點數",
     "preferences": "偏好設定",
     "settings": "設定",
     "shareFeedback": "分享意見回饋"
@@ -1530,6 +1631,8 @@
     "submitFailed": "提交金鑰失敗。請再試一次。"
   },
   "secretPromptCard": {
+    "showValue": "顯示值",
+    "hideValue": "隱藏值",
     "cancel": "取消",
     "domains": "網域：{list}",
     "placeholder": "輸入金鑰值...",
@@ -1573,10 +1676,6 @@
   "singleActivity": {
     "webSearch": "網路搜尋"
   },
-  "skillCreatedCard": {
-    "view": "檢視",
-    "viewAria": "檢視 {name}"
-  },
   "skillDetailPanel": {
     "actionsAria": "技能動作",
     "closeDetails": "關閉技能詳細資料",
@@ -1587,16 +1686,18 @@
     "titleFallback": "技能"
   },
   "skillExecuteDetail": {
-    "parameters": "參數",
-    "rawInput": "原始輸入",
     "runningSuffix": " · 執行中"
   },
   "skillLoadCard": {
     "view": "檢視"
   },
   "skillLoadDetail": {
+    "failed": "載入失敗",
+    "loading": "正在載入技能…",
     "loadingAria": "正在載入技能",
+    "notApproved": "未獲核准",
     "provides": "提供",
+    "unnamedSkill": "技能",
     "usedSkill": "已使用技能"
   },
   "skillLoadOutput": {
@@ -1671,7 +1772,9 @@
   "tableSurface": {
     "copied": "已複製",
     "copy": "複製",
-    "copyAria": "將表格複製為 Markdown"
+    "copyAria": "將表格複製為 Markdown",
+    "copyFailed": "無法複製表格。",
+    "table": "表格"
   },
   "taskPreferencesSurface": {
     "continue": "繼續",
@@ -1719,10 +1822,21 @@
     "command": "指令",
     "denied": "此工具呼叫未獲核准，因此沒有執行。",
     "emptyOutput": "該工具沒有回傳任何輸出。",
-    "input": "輸入",
     "output": "輸出",
     "requestedChanges": "要求的變更",
     "running": "正在執行…"
+  },
+  "toolInputParameters": {
+    "parameters": "參數",
+    "rawInput": "原始輸入",
+    "moreCount": "{count, plural, other {另有 # 項，見「原始輸入」}}"
+  },
+  "toolOutputSection": {
+    "moreCount": "{count, plural, other {另有 # 項，見「原始輸出」}}",
+    "rawOutput": "原始輸出"
+  },
+  "valueFields": {
+    "copyValue": "複製 {label}"
   },
   "toolStepPill": {
     "openAria": "開啟 {label}",
@@ -1949,6 +2063,33 @@
   "assistantSection": {
     "emptyBody": "我隨時都在思考。當有值得您關注的事情時，我會在這裡發起對話。",
     "emptyTitle": "目前還沒有任何想法。"
+  },
+  "sidebarExpandRow": {
+    "expand": "展開",
+    "collapse": "收合"
+  },
+  "assistantSectionToggle": {
+    "hide": "隱藏來自 {name} 的對話",
+    "show": "顯示來自 {name} 的對話"
+  },
+  "coachmarkPress": {
+    "turn": "我點擊了 {label}。接下來呢？"
+  },
+  "cameraFrameGrid": {
+    "count": "{count, plural, other {# 個攝影機畫面}}",
+    "timeRange": "儲存時間：{first} 至 {last}",
+    "savedTime": "儲存於 {time}",
+    "pendingAria": "攝影機畫面，影像仍在載入。{time}",
+    "timeUnavailable": "時間無法取得"
+  },
+  "desktopHelpCard": {
+    "showPreview": "顯示即時預覽",
+    "needsHelp": "虛擬桌面需要你的協助。",
+    "stepIn": "接管",
+    "done": "完成",
+    "skip": "略過",
+    "showMore": "展開",
+    "showLess": "收起"
   },
   "desktopApps": {
     "title": "新增應用程式",

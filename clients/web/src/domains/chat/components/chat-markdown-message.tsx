@@ -31,7 +31,7 @@ import {
 import { handleNativeAnchorClick } from "@/utils/native-anchor";
 
 import {
-  openMarkdownOAuthLinkInPopup,
+  openOAuthUrlInPopup,
   shouldOpenMarkdownLinkInOAuthPopup,
 } from "@/domains/chat/utils/oauth-popup-links";
 import {
@@ -90,7 +90,7 @@ function OAuthAwareLink({
       target="_blank"
       rel={opensOAuthPopup ? undefined : "noopener noreferrer"}
       onClick={(event) => {
-        if (openMarkdownOAuthLinkInPopup(href)) {
+        if (openOAuthUrlInPopup(href)) {
           event.preventDefault();
           return;
         }
@@ -271,6 +271,8 @@ export interface ChatMarkdownMessageProps extends Omit<
   attachments?: DisplayAttachment[];
   /** Active assistant ID for fetching attachment content from the daemon. */
   assistantId?: string | null;
+  /** File actions use product copy; user-authored links keep their captions. */
+  fileLinkLabels?: "action" | "markdown";
   /**
    * Streamed-text reveal sweep (see `rehypeStreamWordFade`): each word is
    * wrapped in a fade span, and while `"revealing"` the words nearest the
@@ -310,9 +312,11 @@ export const ChatMarkdownMessage = memo(function ChatMarkdownMessage({
   content,
   className,
   hardLineBreaks,
+  incremental,
   onVellumLinkClick,
   attachments,
   assistantId,
+  fileLinkLabels = "action",
   streamWordFade,
   redactedCredentialChips,
   workspacePathLinks,
@@ -359,7 +363,8 @@ export const ChatMarkdownMessage = memo(function ChatMarkdownMessage({
             href={href}
             workspacePath={workspacePath}
             assistantId={assistantId ?? undefined}
-            onActivate={
+            labelMode={fileLinkLabels}
+            onOpenFileOptions={
               onVellumLinkClick && !drawerCanOpen
                 ? () => onVellumLinkClick(href, markdownChildrenText(children))
                 : undefined
@@ -381,7 +386,8 @@ export const ChatMarkdownMessage = memo(function ChatMarkdownMessage({
             href={href}
             workspacePath={workspacePath}
             assistantId={assistantId ?? undefined}
-            onActivate={
+            labelMode={fileLinkLabels}
+            onOpenFileOptions={
               onVellumLinkClick && workspacePath !== null && !assistantId
                 ? () =>
                     onVellumLinkClick(
@@ -398,7 +404,7 @@ export const ChatMarkdownMessage = memo(function ChatMarkdownMessage({
 
       return <OAuthAwareLink href={href}>{children}</OAuthAwareLink>;
     },
-    [onVellumLinkClick, assistantId],
+    [onVellumLinkClick, assistantId, fileLinkLabels],
   );
 
   const extraRehypePlugins = useMemo(
@@ -521,6 +527,7 @@ export const ChatMarkdownMessage = memo(function ChatMarkdownMessage({
         content={content}
         className={className}
         hardLineBreaks={hardLineBreaks}
+        incremental={incremental}
         linkComponent={linkComponent}
         imageComponent={imageComponent}
         urlTransform={vellumUrlTransform}

@@ -9,6 +9,8 @@ import {
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { desktopChromeArguments } from "./desktop-browser-endpoint.js";
+
 // Absolute icon paths work without an installed icon theme.
 const TERMINAL_ICON_BASE64 = [
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAACBklEQVR42u2bP2vCQBjG/T",
@@ -32,6 +34,7 @@ export interface DesktopPanelConfigRequest {
   /** Profile the launcher shares with that browser, so it reuses the window. */
   readonly chromiumProfileDir: string;
   readonly terminalPath: string;
+  readonly debugPort?: number;
 }
 
 /** Generate managed launchers and seed the desktop dock on first use. */
@@ -52,6 +55,7 @@ export function writeDesktopPanelConfig(
   mkdirSync(applicationsDir, { recursive: true });
   const chromiumEntry = join(applicationsDir, "google-chrome.desktop");
   const terminalEntry = join(applicationsDir, "xterm.desktop");
+  const minesEntry = join(applicationsDir, "org.gnome.Mines.desktop");
   writeFileSync(
     chromiumEntry,
     desktopEntry({
@@ -59,7 +63,17 @@ export function writeDesktopPanelConfig(
       // Chrome includes its profile path in WM_CLASS.
       windowClass: `google-chrome (${request.chromiumProfileDir})`,
       icon: browserIcon,
-      exec: `"${request.chromiumPath}" --no-sandbox --no-first-run --disable-dev-shm-usage "--user-data-dir=${request.chromiumProfileDir}"`,
+      exec: [
+        request.chromiumPath,
+        ...desktopChromeArguments(
+          request.chromiumProfileDir,
+          request.debugPort,
+        ),
+      ]
+        .map(
+          (arg) => `"${arg.replace(/[\\"`$]/g, "\\$&").replace(/%/g, "%%")}"`,
+        )
+        .join(" "),
     }),
   );
   writeFileSync(
@@ -74,6 +88,16 @@ export function writeDesktopPanelConfig(
     }),
   );
 
+  writeFileSync(
+    minesEntry,
+    desktopEntry({
+      name: "Mines",
+      windowClass: "org.gnome.Mines",
+      icon: "/usr/share/icons/hicolor/scalable/apps/org.gnome.Mines.svg",
+      exec: "/usr/games/gnome-mines",
+    }),
+  );
+
   const launchersDir = join(configDir, "plank", "dock1", "launchers");
   const settingsDir = join(configDir, "glib-2.0", "settings");
   mkdirSync(launchersDir, { recursive: true });
@@ -84,11 +108,12 @@ export function writeDesktopPanelConfig(
   }
   seedFile(join(launchersDir, "chrome.dockitem"), dockItem(chromiumEntry));
   seedFile(join(launchersDir, "terminal.dockitem"), dockItem(terminalEntry));
+  seedFile(join(launchersDir, "mines.dockitem"), dockItem(minesEntry));
   seedFile(
     join(settingsDir, "keyfile"),
     [
       "[net/launchpad/plank/docks/dock1]",
-      "dock-items=['chrome.dockitem', 'terminal.dockitem']",
+      "dock-items=['chrome.dockitem', 'terminal.dockitem', 'mines.dockitem']",
       "icon-size=48",
       "hide-mode='none'",
       "theme='Matte'",

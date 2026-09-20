@@ -29,6 +29,7 @@ import type {
   CompanionGrowth,
   CompanionContext,
   CompanionIntroAction,
+  CompanionIntroReport,
   CompanionSurfaceState,
   ConnectivityState,
   ScreenCaptureFrame,
@@ -38,6 +39,9 @@ import type {
   DictationOverlayState,
   DictationPartialEvent,
   DictationOfferAnswer,
+  CompanionPopoverAnswer,
+  CompanionPopoverView,
+  CompanionPicker,
   ChordBinding,
   ChordRegistrationResult,
   DictationPartialsResult,
@@ -77,6 +81,7 @@ import type {
   UpdateState,
   UpdateStatus,
   VellumCommand,
+  VellumBridge,
   VoiceActivityContent,
   VoiceActivityControl,
   VoiceActivityControlAction,
@@ -94,6 +99,7 @@ export type {
   CompanionGrowth,
   CompanionContext,
   CompanionIntroAction,
+  CompanionIntroReport,
   CompanionSurfaceState,
   ConnectivityState,
   DeepLink,
@@ -212,15 +218,7 @@ declare global {
           ): () => void;
         };
       };
-      permissions?: {
-        getState(): Promise<SystemPermissionsState>;
-        request(kind: SystemPermissionKind): Promise<SystemPermissionStateItem>;
-        openSettings(
-          kind: SystemPermissionKind,
-        ): Promise<SystemPermissionStateItem>;
-        quitAndReopen(): Promise<void>;
-        onState(callback: (state: SystemPermissionsState) => void): () => void;
-      };
+      permissions?: VellumBridge["permissions"];
       commands: {
         on(callback: (command: VellumCommand) => void): () => void;
       };
@@ -403,8 +401,21 @@ declare global {
       companion?: {
         getState(): Promise<CompanionSurfaceState | null>;
         onState(callback: (state: CompanionSurfaceState) => void): () => void;
+        /** Optional: shells that predate the staged introduction have none. */
+        getIntroStage?(): Promise<boolean>;
+        onIntroStage?(callback: (staged: boolean) => void): () => void;
+        /**
+         * Optional for the same reason: a shell that predates the run reports
+         * nothing about it. Pushed to the app's own window only, since it is
+         * the window that can report one.
+         */
+        onIntroReport?(
+          callback: (report: CompanionIntroReport) => void,
+        ): () => void;
+        takeIntroReports?(): Promise<CompanionIntroReport[]>;
         setInteractive?(interactive: boolean): void;
         moveBy?(dx: number, dy: number): void;
+        release?(): void;
         startVoice?(): void;
         toggleWatch?(pick?: CompanionCapturePick): void;
         listCaptureSources?(): Promise<CompanionCaptureSources>;
@@ -431,6 +442,13 @@ declare global {
           answer: DictationOfferAnswer,
           offerId: string,
         ): void;
+        answerPopover?(answer: CompanionPopoverAnswer, popoverId: string): void;
+        setPopoverSize?(popoverId: string, width: number, height: number): void;
+        setPopoverView?(popoverId: string, view: CompanionPopoverView): void;
+        setAttachedPopoverHeight?(popoverId: string, height: number): void;
+        togglePicker?(picker: CompanionPicker): void;
+        openLink?(url: string): void;
+        takesPrompts?(): Promise<boolean>;
         activate?(): void;
         setContext?(context: CompanionContext): void;
         advanceIntro?(action: CompanionIntroAction): void;

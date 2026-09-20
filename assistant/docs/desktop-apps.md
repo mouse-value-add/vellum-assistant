@@ -2,7 +2,7 @@
 
 Open the Desktop modal and choose **Add apps**. Calculator and Text Editor are optional lightweight Linux apps. **Install** adds the selected app and launcher in the background. **Add to desktop** creates a launcher for an app whose binary already exists. **Open** requires a connected desktop and opens a window there. Right-click its Plank icon and choose **Keep in Dock** to pin it. Users can remove pins without the application manager putting them back.
 
-The catalog uses fixed app IDs. Package names, executable paths, X resources and arguments are server-owned. The guardian-authorized gateway accepts the same flat and assistant-scoped route shapes as desktop setup. Neither installation nor launch targets the user's host. The default-off `assistant-desktop` flag and container gate apply to every request.
+The catalog uses fixed app IDs. Package names, executable paths, X resources and arguments are server-owned. The guardian-authorized gateway accepts the same flat and assistant-scoped route shapes as desktop setup. Neither installation nor launch targets the user's host. The `assistant-desktop` flag and platform-hosted container gate apply to every request. The app toolbar is hidden in view-only previews.
 
 ## Installation and licensing
 

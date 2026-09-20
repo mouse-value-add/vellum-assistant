@@ -36,6 +36,10 @@ import {
   buildToolApprovalSeedContentBlocks,
 } from "./approval-card-data.js";
 import {
+  intersectChannelAllowlist,
+  readChannelAllowlist,
+} from "./channel-allowlist.js";
+import {
   buildConversationCandidates,
   type ConversationCandidateSet,
   serializeCandidatesForPrompt,
@@ -52,6 +56,7 @@ import {
   nonEmpty,
   readPayloadObject,
   readPayloadString,
+  readPayloadStringArray,
 } from "./notification-utils.js";
 import { getPreferenceSummary } from "./preference-summary.js";
 import type { NotificationSignal, RoutingIntent } from "./signal.js";
@@ -833,6 +838,19 @@ function buildPassThroughDecision(params: {
   return decision;
 }
 
+function selectDefaultChannelsByUrgency(
+  urgency: NotificationSignal["attentionHints"]["urgency"],
+  availableChannels: NotificationChannel[],
+): NotificationChannel[] {
+  const isUrgent = urgency === "critical" || urgency === "high";
+  if (isUrgent) {
+    return [...availableChannels];
+  }
+  return availableChannels.includes("vellum")
+    ? ["vellum" as NotificationChannel]
+    : [];
+}
+
 /**
  * The deterministic guards every decision passes through once the model,
  * the assistant-tool pass-through, or the fallback has rendered copy.
@@ -870,30 +888,31 @@ export async function evaluateSignal(
   );
   if (signal.sourceChannel === "assistant_tool" && requestedBody) {
     const payload = signal.contextPayload as Record<string, unknown>;
-    const isUrgent =
-      signal.attentionHints.urgency === "critical" ||
-      signal.attentionHints.urgency === "high";
-    const defaultChannels: NotificationChannel[] = isUrgent
-      ? [...availableChannels]
-      : availableChannels.includes("vellum")
-        ? ["vellum" as NotificationChannel]
-        : [];
-    // Honor `--preferred-channels` as ADDITIVE push targets on top of
-    // the default channel set. The notification center (vellum) is the
-    // always-on canonical inbox; preferred channels add push surfaces
-    // on top, they never replace vellum. Disconnected channels are
-    // filtered out so we never try to deliver on something unavailable.
-    const preferredChannelsRaw = Array.isArray(payload.preferredChannels)
-      ? (payload.preferredChannels as unknown[]).filter(
-          (c): c is string => typeof c === "string",
-        )
-      : undefined;
+    const defaultChannels = selectDefaultChannelsByUrgency(
+      signal.attentionHints.urgency,
+      availableChannels,
+    );
+    // `channelAllowlist` is exclusive: only those available channels are
+    // selected. `preferredChannels` is additive on top of the default set
+    // (vellum stays the canonical inbox) and is ignored when an allowlist
+    // is present. Disconnected names are dropped so we never deliver on
+    // something unavailable.
+    const exclusiveAllowlist = readChannelAllowlist(payload);
+    const preferredChannelsRaw = readPayloadStringArray(
+      payload,
+      "preferredChannels",
+    );
     let selectedChannels = defaultChannels;
-    if (preferredChannelsRaw && preferredChannelsRaw.length > 0) {
+    if (exclusiveAllowlist) {
+      selectedChannels = intersectChannelAllowlist(
+        exclusiveAllowlist,
+        availableChannels,
+      );
+    } else if (preferredChannelsRaw && preferredChannelsRaw.length > 0) {
       const availableSet = new Set<string>(availableChannels);
-      const preferredAvailable = preferredChannelsRaw.filter((c) =>
-        availableSet.has(c),
-      ) as NotificationChannel[];
+      const preferredAvailable = preferredChannelsRaw.filter((c) => {
+        return availableSet.has(c);
+      }) as NotificationChannel[];
       if (preferredAvailable.length > 0) {
         selectedChannels = Array.from(
           new Set<NotificationChannel>([
@@ -923,6 +942,32 @@ export async function evaluateSignal(
       ),
       body: requestedBody,
       reasoningSummary: "assistant_reply pass-through",
+    });
+  }
+
+  // Scheduler-owned requested copy: the scheduler already authored the
+  // complete message. Ownership requires both the signal source and the
+  // payload marker so schedule.result (requestedMessage, no
+  // requestedBySource) and notify-mode (message, no requestedBySource)
+  // stay on their existing paths. Urgency still chooses channels; every
+  // selected channel keeps the producer body.
+  const requestedBySource = nonEmpty(
+    readPayloadString(signal.contextPayload, "requestedBySource"),
+  );
+  if (
+    signal.sourceChannel === "scheduler" &&
+    requestedBySource === "scheduler" &&
+    requestedBody
+  ) {
+    return buildPassThroughDecision({
+      signal,
+      availableChannels,
+      selectedChannels: selectDefaultChannelsByUrgency(
+        signal.attentionHints.urgency,
+        availableChannels,
+      ),
+      body: requestedBody,
+      reasoningSummary: "scheduler requested-message pass-through",
     });
   }
 

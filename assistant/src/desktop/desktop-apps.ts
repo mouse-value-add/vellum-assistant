@@ -27,11 +27,7 @@ export const DESKTOP_APPS = [
 ] as const;
 export type DesktopApp = (typeof DESKTOP_APPS)[number];
 export type DesktopAppState =
-  | "available"
-  | "installed"
-  | "added"
-  | "installing"
-  | "failed";
+  "available" | "installed" | "added" | "installing" | "failed";
 const log = getLogger("desktop-apps");
 
 export function desktopAppCommand(app: DesktopApp): string[] {

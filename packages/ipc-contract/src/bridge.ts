@@ -33,6 +33,10 @@ import type {
   CompanionCharacter,
   CompanionContext,
   CompanionIntroAction,
+  CompanionIntroReport,
+  CompanionPopoverAnswer,
+  CompanionPopoverView,
+  CompanionPicker,
   CompanionCapturePick,
   CompanionCaptureSources,
   CompanionSurfaceState,
@@ -58,11 +62,13 @@ import type {
   LockfileWriteResult,
   LocalAssistantStatusResult,
   NotificationActionEvent,
+  PrepareNotificationIdentityPayload,
   PowerEvent,
   VoiceModeChord,
   VoiceModeChordRegistrationResult,
   ResolvedHotkey,
   ShowNotificationPayload,
+  ResetNotificationIdentitiesPayload,
   SystemPermissionKind,
   SystemPermissionStateItem,
   SystemPermissionsState,
@@ -172,8 +178,7 @@ export type LocalListDevicesResult =
   | { ok: false; error: string };
 
 export type LocalRevokeDeviceResult =
-  | { ok: true }
-  | { ok: false; error: string };
+  { ok: true } | { ok: false; error: string };
 
 /**
  * A local assistant's avatar as read off its workspace by the host. `null`
@@ -331,7 +336,13 @@ export interface VellumBridge {
   };
   permissions: {
     getState(): Promise<SystemPermissionsState>;
-    request(kind: SystemPermissionKind): Promise<SystemPermissionStateItem>;
+    request(
+      kind: SystemPermissionKind,
+      presentation?: Pick<
+        ShowNotificationPayload,
+        "presentation" | "identity" | "sender"
+      >,
+    ): Promise<SystemPermissionStateItem>;
     openSettings(
       kind: SystemPermissionKind,
     ): Promise<SystemPermissionStateItem>;
@@ -535,6 +546,16 @@ export interface VellumBridge {
     show(
       payload: ShowNotificationPayload,
     ): Promise<{ success: boolean; errorMessage?: string }>;
+    /** Registers this preload's renderer lifetime before identity publication. */
+    registerIdentityPublisher?(publisherSessionId?: string): Promise<boolean>;
+    /** Optional until every installed desktop preload supports preparation. */
+    prepareIdentity?(
+      payload: PrepareNotificationIdentityPayload,
+    ): Promise<void>;
+    /** Optional until every installed desktop preload supports scoped reset. */
+    resetIdentities?(
+      payload: ResetNotificationIdentitiesPayload,
+    ): Promise<void>;
     onAction(callback: (event: NotificationActionEvent) => void): () => void;
     /**
      * Authoritative state of the window this renderer belongs to, pushed from
@@ -601,9 +622,50 @@ export interface VellumBridge {
   companion?: {
     getState(): Promise<CompanionSurfaceState | null>;
     onState(callback: (state: CompanionSurfaceState) => void): () => void;
+    /**
+     * Whether a run is staged right now, for a window that has just mounted
+     * its scrim: a push that landed before it subscribed is gone, exactly as
+     * for `getState`.
+     */
+    getIntroStage(): Promise<boolean>;
+    /**
+     * Whether the one-time introduction is being staged on the app's own
+     * window: the surface is held in front and stood in the middle of that
+     * window, rather than sitting where it lives.
+     *
+     * Sent to the app's window, not to the surface's. The surface knows the
+     * beat it is on from `onState`; this is for the window the run is staged
+     * over, which dims itself so the only thing lit is the thing being
+     * introduced. Fires on every change, and the run ending is one.
+     */
+    onIntroStage(callback: (staged: boolean) => void): () => void;
+    /**
+     * A moment of the run worth counting, as main saw it.
+     *
+     * Sent to the app's window for the reason the staging is, and one more:
+     * main sees every moment of a run and has no way to report one. That window
+     * is signed in, holds the user's answer about analytics, and shares its
+     * funnel session with the rest of onboarding, none of which is true of the
+     * surface's own route.
+     */
+    onIntroReport(callback: (report: CompanionIntroReport) => void): () => void;
+    /**
+     * The reports main held because no window was listening, handed over once
+     * one is. Taken rather than read, so the same moment is never reported
+     * twice.
+     */
+    takeIntroReports(): Promise<CompanionIntroReport[]>;
     setInteractive(interactive: boolean): void;
     /** Nudge the window, for dragging the surface around the desktop. */
     moveBy(dx: number, dy: number): void;
+    /**
+     * The hand has let go of the surface.
+     *
+     * Sent after every press ends, whether or not it moved anything: main
+     * knows whether a drag was in flight and what, if anything, the release
+     * settles. Mid-call, it is the drop that docks the bar to an edge.
+     */
+    release(): void;
     /**
      * Ask for a live-voice session, which is what Talk does.
      *
@@ -776,6 +838,42 @@ export interface VellumBridge {
      * holding it.
      */
     answerDictationOffer(answer: DictationOfferAnswer, offerId: string): void;
+    /**
+     * Answer the popover beside the surface, naming the popover it was drawn
+     * for. See the `answerCompanionPopover` command.
+     */
+    answerPopover(answer: CompanionPopoverAnswer, popoverId: string): void;
+    /**
+     * Report the size of the popover's card for the popover it is drawing, so
+     * main can size its window and show it once it has been measured.
+     */
+    setPopoverSize(popoverId: string, width: number, height: number): void;
+    /**
+     * Show the popover whole (Review, Enter), put it off (Not Now), or back to
+     * its short form. See `CompanionPopoverView`.
+     */
+    setPopoverView(popoverId: string, view: CompanionPopoverView): void;
+    /**
+     * Report how tall the popover drawn on a call's bar stands above the
+     * bar's centre line, from the surface's own window, so main can make the
+     * canvas tall enough to hold it.
+     */
+    setAttachedPopoverHeight(popoverId: string, height: number): void;
+    /**
+     * Open a picker from the call bar in the popover, or close it. See the
+     * `toggleCompanionPicker` command.
+     */
+    togglePicker?(picker: CompanionPicker): void;
+    /**
+     * Open a web link from the popover in the user's browser. Main refuses any
+     * scheme but http and https.
+     */
+    openLink(url: string): void;
+    /**
+     * Whether the surface is on screen to draw a prompt beside, so a caller
+     * that would otherwise bring the app forward can leave it where it is.
+     */
+    takesPrompts(): Promise<boolean>;
     /**
      * Bring Vellum forward on the conversation the user was last in, which is
      * what pressing the avatar asks for.

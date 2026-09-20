@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8,9 +9,15 @@ import {
 } from "react";
 
 import { CompanionCapturePicker } from "@/components/companion-capture-picker";
+import {
+  CompanionPopover,
+  CompanionPromptRow,
+} from "@/components/companion-popover";
 import { CompanionDictationOffer } from "@/components/companion-dictation-offer";
 import {
   CompanionIntro,
+  INTRO_DEMO_SHORTCUTS,
+  introDemoState,
   introPhase,
   introSpotlight,
 } from "@/components/companion-intro";
@@ -26,16 +33,23 @@ import { companionAccentHexFor } from "@/components/companion-accent";
 import {
   activateCompanionApp,
   answerCompanionDictationOffer,
+  answerCompanionPopover,
   answerCompanionWatchRetro,
+  openCompanionLink,
+  setCompanionAttachedPopoverHeight,
   advanceCompanionIntro,
   captureCompanionSourceThumbnail,
   clearCompanionMarks,
+  companionHasPickers,
+  toggleCompanionPicker,
   getCompanionState,
   listCompanionCaptureSources,
   moveCompanionBy,
+  releaseCompanionSurface,
   setCompanionAnnotating,
   setCompanionAnnotationTool,
   setCompanionInteractive,
+  setCompanionPopoverView,
   setCompanionScreenShare,
   showCompanionContextMenu,
   startCompanionVoice,
@@ -43,6 +57,12 @@ import {
   toggleCompanionWatch,
 } from "@/runtime/companion-surface";
 import { sendVoiceActivityControl } from "@/runtime/desktop-voice-activity";
+import {
+  getSystemPermissionsState,
+  openSystemPermissionSettings,
+  requestSystemPermission,
+  subscribeToSystemPermissions,
+} from "@/runtime/system-permissions";
 import { supportsChords } from "@/runtime/hotkey";
 import { callChordHints } from "@/domains/chat/voice/live-voice/call-chord-keys";
 import { useTranslation } from "@/i18n";
@@ -52,9 +72,12 @@ import type {
   CompanionCapturePick,
   CompanionCaptureSources,
   CompanionCardGrowth,
+  CompanionDock,
   CompanionCharacter,
   CompanionGrowth,
   CompanionIntroBeat,
+  CompanionPopover as CompanionPopoverContent,
+  CompanionPopoverView,
   CompanionSurfaceState,
   CompanionWatchRetro,
   CompanionDictating,
@@ -71,6 +94,23 @@ import type {
  * turn "take me back to Vellum" into a one-pixel nudge that does nothing.
  */
 const DRAG_SLOP = 3;
+
+/**
+ * How long the introduction holds on the answer to the click it asked for
+ * before walking on.
+ *
+ * Long enough to read the answer and the line under it about what the real
+ * thing will ask for, short enough that it still reads as the press having
+ * moved the run rather than as a card that stalled. See the Talk beat in
+ * `companion-intro.tsx`.
+ */
+const GREETED_MS = 2_400;
+
+/**
+ * The tallest a popover on the call's bar is drawn, in the surface's units.
+ * Past it the content scrolls between the header and the answers.
+ */
+const COMPANION_ATTACHED_POPOVER_MAX_HEIGHT = 440;
 
 /**
  * The companion surface inside its Electron canvas
@@ -101,6 +141,10 @@ export function CompanionSurfacePage() {
   // window position and is the only side that knows how much room the display
   // has above the surface.
   const [cardGrowth, setCardGrowth] = useState<CompanionCardGrowth>("up");
+  // Which edge of the display the call's bar rests on. Main's call, like the
+  // growths: it placed the window there and built the canvas for it. Absent
+  // from a shell that predates the docks, which is the bottom.
+  const [dock, setDock] = useState<CompanionDock>("bottom");
   // The creature's box in points and the pill's, which are the surface's whole
   // scale between them. Main sizes the window from both, so they arrive with
   // the state rather than being settings this window reads for itself.
@@ -137,6 +181,18 @@ export function CompanionSurfacePage() {
   // use it stands. Its own state for the reason `watchRetro` is.
   const [dictationOffer, setDictationOffer] = useState<
     CompanionDictationOfferWords | undefined
+  >(undefined);
+  // What the assistant is putting in front of the user, and how main has it
+  // shown. A call's bar carries the short form as a row of its own, and counts
+  // what was put off. The whole of it is the popover's own window.
+  // Whether the call's assistant has voices to pick from, so the voice
+  // chevron is drawn only when it has something to open.
+  const [voicesPickable, setVoicesPickable] = useState(false);
+  const [popover, setPopover] = useState<CompanionPopoverContent | undefined>(
+    undefined,
+  );
+  const [popoverView, setPopoverView] = useState<
+    CompanionPopoverView | undefined
   >(undefined);
   // Whether Watch is offered at all, which is the flag as main last read it.
   const [watchEnabled, setWatchEnabled] = useState(false);
@@ -194,6 +250,10 @@ export function CompanionSurfacePage() {
   // Main's, like the session: this window can reload mid-run, and a beat held
   // here would reset to the first one when it did.
   const [intro, setIntro] = useState<CompanionIntroBeat | null>(null);
+  // Taps of the real voice key, counted by the window that holds the binding.
+  // Main's, like the beat: the edges never reach this window, so the only way
+  // the introduction can show the key answering is to be told the count.
+  const [voiceKeyTaps, setVoiceKeyTaps] = useState(0);
   // Mirrors what main was last told, so a pointer crossing the pill does not
   // send the same instruction on every mouse-move.
   const interactiveRef = useRef(false);
@@ -212,6 +272,9 @@ export function CompanionSurfacePage() {
   const pickerRef = useRef<HTMLDivElement | null>(null);
   // The offer's card, for the reason the picker's is.
   const offerRef = useRef<HTMLDivElement | null>(null);
+  // The prompt row a call's bar carries above or below itself, for the reason
+  // the offer's card is.
+  const promptRef = useRef<HTMLDivElement | null>(null);
   // The strip of drawing tools, for the same reason: it stands off the pill,
   // and every button on it is a press.
   const drawToolsEl = useRef<HTMLDivElement | null>(null);
@@ -219,10 +282,10 @@ export function CompanionSurfacePage() {
   // moment the strip goes away under it.
   const overDrawToolsRef = useRef(false);
   // A callback rather than a ref object, so this window hears the strip go.
-  // The strip goes with the mode, with the share, with the call, and under
-  // an approval that takes the row, and it can go under a pointer resting
-  // on it that nothing then moves: no mouse-move arrives to say the pointer
-  // is now over empty canvas. Give the desktop back the way the picker does,
+  // The strip goes with the mode, with the share and with the call, and it
+  // can go under a pointer resting on it that nothing then moves: no
+  // mouse-move arrives to say the pointer is now over empty canvas. Give the
+  // desktop back the way the picker does,
   // and only when the pointer was on the strip: a press on Draw itself
   // leaves the pointer on the pill, which is still there to be pressed.
   const drawToolsRef = useCallback((element: HTMLDivElement | null) => {
@@ -248,6 +311,7 @@ export function CompanionSurfacePage() {
     const apply = (state: CompanionSurfaceState) => {
       setGrowth(state.growth);
       setCardGrowth(state.cardGrowth);
+      setDock(state.dock ?? "bottom");
       setAvatarBox(state.avatarBox);
       // The creature's box unless the pill has one of its own, which covers a
       // shell that predates the second axis: one box for both is the surface
@@ -274,6 +338,9 @@ export function CompanionSurfacePage() {
       setDictationText(state.dictationText ?? "");
       setWatchRetro(state.watchRetro);
       setDictationOffer(state.dictationOffer);
+      setPopover(state.popover);
+      setVoicesPickable(state.voicesPickable === true);
+      setPopoverView(state.popoverView);
       // Off unless the answer is positively yes, which covers a shell that
       // predates the field and a window whose flags have not synced yet. The
       // control this decides starts reading the user's screen, so a state of
@@ -299,6 +366,9 @@ export function CompanionSurfacePage() {
       // names none, and the strip must not offer what that shell cannot do.
       setAnnotationTool(state.annotationTool);
       setIntro(state.intro);
+      // Zero on a shell that predates the field, which is a surface that has
+      // been told about no taps rather than one that saw them and forgot.
+      setVoiceKeyTaps(state.voiceKeyTaps ?? 0);
     };
     const unsubscribe = subscribeCompanionState(apply);
     // The route chunk loads lazily after the window is created, so a state
@@ -397,6 +467,29 @@ export function CompanionSurfacePage() {
     });
   };
 
+  // A card asking for Screen Recording lists again once the grant lands, so
+  // the tiles replace the ask without the user reopening it. The host pushes
+  // permission state while it waits on Settings, which is what this hears.
+  const needsScreenRecording =
+    picking && captureSources?.screenRecordingGranted === false;
+  useEffect(() => {
+    if (!needsScreenRecording) {
+      return;
+    }
+    return subscribeToSystemPermissions((state) => {
+      if (state.screen?.status !== "granted") {
+        return;
+      }
+      const request = ++sourcesRequestRef.current;
+      void listCompanionCaptureSources().then((listed) => {
+        if (request !== sourcesRequestRef.current || listed === null) {
+          return;
+        }
+        setCaptureSources(listed);
+      });
+    });
+  }, [needsScreenRecording]);
+
   const onTeach = () => {
     if (!watchTargets) {
       toggleCompanionWatch();
@@ -448,6 +541,51 @@ export function CompanionSurfacePage() {
       setCompanionInteractive(false);
     }
   }, [dictationOffer]);
+
+  // Whether the last forwarded move put the pointer on the call's prompt row.
+  const overPromptRef = useRef(false);
+  // The popover on the call's bar, joined to it as one shape: while the bar
+  // is a row (docked to the top or bottom) and the popover is not put off.
+  // Main keeps the popover's own window away in exactly this case.
+  const promptShown =
+    popover !== undefined &&
+    popoverView !== undefined &&
+    popoverView !== "deferred" &&
+    (call !== null || dialing) &&
+    dock !== "left" &&
+    dock !== "right";
+  // How tall it stands above the bar, told to main, which grows the canvas to
+  // hold a list or a form taller than the room kept for a card. Named for the
+  // popover and measured again for each view, which is a shape of its own.
+  const promptId = promptShown ? popover?.id : undefined;
+  useLayoutEffect(() => {
+    const shelf = promptRef.current;
+    if (promptId === undefined || shelf === null) {
+      return;
+    }
+    const report = (): void => {
+      setCompanionAttachedPopoverHeight(
+        promptId,
+        shelf.getBoundingClientRect().height,
+      );
+    };
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(shelf);
+    return () => {
+      observer.disconnect();
+    };
+  }, [promptId, popoverView]);
+  // The row goes when it is answered, reviewed or put off, under a pointer
+  // that has not moved. Give the desktop back the way the offer's card does,
+  // and only when the pointer was on the row.
+  useEffect(() => {
+    if (!promptShown && overPromptRef.current) {
+      overPromptRef.current = false;
+      interactiveRef.current = false;
+      setCompanionInteractive(false);
+    }
+  }, [promptShown]);
 
   const onPick = (pick: CompanionCapturePick) => {
     sourcesRequestRef.current += 1;
@@ -522,6 +660,118 @@ export function CompanionSurfacePage() {
   // still going when a call starts must give way, because the call is the
   // user's own business and this is a caption.
   const introHeld = introPhase(intro);
+  /**
+   * The call the `call` beat borrows the pill's shape from, or null.
+   *
+   * Only while the card is actually on screen: a beat main still holds behind
+   * a real call must not put a second, fictional bar over the real one.
+   */
+  const demo = introShown
+    ? introDemoState(intro, t("companionIntro.call.line"))
+    : null;
+  /**
+   * Whether a call may already use the microphone, which is what the Talk beat
+   * reads to decide whether to mention the prompt the real thing will raise.
+   *
+   * Read while that beat is up and then polled, because the grant can be made
+   * in System Settings, which reports nothing back. Null until the first read
+   * lands and on every shell without a permission to check, which the card
+   * draws as nothing to mention.
+   */
+  const [micGranted, setMicGranted] = useState<boolean | null>(null);
+  /**
+   * Whether the creature is standing in the introduction's card rather than in
+   * its own spot, which is a beat asking to be clicked: the Talk beat, for the
+   * rehearsal, and the last beat, where the click starts a real session.
+   */
+  const staging = introShown && (intro === "talk" || intro === "try");
+  /**
+   * **The first beat is finished by doing the thing it describes.** It says a
+   * hover brings the creature out, and a hover does: the creature stands up on
+   * its own, and the run walks straight on to the card about the creature. A
+   * beat that asked for a hover and then waited for Next would be a beat that
+   * did not notice the user had done it.
+   *
+   * Real hover only, which is the pointer on the creature rather than on the
+   * card (see the hit test in `onSurfacePointerMove`), so reading the card
+   * cannot advance it.
+   */
+  const revealing = introShown && intro === "idle" && hovered;
+  useEffect(() => {
+    if (!revealing) {
+      return;
+    }
+    advanceCompanionIntro("next");
+  }, [revealing]);
+  /**
+   * Whether that click has happened, so the card can answer it.
+   *
+   * Cleared as the run moves, so a user who walks back to the beat is asked
+   * again rather than arriving at the answer to a press they have not made.
+   */
+  const [greeted, setGreeted] = useState(false);
+  useEffect(() => {
+    setGreeted(false);
+  }, [intro]);
+  /**
+   * Take the run's offer to start a conversation for real.
+   *
+   * **The mic is asked for before the call, not during it.** A session that
+   * opens by raising a system prompt is a session the user spends talking to a
+   * dialog. Electron's own ask is a prompt inside this app rather than a trip
+   * to System Settings, so the one press covers both and the call starts on the
+   * answer.
+   */
+  const takeIntroOffer = useCallback((): void => {
+    if (micGranted !== false) {
+      advanceCompanionIntro("try");
+      return;
+    }
+    void requestSystemPermission("microphone").then((item) => {
+      setMicGranted(item?.status === "granted");
+      advanceCompanionIntro("try");
+    });
+  }, [micGranted]);
+  /**
+   * The run carries on by itself once the click has landed.
+   *
+   * The card is answering a press the user just made, so the beat is over the
+   * moment they have read the answer: leaving them to find Next after being
+   * told they did it would be a card congratulating them and then waiting. Long
+   * enough to read six words, and cancelled if anything else moves the run
+   * first.
+   */
+  useEffect(() => {
+    if (!greeted) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      advanceCompanionIntro("next");
+    }, GREETED_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [greeted]);
+  const asking = introShown && intro === "talk";
+  useEffect(() => {
+    if (!asking) {
+      return;
+    }
+    const read = (): void => {
+      void getSystemPermissionsState().then((state) => {
+        setMicGranted(
+          state === null ? null : state.microphone.status === "granted",
+        );
+      });
+    };
+    read();
+    const timer = setInterval(read, 2_000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [asking]);
+  /** Whether what the pill is drawing is that demonstration. */
+  const demoing = demo !== null;
   const phase: CompanionSurfacePhase =
     call !== null || dialing
       ? "call"
@@ -570,6 +820,7 @@ export function CompanionSurfacePage() {
     // so the drag is dropped and this move goes on to hit-test normally.
     if (dragRef.current !== null && event.buttons === 0) {
       dragRef.current = null;
+      releaseCompanionSurface();
     }
     // A drag owns the pointer until it is released. Hit-testing through it
     // would collapse the surface the moment the cursor left the pill, which is
@@ -663,6 +914,15 @@ export function CompanionSurfacePage() {
         event.clientX,
         event.clientY,
       );
+    // The prompt row on the call's bar, for the same reason.
+    const promptRow = promptRef.current;
+    const onPrompt =
+      promptRow !== null &&
+      containsPoint(
+        promptRow.getBoundingClientRect(),
+        event.clientX,
+        event.clientY,
+      );
     // The drawing tools, for the same reason and for as long as they are drawn.
     const drawTools = drawToolsEl.current;
     const onDrawTools =
@@ -678,26 +938,47 @@ export function CompanionSurfacePage() {
     // thing.
     setHovered(onSurface);
     overDrawToolsRef.current = onDrawTools;
-    setInteractive(onSurface || onIntro || onPicker || onOffer || onDrawTools);
+    overPromptRef.current = onPrompt;
+    setInteractive(
+      onSurface || onIntro || onPicker || onOffer || onDrawTools || onPrompt,
+    );
   };
 
   // The avatar's own colour, shared with the display's edge glow so the two
   // lights cannot come apart. See `companionAccentHexFor`.
   const accentHex = companionAccentHexFor(call, publishedAccentHex, character);
 
+  // What was put off with Not Now, counted on the bar so it can be reviewed.
+  const deferredCount =
+    popover === undefined || popoverView !== "deferred"
+      ? 0
+      : popover.kind === "approvals"
+        ? popover.items.length
+        : 1;
+
   return (
     <div
       className="relative h-screen w-screen bg-transparent"
       onMouseMove={onMouseMove}
       onMouseUp={() => {
-        dragRef.current = null;
+        // The hand letting go, which main hears about whether or not the
+        // press moved anything: mid-call, a drag's release is the drop that
+        // docks the bar to an edge, and main is the side that knows whether
+        // this press was one.
+        if (dragRef.current !== null) {
+          dragRef.current = null;
+          releaseCompanionSurface();
+        }
       }}
       onPointerCancel={() => {
         // The capture goes with the pointer when the host takes it, so nothing
         // more reports this press, and a leave that deferred to the drag may
         // never arrive. Give the desktop back the way a leave does; a pointer
         // still on the pill re-arms it on its next move.
-        dragRef.current = null;
+        if (dragRef.current !== null) {
+          dragRef.current = null;
+          releaseCompanionSurface();
+        }
         setHovered(false);
         setInteractive(false);
       }}
@@ -724,6 +1005,7 @@ export function CompanionSurfacePage() {
         phase={phase}
         growth={growth}
         cardGrowth={cardGrowth}
+        dock={dock}
         // The two boxes main sized the window for. The surface spends the
         // options one on its own outermost box and uses both to place the pill
         // against a creature that may be a different size from it.
@@ -734,7 +1016,11 @@ export function CompanionSurfacePage() {
         // The creature notices the hand, in every state including mid-call.
         hovered={hovered}
         accentHex={accentHex}
-        call={call ?? undefined}
+        // The demonstrated session on the `controls` beat, which is not a
+        // session: every handler is withheld while it is drawn, so the bar is
+        // a picture of one. A real call always wins, since one arriving
+        // withdraws the card anyway.
+        call={call ?? demo?.call ?? undefined}
         // For the dial, which names who is being called. The call itself
         // carries its own name once it arrives.
         assistantName={assistantName}
@@ -792,7 +1078,18 @@ export function CompanionSurfacePage() {
         // it. The pill is open on those beats but the pointer is wherever the
         // user's hand happens to be, so without this the beat names a control
         // the user then has to hunt for among the others.
+        // Draws the control the beat is about as though the pointer were on
+        // it, and dims the rest of the bar. The pill is open on those beats but
+        // the pointer is wherever the user's hand happens to be, so without
+        // this the beat names a control the user then has to hunt for.
         spotlight={introSpotlight(intro)}
+        // The Talk beat calls the creature into the middle of its card, where
+        // the sentence asking for a click is.
+        avatarStaged={staging}
+        // The first beat is the surface as the user found it: the lit marker
+        // with the creature still inside. Their own hover brings it out, which
+        // is what that card is for.
+        avatarTucked={introShown && intro === "idle"}
         // Beside the pill rather than inside it, on the canvas main reserves
         // for a card. Null between runs, which is every launch after the
         // first.
@@ -817,7 +1114,26 @@ export function CompanionSurfacePage() {
               // one there is no name to introduce it by.
               assistantName={assistantName === "" ? undefined : assistantName}
               cardRef={introRef}
-              onAdvance={advanceCompanionIntro}
+              // Whether the microphone is already granted, which decides
+              // whether the Talk beat says the real thing will ask for it.
+              // Undefined rather than false while the first read is out, so the
+              // card does not promise a prompt that will not appear.
+              micGranted={micGranted ?? undefined}
+              // Whether the click the Talk beat asks for has landed, since the
+              // creature that takes it belongs to the surface rather than to
+              // the card.
+              greeted={greeted}
+              // Taps of the real key, which is what the drawn keycap answers:
+              // the beats that show it ask for the key rather than for the
+              // picture of it.
+              voiceKeyTaps={voiceKeyTaps}
+              onAdvance={(action) => {
+                if (action === "try") {
+                  takeIntroOffer();
+                  return;
+                }
+                advanceCompanionIntro(action);
+              }}
             />
           )
         }
@@ -874,7 +1190,25 @@ export function CompanionSurfacePage() {
         // forward on the conversation the call is in, which is where the room
         // and the transcript are; main decides what that means.
         onAvatarClick={() => {
-          if (draggedRef.current) {
+          if (draggedRef.current || demoing) {
+            return;
+          }
+          // **The rehearsal starts nothing.** The Talk beat calls the creature
+          // into the card and asks to be clicked, and the press is the user
+          // proving to themselves that they know how. Putting them into a live
+          // call for it would answer a rehearsal with the real thing, on the one
+          // surface where the real thing is a microphone switching on. So the
+          // card says it landed and the run moves on.
+          //
+          // The last beat is the opposite: the creature is in its card for the
+          // same reason, and the press is the finish. It goes out as the run's
+          // own `try`, which arms the microphone first and starts a session.
+          if (introShown && intro === "talk") {
+            setGreeted(true);
+            return;
+          }
+          if (introShown && intro === "try") {
+            takeIntroOffer();
             return;
           }
           if (call !== null || dialing) {
@@ -888,46 +1222,91 @@ export function CompanionSurfacePage() {
         // and this page only asks for it. What comes back is `watching`.
         // Wrapped so the click's event never rides along as a pick.
         onWatch={() => {
+          if (demoing) {
+            return;
+          }
           toggleCompanionWatch();
         }}
         // The way in, when there is a choice to make first. The stop stays on
         // `onWatch`; this is only ever the press with no session running.
-        onTeach={onTeach}
+        onTeach={demoing ? undefined : onTeach}
         picking={picking && pickingFor === "teach"}
         // The share, from main, and the two presses that move it. The stop
         // leaves this window the way a pick does, carrying nothing.
-        sharing={sharing}
-        shareEnabled={shareEnabled}
+        // The demonstration is showing a screen from the Draw beat on, since
+        // Draw acts on what is shared and is not drawn before there is one.
+        sharing={demo?.sharing ?? sharing}
+        // Armed for the demonstration whatever the desktop can actually do:
+        // the beat is about what a call offers, and a Share that is not drawn
+        // is a sentence about a control the user cannot see.
+        shareEnabled={demoing || shareEnabled}
         sharePicking={picking && pickingFor === "share"}
-        onShare={onShare}
-        onStopShare={() => {
-          setCompanionScreenShare();
-        }}
+        onShare={demoing ? undefined : onShare}
+        onStopShare={
+          demoing
+            ? undefined
+            : () => {
+                setCompanionScreenShare();
+              }
+        }
         // Drawing on what is shared. Main's both ways: the press asks, and
         // `annotating` above is what main did with the ask. Nothing is kept
         // here, so a press main refuses (the share ended between the two)
         // leaves the control drawn exactly as the desktop actually is.
         annotating={annotating}
-        onAnnotate={(next) => {
-          setCompanionAnnotating(next);
-        }}
+        onAnnotate={
+          demoing
+            ? undefined
+            : (next) => {
+                setCompanionAnnotating(next);
+              }
+        }
         // Clear, offered while there is something on the shared surface to
         // take down: the assistant's marks, or the mode the user's own ink is
         // drawn under, and only from a shell with a Clear to answer it.
         // Main's both ways, like Draw: the press asks, and the marks going
         // from the pushed state is what happened.
         marked={clearable && (pointedAt || annotating)}
-        onClearMarks={() => {
-          clearCompanionMarks();
-        }}
+        onClearMarks={
+          demoing
+            ? undefined
+            : () => {
+                clearCompanionMarks();
+              }
+        }
+        // The chevrons beside the mic and the assistant's audio. The window
+        // holding the call fills the picker; what the popover shows is how
+        // the chevron knows it is open. Withheld while a beat of the
+        // introduction is borrowing the bar's shape, like every other handler
+        // on that fictional call.
+        openPicker={
+          popover?.kind === "microphones" || popover?.kind === "voices"
+            ? popover.kind
+            : undefined
+        }
+        voicesPickable={voicesPickable}
+        onPicker={
+          !demoing && companionHasPickers()
+            ? (picker) => {
+                toggleCompanionPicker(picker);
+              }
+            : undefined
+        }
         // The tool, main's the same way: the press asks, and `annotationTool`
         // above is what main did with the ask.
         annotationTool={annotationTool}
-        onAnnotationTool={(tool) => {
-          setCompanionAnnotationTool(tool);
-        }}
+        onAnnotationTool={
+          demoing
+            ? undefined
+            : (tool) => {
+                setCompanionAnnotationTool(tool);
+              }
+        }
         drawToolsRef={drawToolsRef}
-        shortcuts={shortcuts}
+        // The demonstration names the keys itself: the captions are what the
+        // beat is pointing at, and on a desktop with no session armed there
+        // would otherwise be nothing beside the controls to read.
+        shortcuts={demoing ? INTRO_DEMO_SHORTCUTS : shortcuts}
         // Beside the bar while the choice is open, on the canvas main
         // reserves for a card. The pick leaves this window the way every
         // press does; the frame that answers it is main's.
@@ -950,16 +1329,66 @@ export function CompanionSurfacePage() {
                   : undefined
               }
               onPick={onPick}
+              onAllowScreenRecording={() => {
+                void openSystemPermissionSettings("screen").catch(
+                  () => undefined,
+                );
+              }}
             />
           ) : null
         }
+        prompt={
+          !promptShown || popover === undefined ? null : popoverView ===
+              "row" &&
+            (popover.kind === "approvals" || popover.kind === "secret") ? (
+            <CompanionPromptRow
+              popover={popover}
+              onAnswer={(answer) => {
+                answerCompanionPopover(answer, popover.id);
+              }}
+              onView={(view) => {
+                setCompanionPopoverView(popover.id, view);
+              }}
+            />
+          ) : (
+            <CompanionPopover
+              // Remounted per popover, so nothing drawn for one carries to
+              // the next.
+              key={popover.id}
+              attached
+              popover={popover}
+              view={popoverView ?? "expanded"}
+              style={{ maxHeight: COMPANION_ATTACHED_POPOVER_MAX_HEIGHT }}
+              onAnswer={(answer) => {
+                answerCompanionPopover(answer, popover.id);
+              }}
+              onView={(view) => {
+                setCompanionPopoverView(popover.id, view);
+              }}
+              onOpenLink={(url) => {
+                openCompanionLink(url);
+              }}
+            />
+          )
+        }
+        promptRef={promptRef}
+        promptsDeferred={deferredCount}
+        onReviewPrompts={() => {
+          if (popover !== undefined) {
+            setCompanionPopoverView(popover.id, "expanded");
+          }
+        }}
         // Out through main and back down into whichever renderer holds the
         // session. This page has no session to act on: it draws one.
-        onControl={(action, requestId) => {
-          sendVoiceActivityControl(
-            requestId === undefined ? { action } : { action, requestId },
-          );
-        }}
+        onControl={
+          demoing
+            ? undefined
+            : (action, requestId) => {
+                sendVoiceActivityControl(
+                  requestId === undefined ? { action } : { action, requestId },
+                );
+              }
+        }
       />
     </div>
   );

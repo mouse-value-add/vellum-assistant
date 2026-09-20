@@ -14,15 +14,22 @@ import {
 import type { LoopToolExecutor } from "../agent/loop.js";
 import type { AssistantEvent } from "../api/index.js";
 import { stripInjectionsForCompaction } from "../context/strip-injections.js";
+import type { AttachmentResolutionResult } from "../daemon/conversation-attachments.js";
 import {
   queueConversationNotice,
   resetConversationNoticesForTests,
 } from "../daemon/conversation-notices.js";
+import { desktopAutomationLease } from "../desktop/desktop-automation-lease.js";
 import { getConversationDirName } from "../persistence/conversation-directories.js";
 import type { UserPromptSubmitContext } from "../plugin-api/types.js";
 import { resetPluginRegistryAndRegisterDefaults } from "../plugins/defaults/index.js";
 import { registerPlugin } from "../plugins/registry.js";
-import type { Message, Provider, ToolDefinition } from "../providers/types.js";
+import type {
+  Message,
+  Provider,
+  SendMessageOptions,
+  ToolDefinition,
+} from "../providers/types.js";
 import { ContextOverflowError } from "../providers/types.js";
 import {
   resolveUsageAttribution,
@@ -40,6 +47,11 @@ const conversationCrudRealSnapshot = {
 const conversationDiskViewRealSnapshot = {
   ...(createRequire(import.meta.url)(
     "../persistence/conversation-disk-view.js",
+  ) as Record<string, unknown>),
+};
+const channelReplyDeliveryRealSnapshot = {
+  ...(createRequire(import.meta.url)(
+    "../runtime/channel-reply-delivery.js",
   ) as Record<string, unknown>),
 };
 // Disable the catalog default so resolution lands on llm.default.
@@ -334,12 +346,18 @@ const deleteMessageByIdMock = mock(() => ({
   segmentIds: [],
   deletedSummaryIds: [],
 }));
-const reserveMessageMock = mock(async () => ({ id: "msg-reserve" }));
+const reserveMessageMock = mock(async () => ({
+  id: "msg-reserve",
+  createdAt: 1_700_000_000_050,
+}));
 /** Persisted rows the loop reads back. Empty unless a test seeds one. */
 let mockStoredMessages: unknown[] = [];
 const updateMessageContentMock = mock(() => {});
 const finalizeMessageContentMock = mock(() => {});
-const addMessageMock = mock(() => ({ id: "mock-msg-id" }));
+const addMessageMock = mock(() => ({
+  id: "mock-msg-id",
+  createdAt: 1_700_000_000_100,
+}));
 const updateConversationContextWindowMock = mock(() => {});
 mock.module("../persistence/conversation-crud.js", () => ({
   setConversationProcessingStartedAt: () => {},
@@ -418,6 +436,10 @@ afterAll(() => {
     "../persistence/conversation-disk-view.js",
     () => conversationDiskViewRealSnapshot,
   );
+  mock.module(
+    "../runtime/channel-reply-delivery.js",
+    () => channelReplyDeliveryRealSnapshot,
+  );
 });
 
 const syncMessageToDiskMock = mock(() => {});
@@ -426,6 +448,19 @@ mock.module("../persistence/conversation-disk-view.js", () => ({
   syncMessageToDisk: syncMessageToDiskMock,
   rebuildConversationDiskViewFromDbState:
     rebuildConversationDiskViewFromDbStateMock,
+}));
+
+let mockTurnReplyMessageId: string | undefined;
+const resolveTurnReplyMessageIdMock = mock(
+  (
+    _conversationId: string,
+    _userMessageId: string | undefined,
+    fallbackMessageId: string,
+  ) => mockTurnReplyMessageId ?? fallbackMessageId,
+);
+mock.module("../runtime/channel-reply-delivery.js", () => ({
+  ...channelReplyDeliveryRealSnapshot,
+  resolveTurnReplyMessageId: resolveTurnReplyMessageIdMock,
 }));
 
 mock.module("../apps/app-store.js", () => ({
@@ -580,12 +615,16 @@ mock.module("../daemon/conversation-usage.js", () => ({
   recordUsage: recordUsageMock,
 }));
 
-const resolveAssistantAttachmentsMock = mock(async () => ({
-  assistantAttachments: [],
-  emittedAttachments: [],
-  directiveWarnings: [],
-  persistedFiles: [],
-}));
+const resolveAssistantAttachmentsMock = mock(
+  async (): Promise<AttachmentResolutionResult> => ({
+    assistantAttachments: [],
+    emittedAttachments: [],
+    directiveWarnings: [],
+    persistedFiles: [],
+    linkedAttachmentIds: [],
+    computerUseScreenshotAttachmentIds: [],
+  }),
+);
 mock.module("../daemon/conversation-attachments.js", () => ({
   resolveAssistantAttachments: resolveAssistantAttachmentsMock,
   approveHostAttachmentRead: async () => true,
@@ -687,7 +726,7 @@ mock.module("../persistence/llm-request-log-store.js", () => ({
 // ── Imports (after mocks) ────────────────────────────────────────────
 
 import { AgentLoop } from "../agent/loop.js";
-import type { Conversation } from "../daemon/conversation.js";
+import { Conversation } from "../daemon/conversation.js";
 import {
   applyCompactionResult,
   runAgentLoopImpl,
@@ -764,6 +803,19 @@ function makeCtx(
     toolExecutor,
   });
 
+  const modeSessions = {
+    getTurnOwner: () => undefined,
+    getTerminalDisposition: () => undefined,
+    keepsSessionOpenAfterTurn: () => false,
+    trackPersistedRow: () => false,
+    recordStructuralWait: () => false,
+    invalidateStructuralWait: mock(() => false),
+    beginDraining: () => false,
+    finalizeTurn: () => false,
+    releaseTurn: () => false,
+    transferTurn: () => false,
+  } as unknown as Conversation["modeSessions"];
+
   const ctx = asConversation({
     conversationId: "test-conv",
     messages: [
@@ -811,6 +863,7 @@ function makeCtx(
     pendingSurfaceActions: new Map(),
     surfaceActionRequestIds: new Set<string>(),
     currentTurnSurfaces: [],
+    modeSessions,
 
     workingDir: "/tmp",
     channelCapabilities: undefined,
@@ -892,6 +945,26 @@ function makeCtx(
   }
   fakeContextWindowManagers.set(conversationId, ctx.contextWindowManager);
   return ctx;
+}
+
+function makeSendUserMessageCtx(): Conversation {
+  return makeCtx({
+    currentCallSite: "mainAgent",
+    providerResponses: [
+      toolUseResponse("tu_1", "send_user_message", {
+        message: "Here is the result.",
+      }),
+      textResponse("Finished delivery."),
+    ],
+    loopTools: [
+      {
+        name: "send_user_message",
+        description: "deliver",
+        input_schema: { type: "object" },
+      },
+    ],
+    toolExecutor: async () => ({ content: "Delivered.", isError: false }),
+  });
 }
 
 /**
@@ -987,6 +1060,8 @@ beforeEach(() => {
   setAgentLoopExitReasonOnLatestLogMock.mockClear();
   syncMessageToDiskMock.mockClear();
   rebuildConversationDiskViewFromDbStateMock.mockClear();
+  mockTurnReplyMessageId = undefined;
+  resolveTurnReplyMessageIdMock.mockClear();
   emitAssistantReplyNotificationMock.mockClear();
   updateMessageMetadataMock.mockClear();
   updateMessageMetadataMock.mockImplementation(() => {});
@@ -1038,6 +1113,8 @@ beforeEach(() => {
     emittedAttachments: [],
     directiveWarnings: [],
     persistedFiles: [],
+    linkedAttachmentIds: [],
+    computerUseScreenshotAttachmentIds: [],
   }));
   mockMessageById = null;
   resetConversationNoticesForTests();
@@ -1048,7 +1125,388 @@ beforeEach(() => {
   resetPluginRegistryAndRegisterDefaults();
 });
 
+function makeModeSessionDouble(options?: {
+  terminalDisposition?: {
+    status: "completed" | "interrupted";
+    endReason: string;
+  };
+  structuralWait?: boolean;
+  sourceLifetime?: boolean;
+}) {
+  const owner = { id: "session-1", mode: "computer_use" as const };
+  const trackPersistedRow = mock(() => true);
+  const recordStructuralWait = mock(() => options?.structuralWait ?? false);
+  const beginDraining = mock(() => true);
+  const finalizeTurn = mock(() => true);
+  const releaseTurn = mock(() => true);
+  const transferTurn = mock(() => true);
+  const coordinator = {
+    getTurnOwner: () => owner,
+    getTerminalDisposition: () => options?.terminalDisposition,
+    keepsSessionOpenAfterTurn: () => options?.sourceLifetime ?? false,
+    trackPersistedRow,
+    recordStructuralWait,
+    beginDraining,
+    finalizeTurn,
+    releaseTurn,
+    transferTurn,
+  } as unknown as Conversation["modeSessions"];
+  return {
+    coordinator,
+    trackPersistedRow,
+    recordStructuralWait,
+    beginDraining,
+    finalizeTurn,
+    releaseTurn,
+    transferTurn,
+  };
+}
+
+describe("prompt cache warming", () => {
+  test("attributes provider usage to the conversation", async () => {
+    const sendMessage = mock(
+      async (_messages: Message[], _options?: SendMessageOptions) =>
+        textResponse("unused"),
+    );
+    const conversation = Object.assign(
+      Object.create(Conversation.prototype) as object,
+      {
+        conversationId: "conv-cache-warm-test",
+        messages: [],
+        provider: { name: "mock-provider", sendMessage },
+        agentLoop: { getResolvedTools: () => [] },
+        buildCurrentSystemPrompt: () => "system prompt",
+      },
+    ) as unknown as Conversation;
+
+    await conversation.warmPromptCache();
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[1]?.config).toMatchObject({
+      callSite: "mainAgent",
+      conversationId: "conv-cache-warm-test",
+      max_tokens: 16,
+      selectionSeed: "conv-cache-warm-test",
+    });
+    expect(
+      sendMessage.mock.calls[0]?.[1]?.config?.usageTracking,
+    ).toBeUndefined();
+  });
+
+  test("stays non-rejecting when request preparation fails", async () => {
+    const sendMessage = mock(async () => textResponse("unused"));
+    const conversation = Object.assign(
+      Object.create(Conversation.prototype) as object,
+      {
+        conversationId: "conv-cache-warm-test",
+        messages: [],
+        provider: { name: "mock-provider", sendMessage },
+        agentLoop: {
+          getResolvedTools: () => {
+            throw new Error("tool resolution failed");
+          },
+        },
+        buildCurrentSystemPrompt: () => "system prompt",
+      },
+    ) as unknown as Conversation;
+
+    await expect(conversation.warmPromptCache()).resolves.toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  test("does not rebuild a system prompt explicitly removed by a hook", async () => {
+    const sendMessage = mock(
+      async (_messages: Message[], _options?: SendMessageOptions) =>
+        textResponse("unused"),
+    );
+    const buildCurrentSystemPrompt = mock(() => "rebuilt prompt");
+    const conversation = Object.assign(
+      Object.create(Conversation.prototype) as object,
+      {
+        conversationId: "conv-cache-warm-test",
+        messages: [],
+        provider: { name: "mock-provider", sendMessage },
+        agentLoop: { getResolvedTools: () => [] },
+        buildCurrentSystemPrompt,
+      },
+    ) as unknown as Conversation;
+
+    await conversation.warmPromptCache({ systemPrompt: null, tools: [] });
+
+    expect(buildCurrentSystemPrompt).not.toHaveBeenCalled();
+    expect(sendMessage.mock.calls[0]?.[1]?.systemPrompt).toBeUndefined();
+  });
+});
+
 describe("session-agent-loop", () => {
+  describe("mode session settlement", () => {
+    test.each(["reply", "provider error"] as const)(
+      "row tracking failures preserve tool output and the final %s",
+      async (outcome) => {
+        const sessions = makeModeSessionDouble();
+        sessions.trackPersistedRow.mockImplementation(() => {
+          throw new Error("session row tracking unavailable");
+        });
+        for (let index = 1; index <= 3; index += 1) {
+          reserveMessageMock.mockImplementationOnce(async () => ({
+            id: `msg-tracking-${index}`,
+            createdAt: 1_700_000_000_050 + index,
+          }));
+        }
+        mockMessageById = {
+          id: "msg-tracking-2",
+          conversationId: "test-conv",
+          createdAt: 1_700_000_000_052,
+          role: "user",
+          content: "[]",
+          metadata: null,
+        };
+        const scripted = createMockProvider([
+          toolUseResponse("tool-123", "file_read", {}),
+          outcome === "reply"
+            ? textResponse("Finished reading")
+            : new Error("upstream unavailable"),
+        ]);
+        let savedToolOutputBeforeFollowup = false;
+        const provider: Provider = {
+          ...scripted.provider,
+          async sendMessage(messages, options) {
+            if (scripted.calls.length === 1) {
+              savedToolOutputBeforeFollowup = inflightDeltaFiles().some(
+                (path) => readFileSync(path, "utf8").includes("file content"),
+              );
+            }
+            return scripted.provider.sendMessage(messages, options);
+          },
+        };
+        const executeTool = mock(async () => ({
+          content: "file content",
+          isError: false,
+        }));
+        const ctx = makeCtx({
+          modeSessions: sessions.coordinator,
+          loopProvider: provider,
+          loopTools: [
+            {
+              name: "file_read",
+              description: "Read a file",
+              input_schema: { type: "object", properties: {} },
+            },
+          ],
+          toolExecutor: executeTool,
+        });
+        const events: AssistantEvent[] = [];
+
+        await runAgentLoopImpl(ctx, "read the file", "msg-user-123", (event) =>
+          events.push(event),
+        );
+
+        expect(executeTool).toHaveBeenCalledTimes(1);
+        expect(scripted.calls).toHaveLength(2);
+        expect(savedToolOutputBeforeFollowup).toBe(true);
+        expect(
+          events.filter((event) => event.type === "assistant_turn_start"),
+        ).toHaveLength(2);
+        expect(
+          events.filter((event) => event.type === "message_complete"),
+        ).toHaveLength(1);
+        expect(events.some((event) => event.type === "error")).toBe(false);
+        expect(inflightDeltaFiles()).toHaveLength(0);
+        expect(sessions.finalizeTurn).toHaveBeenCalledTimes(1);
+        const finalized = (
+          finalizeMessageContentMock.mock.calls as unknown as Array<
+            [string, string, unknown]
+          >
+        ).map(([id, content]) => ({ id, content }));
+        expect(finalized).toContainEqual({
+          id: "msg-tracking-2",
+          content: expect.stringContaining("file content"),
+        });
+        if (outcome === "reply") {
+          expect(finalized).toContainEqual({
+            id: "msg-tracking-3",
+            content: expect.stringContaining("Finished reading"),
+          });
+          expect(addMessageMock).not.toHaveBeenCalled();
+        } else {
+          expect(addMessageMock).toHaveBeenCalledTimes(1);
+          expect(backfillMessageIdOnLogsMock).toHaveBeenCalledWith(
+            "test-conv",
+            "mock-msg-id",
+          );
+          expect(ctx.messages.at(-1)?.content).toEqual([
+            {
+              type: "text",
+              text: mockConversationErrorClassification.userMessage,
+            },
+          ]);
+        }
+      },
+    );
+
+    test("finalizes an owned turn after its assistant output settles", async () => {
+      const sessions = makeModeSessionDouble();
+      const ctx = makeCtx({ modeSessions: sessions.coordinator });
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", () => {});
+
+      expect(sessions.trackPersistedRow).toHaveBeenCalledWith(
+        "test-req",
+        expect.any(String),
+        expect.anything(),
+      );
+      expect(sessions.beginDraining).not.toHaveBeenCalled();
+      expect(sessions.finalizeTurn).toHaveBeenCalledWith({
+        turnId: "test-req",
+        status: "completed",
+        endedAt: expect.any(Number),
+        endReason: "turn_settled",
+        lastActivityAt: expect.any(Number),
+      });
+    });
+
+    test.each(["throw", "conflict"] as const)(
+      "keeps a delivered reply successful after a finalization %s",
+      async (failedOperation) => {
+        const sessions = makeModeSessionDouble();
+        sessions.finalizeTurn.mockImplementation(() => {
+          if (failedOperation === "throw") {
+            throw new Error("session settlement unavailable");
+          }
+          return false;
+        });
+        const ctx = makeCtx({ modeSessions: sessions.coordinator });
+        const events: AssistantEvent[] = [];
+
+        await runAgentLoopImpl(ctx, "hello", "msg-1", (event) =>
+          events.push(event),
+        );
+
+        expect(
+          events.filter((event) => event.type === "message_complete"),
+        ).toHaveLength(1);
+        expect(events.some((event) => event.type === "error")).toBe(false);
+        expect(sessions.releaseTurn).toHaveBeenCalledWith("test-req", {
+          status: "completed",
+          endReason: "turn_settled",
+        });
+      },
+    );
+
+    test("releases a retired source only after final output settles", async () => {
+      const sessions = makeModeSessionDouble({
+        terminalDisposition: {
+          status: "interrupted",
+          endReason: "browser_cancelled",
+        },
+      });
+      const ctx = makeCtx({ modeSessions: sessions.coordinator });
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", () => {});
+
+      expect(sessions.beginDraining).not.toHaveBeenCalled();
+      expect(sessions.releaseTurn).toHaveBeenCalledWith("test-req", {
+        status: "completed",
+        endReason: "turn_settled",
+      });
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+    });
+
+    test("keeps a source-lifetime session active across a cancelled turn", async () => {
+      const abortController = new AbortController();
+      const provider: Provider = {
+        name: "mock",
+        async sendMessage(_messages, options) {
+          options?.onEvent?.({ type: "text_delta", text: "partial" });
+          abortController.abort();
+          return textResponse("partial");
+        },
+      };
+      const sessions = makeModeSessionDouble({ sourceLifetime: true });
+      const cancelledCtx = makeCtx({
+        loopProvider: provider,
+        abortController,
+        modeSessions: sessions.coordinator,
+      });
+
+      await runAgentLoopImpl(cancelledCtx, "hello", "msg-1", () => {});
+
+      expect(sessions.releaseTurn).toHaveBeenCalledWith("test-req");
+      expect(sessions.beginDraining).not.toHaveBeenCalled();
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+
+      const laterCtx = makeCtx({ modeSessions: sessions.coordinator });
+      await runAgentLoopImpl(laterCtx, "later", "msg-2", () => {});
+
+      expect(sessions.releaseTurn).toHaveBeenCalledTimes(2);
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+    });
+
+    test("keeps a source-lifetime session active across a failed turn", async () => {
+      const sessions = makeModeSessionDouble({ sourceLifetime: true });
+      const failedCtx = makeCtx({
+        loopProvider: {
+          name: "mock",
+          async sendMessage() {
+            throw new Error("provider failure");
+          },
+        } as Provider,
+        modeSessions: sessions.coordinator,
+      });
+
+      await runAgentLoopImpl(failedCtx, "hello", "msg-1", () => {});
+
+      expect(sessions.releaseTurn).toHaveBeenCalledWith("test-req");
+      expect(sessions.beginDraining).not.toHaveBeenCalled();
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+    });
+
+    test("keeps an owned turn open for an exact structural response", async () => {
+      const sessions = makeModeSessionDouble({ structuralWait: true });
+      const ctx = makeCtx({
+        modeSessions: sessions.coordinator,
+        pendingSurfaceActions: new Map([
+          ["surface-1", { surfaceType: "form" }],
+        ]) as Conversation["pendingSurfaceActions"],
+      });
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", () => {});
+
+      expect(sessions.recordStructuralWait).toHaveBeenCalledWith("test-req", {
+        kind: "surface",
+        responseId: "surface-1",
+      });
+      expect(sessions.releaseTurn).toHaveBeenCalledWith("test-req");
+      expect(sessions.beginDraining).not.toHaveBeenCalled();
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+    });
+
+    test("transfers ownership to the queued turn at a checkpoint", async () => {
+      const sessions = makeModeSessionDouble();
+      const ctx = makeCtx({
+        modeSessions: sessions.coordinator,
+        providerResponses: [toolUseResponse("tu-1", "file_read", {})],
+        loopTools: [
+          {
+            name: "file_read",
+            description: "Read a file",
+            input_schema: { type: "object", properties: {} },
+          },
+        ],
+        toolExecutor: async () => ({ content: "file content", isError: false }),
+        canHandoffAtCheckpoint: () => true,
+        queue: {
+          snapshot: () => [{ requestId: "msg-2" }],
+        } as unknown as Conversation["queue"],
+      });
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", () => {});
+
+      expect(sessions.transferTurn).toHaveBeenCalledWith("test-req", "msg-2");
+      expect(sessions.finalizeTurn).not.toHaveBeenCalled();
+    });
+  });
+
   describe("user-prompt-submit hook failures", () => {
     test("passes the effective profile to hooks even when it was already announced", async () => {
       // Both profiles are complete (provider + model) so each is a usable
@@ -1663,6 +2121,30 @@ describe("session-agent-loop", () => {
     });
   });
 
+  test("releases desktop control before a completed turn accepts another message", async () => {
+    const events: AssistantEvent[] = [];
+    const ctx = makeCtx();
+    const release = spyOn(desktopAutomationLease, "releaseForConversation");
+    const setProcessing = ctx.setProcessing.bind(ctx);
+    ctx.setProcessing = (processing) => {
+      if (!processing) {
+        expect(release).toHaveBeenCalledWith(ctx.conversationId);
+      }
+      setProcessing(processing);
+    };
+    try {
+      await runAgentLoopImpl(ctx, "hello", "msg-1", (event) =>
+        events.push(event),
+      );
+      expect(events.some((event) => event.type === "message_complete")).toBe(
+        true,
+      );
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      release.mockRestore();
+    }
+  });
+
   describe("tool execution errors via agent loop", () => {
     test("error events from agent loop are classified and emitted", async () => {
       const events: AssistantEvent[] = [];
@@ -1697,6 +2179,157 @@ describe("session-agent-loop", () => {
       expect(conversationError).toBeUndefined();
       const complete = events.find((e) => e.type === "message_complete");
       expect(complete).toBeDefined();
+    });
+
+    test("carries automatic screenshot provenance on message completion", async () => {
+      resolveAssistantAttachmentsMock.mockImplementation(async () => ({
+        assistantAttachments: [],
+        emittedAttachments: [
+          {
+            id: "screenshot-1",
+            filename: "computer-use-click.png",
+            mimeType: "image/png",
+            data: "c2NyZWVuc2hvdA==",
+            sourceType: "tool_block" as const,
+            computerUseScreenshot: true,
+          },
+        ],
+        directiveWarnings: [],
+        persistedFiles: [],
+        linkedAttachmentIds: ["screenshot-1"],
+        computerUseScreenshotAttachmentIds: ["screenshot-1"],
+      }));
+      const events: AssistantEvent[] = [];
+      const ctx = makeCtx({ providerResponses: [textResponse("Done")] });
+
+      await runAgentLoopImpl(ctx, "click it", "msg-1", (event) =>
+        events.push(event),
+      );
+
+      const complete = events.find(
+        (event) => event.type === "message_complete",
+      );
+      expect(complete?.attachments?.[0]?.computerUseScreenshot).toBe(true);
+      const syncCalls = syncMessageToDiskMock.mock.calls as unknown as Array<
+        [string, string, number]
+      >;
+      const finalRowSyncs = syncCalls.filter(
+        (call) => call[1] === "msg-reserve",
+      );
+      expect(finalRowSyncs).toHaveLength(1);
+    });
+
+    test("defers an earlier delivered attachment reply to ordered turn settlement", async () => {
+      const featureFlags = await import("../config/assistant-feature-flags.js");
+      const flagSpy = spyOn(
+        featureFlags,
+        "isAssistantFeatureFlagEnabled",
+      ).mockImplementation((key: string) => key === "send-user-message");
+      reserveMessageMock
+        .mockImplementationOnce(async () => ({
+          id: "msg-delivered-reply",
+          createdAt: 1_700_000_000_050,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-tool-result",
+          createdAt: 1_700_000_000_050,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-final-private",
+          createdAt: 1_700_000_000_050,
+        }));
+      mockTurnReplyMessageId = "msg-delivered-reply";
+      resolveAssistantAttachmentsMock.mockImplementation(async () => ({
+        assistantAttachments: [],
+        emittedAttachments: [],
+        directiveWarnings: [],
+        persistedFiles: [],
+        linkedAttachmentIds: ["attachment-1"],
+        computerUseScreenshotAttachmentIds: [],
+      }));
+      const assistantSyncsAtTerminal: string[][] = [];
+      const ctx = makeSendUserMessageCtx();
+
+      try {
+        await runAgentLoopImpl(ctx, "click it", "msg-1", (event) => {
+          if (event.type !== "message_complete") {
+            return;
+          }
+          const calls = syncMessageToDiskMock.mock.calls as unknown as Array<
+            [string, string, number]
+          >;
+          assistantSyncsAtTerminal.push(
+            calls
+              .map((call) => call[1])
+              .filter((id) =>
+                ["msg-delivered-reply", "msg-final-private"].includes(id),
+              ),
+          );
+        });
+      } finally {
+        flagSpy.mockRestore();
+      }
+
+      expect(resolveTurnReplyMessageIdMock).toHaveBeenCalledWith(
+        "test-conv",
+        "msg-1",
+        "msg-final-private",
+      );
+      expect(assistantSyncsAtTerminal.at(-1)).toEqual([]);
+      const calls = syncMessageToDiskMock.mock.calls as unknown as Array<
+        [string, string, number]
+      >;
+      expect(
+        calls
+          .map((call) => call[1])
+          .filter((id) =>
+            ["msg-delivered-reply", "msg-final-private"].includes(id),
+          ),
+      ).toEqual(["msg-delivered-reply", "msg-final-private"]);
+    });
+
+    test("does not queue an earlier delivered reply without a linked attachment", async () => {
+      const featureFlags = await import("../config/assistant-feature-flags.js");
+      const flagSpy = spyOn(
+        featureFlags,
+        "isAssistantFeatureFlagEnabled",
+      ).mockImplementation((key: string) => key === "send-user-message");
+      reserveMessageMock
+        .mockImplementationOnce(async () => ({
+          id: "msg-delivered-empty",
+          createdAt: 1_700_000_000_050,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-tool-result-empty",
+          createdAt: 1_700_000_000_050,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-final-empty",
+          createdAt: 1_700_000_000_050,
+        }));
+      mockTurnReplyMessageId = "msg-delivered-empty";
+
+      try {
+        await runAgentLoopImpl(
+          makeSendUserMessageCtx(),
+          "click it",
+          "msg-1",
+          () => {},
+        );
+      } finally {
+        flagSpy.mockRestore();
+      }
+
+      const calls = syncMessageToDiskMock.mock.calls as unknown as Array<
+        [string, string, number]
+      >;
+      expect(
+        calls
+          .map((call) => call[1])
+          .filter((id) =>
+            ["msg-delivered-empty", "msg-final-empty"].includes(id),
+          ),
+      ).toEqual(["msg-final-empty"]);
     });
   });
 
@@ -1956,6 +2589,43 @@ describe("session-agent-loop", () => {
       const call = recordRequestLogMock.mock.calls[0] as unknown as unknown[];
       expect(call[5]).toBe("callAgent");
     });
+
+    test("reports only the first finalized model call", async () => {
+      const tool: ToolDefinition = {
+        name: "echo",
+        description: "Echo",
+        input_schema: { type: "object" },
+      };
+      const onFirstModelCallPrepared = mock(() => {});
+      const ctx = makeCtx({
+        providerResponses: [
+          toolUseResponse("tool-1", "echo", {}),
+          textResponse("done"),
+        ],
+        loopTools: [tool],
+        toolExecutor: async () => ({ content: "ok", isError: false }),
+      });
+      const turnSignal = ctx.abortController?.signal;
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", () => {}, {
+        callSite: "callAgent",
+        inferenceCallSite: "mainAgent",
+        overrideProfile: "quality-optimized",
+        forceOverrideProfile: true,
+        onFirstModelCallPrepared,
+      });
+
+      expect(onFirstModelCallPrepared).toHaveBeenCalledTimes(1);
+      expect(onFirstModelCallPrepared).toHaveBeenCalledWith({
+        callSite: "mainAgent",
+        overrideProfile: "quality-optimized",
+        forceOverrideProfile: true,
+        signal: turnSignal,
+        systemPrompt: "system prompt",
+        tools: [tool],
+      });
+      expect(ctx.currentCallSite).toBe("callAgent");
+    });
   });
 
   describe("usage accounting", () => {
@@ -2172,6 +2842,48 @@ describe("session-agent-loop", () => {
       );
     });
 
+    test("carries automatic screenshot provenance on generation handoff", async () => {
+      resolveAssistantAttachmentsMock.mockImplementation(async () => ({
+        assistantAttachments: [],
+        emittedAttachments: [
+          {
+            id: "screenshot-1",
+            filename: "computer-use-click.png",
+            mimeType: "image/png",
+            data: "c2NyZWVuc2hvdA==",
+            sourceType: "tool_block" as const,
+            computerUseScreenshot: true,
+          },
+        ],
+        directiveWarnings: [],
+        persistedFiles: [],
+        linkedAttachmentIds: ["screenshot-1"],
+        computerUseScreenshotAttachmentIds: ["screenshot-1"],
+      }));
+      const events: AssistantEvent[] = [];
+      const ctx = makeCtx({
+        providerResponses: [toolUseResponse("tu-1", "file_read", {})],
+        loopTools: [
+          {
+            name: "file_read",
+            description: "Read a file",
+            input_schema: { type: "object", properties: {} },
+          },
+        ],
+        toolExecutor: async () => ({ content: "content", isError: false }),
+        canHandoffAtCheckpoint: () => true,
+      });
+
+      await runAgentLoopImpl(ctx, "hello", "msg-1", (event) =>
+        events.push(event),
+      );
+
+      const handoff = events.find(
+        (event) => event.type === "generation_handoff",
+      );
+      expect(handoff?.attachments?.[0]?.computerUseScreenshot).toBe(true);
+    });
+
     test("continues when canHandoffAtCheckpoint returns false", async () => {
       const events: AssistantEvent[] = [];
 
@@ -2222,11 +2934,23 @@ describe("session-agent-loop", () => {
         },
       };
 
-      const ctx = makeCtx({ loopProvider: provider, abortController });
+      const sessions = makeModeSessionDouble();
+      const ctx = makeCtx({
+        loopProvider: provider,
+        abortController,
+        modeSessions: sessions.coordinator,
+      });
       await runAgentLoopImpl(ctx, "hello", "msg-1", (msg) => events.push(msg));
 
       const cancelled = events.find((e) => e.type === "generation_cancelled");
       expect(cancelled).toBeDefined();
+      expect(sessions.finalizeTurn).toHaveBeenCalledWith({
+        turnId: "test-req",
+        status: "interrupted",
+        endedAt: expect.any(Number),
+        endReason: "cancelled",
+        lastActivityAt: expect.any(Number),
+      });
     });
 
     // A `task_progress` card mid-run. `data` mirrors what `ui_show` stores for
@@ -2620,6 +3344,38 @@ describe("session-agent-loop", () => {
       expect(ctx.pendingSurfaceActions.has("page-1")).toBe(true);
       expect(ctx.pendingSurfaceActions.has("stale-table-1")).toBe(false);
       expect(ctx.pendingSurfaceActions.has("stale-form-1")).toBe(false);
+      expect(ctx.modeSessions.invalidateStructuralWait).toHaveBeenCalledTimes(
+        2,
+      );
+      expect(ctx.modeSessions.invalidateStructuralWait).toHaveBeenCalledWith({
+        kind: "surface",
+        responseId: "stale-table-1",
+      });
+      expect(ctx.modeSessions.invalidateStructuralWait).toHaveBeenCalledWith({
+        kind: "surface",
+        responseId: "stale-form-1",
+      });
+    });
+
+    test("tracking cleanup failure does not prevent a new user turn", async () => {
+      const events: AssistantEvent[] = [];
+      const ctx = makeCtx();
+      ctx.pendingSurfaceActions.set("stale-surface", { surfaceType: "form" });
+      ctx.modeSessions.invalidateStructuralWait = () => {
+        throw new Error("session tracking unavailable");
+      };
+      await runAgentLoopImpl(
+        ctx,
+        "hello",
+        "msg-1",
+        (event) => events.push(event),
+        { isUserMessage: true },
+      );
+      expect(ctx.pendingSurfaceActions.has("stale-surface")).toBe(false);
+      expect(
+        events.filter((event) => event.type === "message_complete"),
+      ).toHaveLength(1);
+      expect(events.some((event) => event.type === "error")).toBe(false);
     });
 
     test("withholds the dismissal event and keeps the surface pending when its persisted write fails", async () => {
@@ -2653,6 +3409,7 @@ describe("session-agent-loop", () => {
       // The card stays live on the client, so the daemon must keep treating it
       // as pending; the sweep retries on the next user message.
       expect(ctx.pendingSurfaceActions.has("stale-table-2")).toBe(true);
+      expect(ctx.modeSessions.invalidateStructuralWait).not.toHaveBeenCalled();
     });
 
     test("dismisses the remaining surfaces when one write fails", async () => {
@@ -2716,6 +3473,7 @@ describe("session-agent-loop", () => {
       expect(completeEvents).toHaveLength(0);
       // The pending surface should still be there
       expect(ctx.pendingSurfaceActions.has("active-table-1")).toBe(true);
+      expect(ctx.modeSessions.invalidateStructuralWait).not.toHaveBeenCalled();
     });
 
     test("no-op when no pending surfaces exist", async () => {
@@ -2774,6 +3532,11 @@ describe("session-agent-loop", () => {
         isUserMessage: true,
       });
 
+      expect(ctx.pendingSurfaceActions.has("stale-table-1")).toBe(false);
+      expect(ctx.modeSessions.invalidateStructuralWait).toHaveBeenCalledWith({
+        kind: "surface",
+        responseId: "stale-table-1",
+      });
       expect(ctx.isProcessing()).toBe(false);
       expect(ctx.abortController).toBeNull();
       expect(ctx.currentRequestId).toBeUndefined();
@@ -3041,9 +3804,18 @@ describe("session-agent-loop", () => {
       // shape too, so a reload explains why the assistant stopped instead of
       // ending on a bare tool call.
       reserveMessageMock
-        .mockImplementationOnce(async () => ({ id: "msg-reserve-1" }))
-        .mockImplementationOnce(async () => ({ id: "msg-reserve-2" }))
-        .mockImplementationOnce(async () => ({ id: "msg-reserve-3" }));
+        .mockImplementationOnce(async () => ({
+          id: "msg-reserve-1",
+          createdAt: 1_700_000_000_051,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-reserve-2",
+          createdAt: 1_700_000_000_052,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-reserve-3",
+          createdAt: 1_700_000_000_053,
+        }));
       mockConversationErrorClassification = DAILY_LIMIT_CLASSIFICATION;
 
       // GIVEN a run whose first call asks for a tool, the tool succeeds, and
@@ -3555,8 +4327,14 @@ describe("session-agent-loop", () => {
       // `llm_call_started` must delete the stranded row so the transcript
       // does not accumulate empty assistant bubbles.
       reserveMessageMock
-        .mockImplementationOnce(async () => ({ id: "msg-strand-A" }))
-        .mockImplementationOnce(async () => ({ id: "msg-strand-B" }));
+        .mockImplementationOnce(async () => ({
+          id: "msg-strand-A",
+          createdAt: 1_700_000_000_051,
+        }))
+        .mockImplementationOnce(async () => ({
+          id: "msg-strand-B",
+          createdAt: 1_700_000_000_052,
+        }));
       // Indexer/projector mocks default to no-op; no finalized row in this
       // test, so `mockMessageById` stays null.
 
@@ -3618,6 +4396,7 @@ describe("session-agent-loop", () => {
       // reservation id.
       reserveMessageMock.mockImplementationOnce(async () => ({
         id: "msg-orphaned-reservation",
+        createdAt: 1_700_000_000_051,
       }));
 
       // GIVEN a real loop that reserves an assistant row at
@@ -3660,6 +4439,7 @@ describe("session-agent-loop", () => {
     test("managed-key provider-error cleanup publishes message invalidation after deleting the reservation", async () => {
       reserveMessageMock.mockImplementationOnce(async () => ({
         id: "msg-managed-key-reservation",
+        createdAt: 1_700_000_000_051,
       }));
       mockConversationErrorClassification = {
         code: "MANAGED_KEY_INVALID",
@@ -3996,6 +4776,7 @@ describe("session-agent-loop", () => {
       // error message lands.
       reserveMessageMock.mockImplementationOnce(async () => ({
         id: "msg-orphan-with-partial",
+        createdAt: 1_700_000_000_051,
       }));
 
       // GIVEN a real loop whose provider streams a delta — landing a debounced

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
+import { setOverridesForTesting } from "../../__tests__/feature-flag-test-helpers.js";
 import { RuntimeHttpServer } from "../http-server.js";
 import {
   mintActorToken,
@@ -13,6 +14,8 @@ describe("RuntimeHttpServer /v1/desktop/stream upgrade", () => {
   let server: RuntimeHttpServer;
   let baseUrl: string;
   let restoreAuthEnv: () => void;
+  const originalContainerized = process.env.IS_CONTAINERIZED;
+  const originalPlatform = process.env.IS_PLATFORM;
 
   beforeEach(async () => {
     restoreAuthEnv = requireHttpAuth();
@@ -20,11 +23,23 @@ describe("RuntimeHttpServer /v1/desktop/stream upgrade", () => {
     server = new RuntimeHttpServer({ port, hostname: "127.0.0.1" });
     await server.start();
     baseUrl = `127.0.0.1:${server.actualPort}`;
+    process.env.IS_PLATFORM = "true";
   });
 
   afterEach(async () => {
     await server.stop();
     restoreAuthEnv();
+    if (originalContainerized === undefined) {
+      delete process.env.IS_CONTAINERIZED;
+    } else {
+      process.env.IS_CONTAINERIZED = originalContainerized;
+    }
+    if (originalPlatform === undefined) {
+      delete process.env.IS_PLATFORM;
+    } else {
+      process.env.IS_PLATFORM = originalPlatform;
+    }
+    setOverridesForTesting({});
   });
 
   test("refuses a non-private origin with 403", async () => {
@@ -62,6 +77,56 @@ describe("RuntimeHttpServer /v1/desktop/stream upgrade", () => {
     );
     const closed = await waitForClose(ws);
     expect(closed.code).toBe(4008);
-    expect(closed.reason).toBe("Desktop is not available on this assistant");
+    expect(closed.reason).toBe(
+      "Virtual desktop is available only on enabled platform-hosted assistants",
+    );
   });
+  for (const flag of [false, undefined]) {
+    test(`refuses a containerized stream with a disabled or missing flag (${flag})`, async () => {
+      process.env.IS_CONTAINERIZED = "true";
+      setOverridesForTesting(
+        flag === undefined ? {} : { "assistant-desktop": flag },
+      );
+      const ws = new WebSocket(
+        `ws://${baseUrl}/v1/desktop/stream?token=${encodeURIComponent(mintGatewayToken())}`,
+      );
+      const closed = await waitForClose(ws);
+      expect(closed.code).toBe(4008);
+      expect(closed.reason).toBe(
+        "Virtual desktop is available only on enabled platform-hosted assistants",
+      );
+    });
+  }
+});
+
+test("self-hosted containers cannot stream with the feature flag enabled", async () => {
+  const originalPlatform = process.env.IS_PLATFORM;
+  const originalContainerized = process.env.IS_CONTAINERIZED;
+  const restoreAuth = requireHttpAuth();
+  const server = new RuntimeHttpServer({ port: 0, hostname: "127.0.0.1" });
+  try {
+    await server.start();
+    process.env.IS_PLATFORM = "false";
+    process.env.IS_CONTAINERIZED = "true";
+    setOverridesForTesting({ "assistant-desktop": true });
+    const baseUrl = `127.0.0.1:${server.actualPort}`;
+    const ws = new WebSocket(
+      `ws://${baseUrl}/v1/desktop/stream?token=${encodeURIComponent(mintGatewayToken())}`,
+    );
+    expect((await waitForClose(ws)).code).toBe(4008);
+  } finally {
+    await server.stop();
+    restoreAuth();
+    if (originalPlatform === undefined) {
+      delete process.env.IS_PLATFORM;
+    } else {
+      process.env.IS_PLATFORM = originalPlatform;
+    }
+    if (originalContainerized === undefined) {
+      delete process.env.IS_CONTAINERIZED;
+    } else {
+      process.env.IS_CONTAINERIZED = originalContainerized;
+    }
+    setOverridesForTesting({});
+  }
 });

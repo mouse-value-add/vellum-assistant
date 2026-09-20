@@ -1,8 +1,10 @@
+import * as fs from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, mock, spyOn, test } from "bun:test";
 
+import { setOverridesForTesting } from "../__tests__/feature-flag-test-helpers.js";
 import { newFakeDesktop, newViewer, settle } from "./__tests__/fake-desktop.js";
 import { DesktopDependencyInstaller } from "./desktop-dependencies.js";
 import {
@@ -13,6 +15,7 @@ import {
   getDesktopSessionManager,
 } from "./desktop-session-manager.js";
 import { DesktopStreamBridge } from "./desktop-stream-bridge.js";
+import { isVirtualDesktopEnabled } from "./virtual-desktop-feature.js";
 
 const profileDir = mkdtempSync(join(tmpdir(), "desktop-bridge-test-"));
 afterAll(() => {
@@ -55,6 +58,7 @@ class FakeTcp implements DesktopTcpSocket {
 function newBridge(
   manager: DesktopSessionManager,
   ensureInstalled: () => Promise<void> = async () => {},
+  isEnabled: () => boolean = () => true,
 ) {
   const ws = new FakeWs();
   const tcp = new FakeTcp();
@@ -65,6 +69,7 @@ function newBridge(
   const bridge = new DesktopStreamBridge(ws, {
     manager,
     ensureInstalled,
+    isEnabled,
     connect: async (_port, handlers) => {
       tcp.handlers = handlers;
       await gate;
@@ -85,6 +90,121 @@ function slotIsFree(manager: DesktopSessionManager): boolean {
 }
 
 describe("DesktopStreamBridge", () => {
+  test("streams without flag or filesystem checks after connecting", async () => {
+    const originalContainerized = process.env.IS_CONTAINERIZED;
+    const originalPlatform = process.env.IS_PLATFORM;
+    const h = newFakeDesktop({ profileDir });
+    const isEnabled = mock(isVirtualDesktopEnabled);
+    const b = newBridge(h.manager, async () => {}, isEnabled);
+    process.env.IS_CONTAINERIZED = "true";
+    process.env.IS_PLATFORM = "true";
+    setOverridesForTesting({ "assistant-desktop": true });
+    try {
+      b.connectNow();
+      await b.bridge.start();
+      expect(isEnabled).toHaveBeenCalled();
+      isEnabled.mockClear();
+      const stat = spyOn(fs, "statSync");
+      const read = spyOn(fs, "readFileSync");
+      try {
+        const frame = new Uint8Array([1, 2, 3]);
+        for (let i = 0; i < 100; i++) {
+          b.bridge.handleClientFrame(frame);
+          b.tcp.handlers.onData(frame);
+          b.tcp.handlers.onDrain();
+        }
+        expect(b.tcp.writes).toHaveLength(100);
+        expect(b.ws.sent).toHaveLength(100);
+        setOverridesForTesting({ "assistant-desktop": false });
+        b.bridge.handleClientFrame(frame);
+        b.tcp.handlers.onData(frame);
+        b.tcp.handlers.onDrain();
+        expect(b.tcp.writes).toHaveLength(101);
+        expect(b.ws.sent).toHaveLength(101);
+        expect(b.ws.closeCode).toBeNull();
+        expect(b.tcp.ended).toBe(false);
+        expect(isEnabled).not.toHaveBeenCalled();
+        expect(stat).not.toHaveBeenCalled();
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        stat.mockRestore();
+        read.mockRestore();
+      }
+    } finally {
+      b.bridge.handleClose();
+      await h.manager.destroy();
+      setOverridesForTesting({});
+      if (originalContainerized === undefined) {
+        delete process.env.IS_CONTAINERIZED;
+      } else {
+        process.env.IS_CONTAINERIZED = originalContainerized;
+      }
+      if (originalPlatform === undefined) {
+        delete process.env.IS_PLATFORM;
+      } else {
+        process.env.IS_PLATFORM = originalPlatform;
+      }
+    }
+  });
+
+  test("refuses a disabled desktop before installation or process startup", async () => {
+    const h = newFakeDesktop({ profileDir });
+    let installs = 0;
+    const b = newBridge(
+      h.manager,
+      async () => {
+        installs++;
+      },
+      () => false,
+    );
+    await b.bridge.start();
+    expect(b.ws.closeCode).toBe(4008);
+    expect(installs).toBe(0);
+    expect(h.spawned).toEqual([]);
+    expect(slotIsFree(h.manager)).toBe(true);
+  });
+
+  test("does not start the desktop when disabled during installation", async () => {
+    const h = newFakeDesktop({ profileDir });
+    let enabled = true;
+    const install = Promise.withResolvers<void>();
+    const b = newBridge(
+      h.manager,
+      () => install.promise,
+      () => enabled,
+    );
+    const started = b.bridge.start();
+    enabled = false;
+    install.resolve();
+    await started;
+    expect(b.ws.closeCode).toBe(4008);
+    expect(slotIsFree(h.manager)).toBe(true);
+    expect(b.tcp.handlers).toBeUndefined();
+    expect(h.spawned).toEqual([]);
+  });
+
+  for (const direction of ["viewer", "desktop"] as const) {
+    test(`ignores ${direction} frames after the stream closes`, async () => {
+      const h = newFakeDesktop({ profileDir });
+      const b = newBridge(h.manager);
+      b.connectNow();
+      await b.bridge.start();
+      b.bridge.handleClose();
+      const frame = new Uint8Array([1, 2, 3]);
+      if (direction === "viewer") {
+        b.bridge.handleClientFrame(frame);
+      } else {
+        b.tcp.handlers.onData(frame);
+      }
+      expect(b.ws.closeCode).toBeNull();
+      expect(b.ws.sent).toHaveLength(0);
+      expect(b.tcp.writes).toHaveLength(0);
+      expect(b.tcp.ended).toBe(true);
+      expect(slotIsFree(h.manager)).toBe(true);
+      await h.manager.destroy();
+    });
+  }
+
   test("direct viewers share background setup across a timeout and reconnect", async () => {
     const h = newFakeDesktop({ profileDir });
     let ready = false;
@@ -300,6 +420,7 @@ describe("DesktopStreamBridge", () => {
 
     const ws = new FakeWs();
     const bridge = new DesktopStreamBridge(ws, {
+      isEnabled: () => true,
       connect: async () => {
         throw new Error("must not dial the VNC port");
       },

@@ -27,6 +27,7 @@ import type { LiveVoiceSightFrameTiming } from "@/domains/chat/voice/live-voice/
 import type {
   LiveVoiceEntry,
   LiveVoiceMetricsServerFrame,
+  LiveVoiceSightSource,
 } from "@/domains/chat/voice/live-voice/protocol";
 import type { LiveVoicePlaybackProgress } from "@/domains/chat/voice/live-voice/tts-playback";
 import { createSelectors } from "@/utils/create-selectors";
@@ -76,6 +77,7 @@ export type LiveVoiceStatusKey =
   | "liveVoiceStatus.reconnecting"
   | "liveVoiceStatus.listening"
   | "liveVoiceStatus.thinking"
+  | "liveVoiceStatus.working"
   | "liveVoiceStatus.speaking"
   | "liveVoiceStatus.ending"
   | "liveVoiceStatus.muted";
@@ -145,12 +147,19 @@ export function liveVoiceSurfaceLabelKey(
   reconnecting: boolean,
   assistantAudioActive: boolean,
   muted: boolean,
+  responsePhase: LiveVoiceResponsePhase | null = null,
 ): LiveVoiceStatusKey | null {
   if (state === "listening" && muted) {
     return "liveVoiceStatus.muted";
   }
   if (state === "connecting" && reconnecting) {
     return "liveVoiceStatus.reconnecting";
+  }
+  if (
+    responsePhase === "escalated" &&
+    (state === "thinking" || (state === "speaking" && !assistantAudioActive))
+  ) {
+    return "liveVoiceStatus.working";
   }
   if (state === "speaking" && !assistantAudioActive) {
     return "liveVoiceStatus.thinking";
@@ -183,6 +192,11 @@ export interface LiveVoiceSessionControls {
    * unless the session is `speaking`.
    */
   interrupt: () => void;
+  startSightSession?: (
+    cameraEpoch: number,
+    source: LiveVoiceSightSource,
+  ) => boolean;
+  endSightSession?: (cameraEpoch: number) => boolean;
   /**
    * Mute (or unmute) the mic without ending the session. While muted the
    * capture graph keeps running but silence is streamed in place of the
@@ -234,6 +248,7 @@ export interface LiveVoiceSessionControls {
   sightFrame: (
     attachmentId: string,
     timing?: LiveVoiceSightFrameTiming,
+    lifecycle?: { cameraEpoch: number; source: LiveVoiceSightSource },
   ) => boolean;
 }
 
@@ -255,6 +270,9 @@ export interface LiveVoiceTurnLatency {
   readonly server: LiveVoiceMetricsServerFrame | null;
   readonly clientHeardLatencyMs: number | null;
 }
+
+/** Extra response phase exposed by structured activity frames. */
+export type LiveVoiceResponsePhase = "escalated";
 
 /** Viewport-space point (px) the color room's entrance grows from. */
 export interface LiveVoiceEntryOrigin {
@@ -479,6 +497,8 @@ export interface LiveVoiceState {
    * `reset()` clears it with everything else.
    */
   activityLabel: string;
+  /** Neutral handoff state while the conversation profile prepares a reply. */
+  responsePhase: LiveVoiceResponsePhase | null;
   /**
    * The confirmation the current turn is blocked on, or `null` when it is not
    * blocked on one.
@@ -511,6 +531,24 @@ export interface LiveVoiceState {
    * while the transport comes back.
    */
   screenShareTarget: WatchCaptureTarget | null;
+  /**
+   * The user asked out loud for the call to start (`start`) or stop (`stop`)
+   * looking through the camera, and the voice room has not taken the ask yet.
+   * The camera is the room's (its hooks own the viewfinder and Live), and the
+   * room may not even be mounted when the ask lands, so the ask waits here for
+   * the room to take it. Taken once: a room that mounts later must not reopen
+   * the camera for an old ask. A newer ask replaces an older one.
+   */
+  cameraLookRequest: CameraLookRequest | null;
+  /**
+   * The assistant asked to look (`look_screen`, `look_camera`) and the fresh
+   * frame that answers it has not been taken yet. Whatever the look turned on,
+   * or found already on, owes the call one frame of it now, whether or not the
+   * frame gate would call the view new: the session answers the look from that
+   * frame, and says nothing until it lands. Taken once, by the screen share
+   * hook or the room's sight hook, with {@link takeLiveVoiceLookFrame}.
+   */
+  lookFrameRequested: { readonly screen: boolean; readonly camera: boolean };
   /**
    * Whether the user has the mouse down on the shared surface, drawing.
    *
@@ -659,6 +697,8 @@ export interface LiveVoiceActions {
     activityLabel: string,
     pendingApprovalRequestId?: string | null,
   ) => void;
+  /** Set or clear the current response's structured handoff phase. */
+  setResponsePhase: (responsePhase: LiveVoiceResponsePhase | null) => void;
   /** Set whether the controller is retrying a dropped connection. */
   setReconnecting: (reconnecting: boolean) => void;
   /**
@@ -730,6 +770,10 @@ export interface LiveVoiceActions {
   setUtteranceOpen: (utteranceOpen: boolean) => void;
   /** Set or clear what the session is being shown. See `screenShareTarget`. */
   setScreenShareTarget: (screenShareTarget: WatchCaptureTarget | null) => void;
+  /** Raise or take the spoken camera ask. See `cameraLookRequest`. */
+  setCameraLookRequest: (cameraLookRequest: CameraLookRequest | null) => void;
+  /** Raise or take a look's frame ask. See `lookFrameRequested`. */
+  setLookFrameRequested: (source: LookFrameSource, requested: boolean) => void;
   /**
    * Record a mark the user is making on the shared surface: the hand going
    * down, or coming off with the strokes it left.
@@ -963,6 +1007,7 @@ const INITIAL_SESSION_STATE: Omit<
   assistantAudioActive: false,
   microphoneActive: false,
   activityLabel: "",
+  responsePhase: null,
   pendingApprovalRequestId: null,
   reconnecting: false,
   assistantId: null,
@@ -978,6 +1023,8 @@ const INITIAL_SESSION_STATE: Omit<
   controls: null,
   utteranceOpen: false,
   screenShareTarget: null,
+  cameraLookRequest: null,
+  lookFrameRequested: { screen: false, camera: false },
   shareDrawing: false,
   shareAnnotation: null,
   partialTranscript: "",
@@ -1125,6 +1172,10 @@ const useLiveVoiceStoreBase = create<LiveVoiceStore>()((set) => ({
   setMicrophoneActive: (microphoneActive) => set({ microphoneActive }),
   setActivityLabel: (activityLabel, pendingApprovalRequestId = null) =>
     set({ activityLabel, pendingApprovalRequestId }),
+  setResponsePhase: (responsePhase) =>
+    set((state) =>
+      state.responsePhase === responsePhase ? state : { responsePhase },
+    ),
   setReconnecting: (reconnecting) => set({ reconnecting }),
   setSessionContext: (assistantId, conversationId) =>
     // A fresh session always opens with the mic live, even if the controller
@@ -1287,16 +1338,29 @@ const useLiveVoiceStoreBase = create<LiveVoiceStore>()((set) => ({
   setFirstRunCardOpen: (firstRunCardOpen) => set({ firstRunCardOpen }),
   setConfigNotice: (configNotice) => set({ configNotice }),
   setUtteranceOpen: (utteranceOpen) => set({ utteranceOpen }),
+  setCameraLookRequest: (cameraLookRequest) => set({ cameraLookRequest }),
+  setLookFrameRequested: (source, requested) =>
+    set((s) => ({
+      lookFrameRequested: { ...s.lookFrameRequested, [source]: requested },
+    })),
   setScreenShareTarget: (screenShareTarget) =>
-    set({
+    set((s) => ({
       screenShareTarget,
+      // A share that ends owes nothing: the look it was asked for has no
+      // screen to be answered from, and a later share must not take a frame
+      // for it.
+      ...(screenShareTarget === null
+        ? {
+            lookFrameRequested: { ...s.lookFrameRequested, screen: false },
+          }
+        : {}),
       // A share that ends takes the drawing on it with it: the marks belong to
       // a surface that is no longer being shown, and a `drawing` left true
       // would hold the next share's first frame for a hand that is long since
       // off the mouse.
       shareDrawing: false,
       shareAnnotation: null,
-    }),
+    })),
   setShareAnnotation: (phase, strokes, ink) =>
     set((s) => {
       if (phase === "drawing") {
@@ -1610,10 +1674,74 @@ export function setLiveVoiceScreenShare(
   state.setScreenShareTarget(target);
 }
 
+/** What a spoken camera ask wants the voice room to do. */
+export type CameraLookRequest = "start" | "stop";
+
+/** What a look is of: the shared screen or the room's camera. */
+export type LookFrameSource = "screen" | "camera";
+
+/**
+ * Owe the session one fresh frame of `source` for a look it asked for. No-op
+ * without an active session or with an assistant that cannot take frames,
+ * since no frame could be sent.
+ */
+export function requestLiveVoiceLookFrame(source: LookFrameSource): void {
+  const state = useLiveVoiceStore.getState();
+  if (!isLiveVoiceSessionActive(state.state) || state.sightFramesUnsupported) {
+    return;
+  }
+  state.setLookFrameRequested(source, true);
+}
+
+/**
+ * Take the look frame owed for `source`, if any, so exactly one frame answers
+ * it. Returns whether one was owed.
+ */
+export function takeLiveVoiceLookFrame(source: LookFrameSource): boolean {
+  const state = useLiveVoiceStore.getState();
+  if (!state.lookFrameRequested[source]) {
+    return false;
+  }
+  state.setLookFrameRequested(source, false);
+  return true;
+}
+
+/**
+ * Ask the voice room to open the camera in Live ("look at this") or to close
+ * it ("stop looking"). No-op without an active session, and a start is also
+ * refused by an assistant that cannot take frames. The room takes the ask
+ * with {@link takeLiveVoiceCameraLookRequest}.
+ */
+export function requestLiveVoiceCameraLook(request: CameraLookRequest): void {
+  const state = useLiveVoiceStore.getState();
+  if (!isLiveVoiceSessionActive(state.state)) {
+    return;
+  }
+  if (request === "start" && state.sightFramesUnsupported) {
+    return;
+  }
+  // A look that stops owes no frame of what it stopped showing.
+  if (request === "stop") {
+    state.setLookFrameRequested("camera", false);
+  }
+  state.setCameraLookRequest(request);
+}
+
+/** Take the pending camera ask, if any, so it is acted on exactly once. */
+export function takeLiveVoiceCameraLookRequest(): CameraLookRequest | null {
+  const state = useLiveVoiceStore.getState();
+  const request = state.cameraLookRequest;
+  if (request !== null) {
+    state.setCameraLookRequest(null);
+  }
+  return request;
+}
+
 export function sendLiveVoiceSightFrame(
   attachmentId: string,
   sessionGeneration: number,
   timing?: LiveVoiceSightFrameTiming,
+  lifecycle?: { cameraEpoch: number; source: LiveVoiceSightSource },
 ): boolean {
   const state = useLiveVoiceStore.getState();
   if (state.sessionGeneration !== sessionGeneration) {
@@ -1624,11 +1752,31 @@ export function sendLiveVoiceSightFrame(
   if (state.sightFramesUnsupported) {
     return false;
   }
-  const sent = state.controls?.sightFrame(attachmentId, timing) ?? false;
+  const sent = lifecycle
+    ? (state.controls?.sightFrame(attachmentId, timing, lifecycle) ?? false)
+    : (state.controls?.sightFrame(attachmentId, timing) ?? false);
   if (sent) {
     state.noteSightFrameSent(attachmentId);
   }
   return sent;
+}
+
+export function startLiveVoiceSightSession(
+  cameraEpoch: number,
+  source: LiveVoiceSightSource,
+): boolean {
+  return (
+    useLiveVoiceStore
+      .getState()
+      .controls?.startSightSession?.(cameraEpoch, source) ?? false
+  );
+}
+
+export function endLiveVoiceSightSession(cameraEpoch: number): boolean {
+  return (
+    useLiveVoiceStore.getState().controls?.endSightSession?.(cameraEpoch) ??
+    false
+  );
 }
 
 /**

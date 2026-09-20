@@ -3,7 +3,7 @@
  * 7778-163402): a Clean/Raw switch over one card, clamped to a readable height
  * with a Show more control.
  *
- * `skill_load`'s output is the skill body itself — markdown that renders
+ * `skill_load`'s output is the skill body itself: markdown that renders
  * properly (Clean) but that an operator sometimes needs to see verbatim, header
  * lines and tool manifest included (Raw). Those were two separate collapsed
  * disclosures; the segment control makes them one thing viewed two ways, which
@@ -15,8 +15,8 @@ import { useState } from "react";
 import { SegmentControl } from "@vellumai/design-library";
 
 import {
-  ClampedContent,
-  CopyButton,
+  CodePre,
+  DetailBlock,
   SectionLabel,
 } from "@/components/detail-primitives";
 import { ChatMarkdownMessage } from "@/domains/chat/components/chat-markdown-message";
@@ -53,13 +53,12 @@ export function SkillLoadOutput({
   }
 
   const activeMode: OutputMode = hasClean ? mode : "raw";
-  const body = activeMode === "clean" ? instructions : raw;
 
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-3">
         {/* The row owns the spacing under the header, so the label drops its
-            own bottom margin — otherwise it sits off-centre from the switch. */}
+            own bottom margin. Otherwise it sits off-centre from the switch. */}
         <SectionLabel className="mb-0">
           {t("skillLoadOutput.output")}
         </SectionLabel>
@@ -77,22 +76,19 @@ export function SkillLoadOutput({
         )}
       </div>
 
-      <div className="relative rounded-xl bg-[var(--surface-overlay)] p-3">
-        <ClampedContent length={body.length}>
-          {activeMode === "clean" ? (
-            <ChatMarkdownMessage
-              content={instructions}
-              assistantId={assistantId}
-            />
-          ) : (
-            <pre className="font-mono text-xs whitespace-pre-wrap break-words text-[var(--content-default)]">
-              {raw}
-            </pre>
-          )}
-        </ClampedContent>
-
-        {activeMode === "raw" && <CopyButton text={raw} />}
-      </div>
+      <DetailBlock
+        variant="filled"
+        copyText={activeMode === "raw" ? raw : undefined}
+      >
+        {activeMode === "clean" ? (
+          <ChatMarkdownMessage
+            content={instructions}
+            assistantId={assistantId}
+          />
+        ) : (
+          <CodePre text={raw} />
+        )}
+      </DetailBlock>
     </div>
   );
 }

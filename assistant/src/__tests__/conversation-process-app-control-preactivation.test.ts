@@ -87,6 +87,7 @@ import {
   type QueuedMessage,
 } from "../daemon/conversation-queue-manager.js";
 import type { TrustContext } from "../daemon/trust-context-types.js";
+import { mockUnownedModeSessions } from "./helpers/mock-conversation.js";
 
 // ---------------------------------------------------------------------------
 // Fake context — captures preactivation calls, satisfies the bare minimum
@@ -117,6 +118,7 @@ function makeFakeContext(opts: {
     abortController: null,
     queue: opts.queue,
     surfaceActionRequestIds: new Set<string>(),
+    modeSessions: mockUnownedModeSessions(),
     usageStats: { inputTokens: 0, outputTokens: 0, estimatedCost: 0 },
     get preactivatedSkillIds(): string[] | undefined {
       return preactivatedSkillIds;
@@ -160,12 +162,6 @@ function makeFakeContext(opts: {
     trustContext: {
       trustClass: "guardian" as const,
       guardianPrincipalId: "user-1",
-    },
-    setTrustContext(
-      this: { trustContext?: TrustContext },
-      trustContext: TrustContext | null,
-    ) {
-      this.trustContext = trustContext ?? undefined;
     },
     setTransportHints() {},
     applyHostEnvFromTransport() {},
@@ -415,10 +411,10 @@ describe("drainQueue preactivation re-add for host-proxy interfaces", () => {
       "U-contact",
     );
     expect(ctx.currentTurnTrustContext?.sourceChannel).toBe("slack");
-    // The drain is where a queued message commits to a run, so the resting
-    // slot names the sender too: history is scoped from it, and a slot still
-    // naming the guardian would hand the contact's turn the guardian's rows.
-    expect(ctx.trustContext).toBe(contactTrust);
+    // The slot itself is left alone; only the turn's view is corrected. A
+    // drain stamping it would attribute the conversation to a sender whose
+    // turn can still lose the processing lock at persist time.
+    expect(ctx.trustContext?.trustClass).toBe("guardian");
   });
 
   test("buildPassthroughBatch refuses to coalesce two channel senders", async () => {

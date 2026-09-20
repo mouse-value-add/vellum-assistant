@@ -37,18 +37,25 @@ const CHROME_PACKAGES = {
 const DESKTOP_BINARIES = {
   xServer: ["Xtigervnc"],
   windowManager: ["openbox"],
+  python: ["python3"],
   compositor: ["xcompmgr"],
   panel: ["plank"],
-  panelSession: ["dbus-run-session"],
+  sessionBus: ["dbus-daemon"],
   clipboard: ["tigervncconfig", "vncconfig"],
   terminal: ["xterm"],
   wallpaper: ["feh"],
+  input: ["xdotool"],
+  capture: ["scrot"],
 } as const;
 
 const DESKTOP_PACKAGES = [
+  "at-spi2-core",
   "dbus-x11",
   "feh",
+  "gnome-mines",
   "openbox",
+  "python3",
+  "python3-dbus",
   "tigervnc-standalone-server",
   "tigervnc-common",
   "plank",
@@ -58,6 +65,8 @@ const DESKTOP_PACKAGES = [
   "xcompmgr",
   "xfonts-base",
   "xterm",
+  "xdotool",
+  "scrot",
   "fonts-liberation",
   "libgtk-3-0",
   "libvulkan1",
@@ -115,8 +124,11 @@ export class DesktopDependencyInstaller {
           return (
             existsSync(desktopChromePath() + ".ready") &&
             existsSync(desktopChromePath()) &&
+            existsSync("/usr/games/gnome-mines") &&
             existsSync("/usr/share/fonts/X11/misc/fonts.dir") &&
-            existsSync("/usr/share/dbus-1/services/org.ayatana.bamf.service")
+            existsSync("/usr/share/dbus-1/services/org.ayatana.bamf.service") &&
+            existsSync("/usr/share/dbus-1/services/org.a11y.Bus.service") &&
+            existsSync("/usr/lib/python3/dist-packages/dbus/__init__.py")
           );
         } catch {
           return false;
@@ -162,7 +174,7 @@ export class DesktopDependencyInstaller {
       })
       .catch((err: unknown) => {
         log.warn({ err }, "Desktop installation failed");
-        this.status = { state: "failed" };
+        this.status = { state: "failed", stage: this.status?.stage };
       })
       .finally(() => {
         this.installing = null;
@@ -172,11 +184,32 @@ export class DesktopDependencyInstaller {
     return this.status;
   }
 
-  async ensureReady(): Promise<void> {
+  async ensureReady(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     this.start();
-    await this.installing;
-    if (this.getStatus().state !== "ready") {
-      throw new Error("Desktop setup did not complete");
+    let onAbort: (() => void) | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        onAbort = () => reject(signal?.reason);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        void Promise.resolve(this.installing).then(() => resolve(), reject);
+      });
+      signal?.throwIfAborted();
+      const status = this.getStatus();
+      if (status.state === "unsupported") {
+        throw new Error(
+          "Virtual desktop installation is unsupported on this assistant.",
+        );
+      }
+      if (status.state !== "ready") {
+        throw new Error(
+          `Virtual desktop setup failed during ${status.stage ?? "installation"}. Open the Virtual desktop panel to retry. Do not launch Chrome manually.`,
+        );
+      }
+    } finally {
+      if (onAbort) {
+        signal?.removeEventListener("abort", onAbort);
+      }
     }
   }
 

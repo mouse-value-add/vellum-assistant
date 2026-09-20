@@ -110,6 +110,22 @@ describe("AssistantConfigSchema", () => {
     expect(result.services["image-generation"].model).toBe("gpt-image-2");
   });
 
+  test("accepts openrouter as an image generation provider", () => {
+    const result = AssistantConfigSchema.parse({
+      services: {
+        "image-generation": {
+          provider: "openrouter",
+          model: "google/gemini-3.1-flash-image-preview",
+        },
+      },
+    });
+
+    expect(result.services["image-generation"].provider).toBe("openrouter");
+    expect(result.services["image-generation"].model).toBe(
+      "google/gemini-3.1-flash-image-preview",
+    );
+  });
+
   test("accepts Tavily as a web search provider", () => {
     const result = AssistantConfigSchema.parse({
       services: {
@@ -998,6 +1014,18 @@ describe("AssistantConfigSchema", () => {
         echoEmaHalfLifeMs: 400,
         echoDrainSlackMs: 300,
       },
+      flux: {
+        turnEnd: { enabled: true },
+        eotThreshold: 0.7,
+        eotTimeoutMs: 5000,
+      },
+      archiveAudio: false,
+    });
+  });
+
+  test("applies voice defaults", () => {
+    const result = AssistantConfigSchema.parse({});
+    expect(result.voice).toEqual({
       frontModel: {
         endpointDecisionTimeoutMs: 1200,
         endpointExtensionMs: 1500,
@@ -1009,15 +1037,9 @@ describe("AssistantConfigSchema", () => {
           maxSilenceMs: 35000,
           longOpMs: 15000,
           minGapMs: 6000,
-          generationTimeoutMs: 1500,
+          generationTimeoutMs: 5000,
         },
       },
-      flux: {
-        turnEnd: { enabled: true },
-        eotThreshold: 0.7,
-        eotTimeoutMs: 5000,
-      },
-      archiveAudio: false,
     });
   });
 

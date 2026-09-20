@@ -15,6 +15,7 @@ import type {
   AgentEvent,
   AgentLoopExitReason,
   CheckpointDecision,
+  PreparedModelCall,
 } from "../agent/loop.js";
 import { createAssistantMessage } from "../agent/message-types.js";
 import type { AssistantEvent } from "../api/index.js";
@@ -38,6 +39,7 @@ import {
 import { getConfig } from "../config/loader.js";
 import type { LLMCallSite } from "../config/schemas/llm.js";
 import { isSendUserMessageActiveForTurn } from "../config/send-user-message-gate.js";
+import { desktopAutomationLease } from "../desktop/desktop-automation-lease.js";
 import { writeRelationshipState } from "../home/relationship-state-writer.js";
 import type { UserPromptSubmitInputContext } from "../hooks/types.js";
 import {
@@ -105,6 +107,7 @@ import {
   type EventHandlerDeps,
   finalizePendingToolResultRow,
   resetInjectionLedgersForStrip,
+  selectFinalComputerUseScreenshotCandidate,
   settlePendingPartialFlush,
 } from "./conversation-agent-loop-handlers.js";
 import {
@@ -133,6 +136,7 @@ import {
 } from "./conversation-runtime-assembly.js";
 import type { CurrentTurnSurface } from "./conversation-surfaces.js";
 import {
+  blockingPendingSurfaceIds,
   hasBlockingPendingSurface,
   markSurfaceCompleted,
   settleRunningTaskProgressSurfaces,
@@ -150,6 +154,7 @@ import {
   unregisterInflightTurn,
 } from "./inflight-turn-registry.js";
 import type { UsageStats } from "./message-protocol.js";
+import { bestEffortModeSessionTracking } from "./mode-session-tracking.js";
 import {
   persistReactionRecords,
   type QueuedReactionRecord,
@@ -289,6 +294,89 @@ function turnEndedAwaitingUser(ctx: Conversation): boolean {
   );
 }
 
+function recordModeSessionStructuralWaits(
+  ctx: Conversation,
+  turnId: string,
+): boolean {
+  let recorded = false;
+  for (const interaction of getPendingInteractionsByConversation(
+    ctx.conversationId,
+  )) {
+    const kind =
+      interaction.kind === "acp_confirmation"
+        ? "confirmation"
+        : interaction.kind;
+    if (kind !== "confirmation" && kind !== "question" && kind !== "secret") {
+      continue;
+    }
+    recorded =
+      ctx.modeSessions.recordStructuralWait(turnId, {
+        kind,
+        responseId: interaction.requestId,
+      }) || recorded;
+  }
+  for (const surfaceId of blockingPendingSurfaceIds(ctx)) {
+    recorded =
+      ctx.modeSessions.recordStructuralWait(turnId, {
+        kind: "surface",
+        responseId: surfaceId,
+      }) || recorded;
+  }
+  return recorded;
+}
+
+function settleModeSessionTurn(
+  ctx: Conversation,
+  turnId: string,
+  fallback: { status: "completed" | "interrupted"; endReason: string },
+): void {
+  try {
+    if (!ctx.modeSessions.getTurnOwner(turnId)) {
+      ctx.modeSessions.releaseTurn(turnId);
+      return;
+    }
+    if (
+      fallback.status === "completed" &&
+      recordModeSessionStructuralWaits(ctx, turnId)
+    ) {
+      ctx.modeSessions.releaseTurn(turnId);
+      return;
+    }
+    if (ctx.modeSessions.keepsSessionOpenAfterTurn(turnId)) {
+      ctx.modeSessions.releaseTurn(turnId);
+      return;
+    }
+    const disposition = ctx.modeSessions.getTerminalDisposition(turnId);
+    if (disposition) {
+      ctx.modeSessions.releaseTurn(turnId, fallback);
+      return;
+    }
+    const finalized = ctx.modeSessions.finalizeTurn({
+      turnId,
+      status: fallback.status,
+      endedAt: Date.now(),
+      endReason: fallback.endReason,
+      lastActivityAt: Date.now(),
+    });
+    if (!finalized) {
+      ctx.modeSessions.releaseTurn(turnId, fallback);
+    }
+  } catch (err) {
+    log.warn(
+      { err, conversationId: ctx.conversationId, turnId },
+      "Mode-session turn settlement failed",
+    );
+    try {
+      ctx.modeSessions.releaseTurn(turnId, fallback);
+    } catch (releaseErr) {
+      log.warn(
+        { err: releaseErr, conversationId: ctx.conversationId, turnId },
+        "Mode-session turn cleanup failed",
+      );
+    }
+  }
+}
+
 // ── abort watchdog ───────────────────────────────────────────────────
 
 /**
@@ -390,12 +478,16 @@ export async function runAgentLoopImpl(
      */
     replyDeliveredInAppOnly?: boolean;
     /**
-     * LLM call-site identifier threaded into the per-call provider config.
-     * Adapter callers (heartbeat, filing, scheduler, etc.) pass their own
-     * call-site id so the resolver picks `llm.callSites.<id>`. When unset,
-     * the agent loop defaults to `'mainAgent'` for user-initiated turns.
+     * Semantic call-site identifier for the turn. It also selects provider
+     * configuration unless `inferenceCallSite` is set. When unset, the agent
+     * loop defaults to `'mainAgent'` for user-initiated turns.
      */
     callSite?: LLMCallSite;
+    /**
+     * Provider configuration source when it differs from the turn's semantic
+     * call site. The semantic call site still controls tools and UI behavior.
+     */
+    inferenceCallSite?: LLMCallSite;
     /**
      * Optional ad-hoc inference-profile override applied to every LLM call
      * the loop issues. When set, the agent loop sets
@@ -411,6 +503,8 @@ export async function runAgentLoopImpl(
      * sites. Used when a caller explicitly pins a background run to a profile.
      */
     forceOverrideProfile?: boolean;
+    /** Observe the first finalized model request without delaying it. */
+    onFirstModelCallPrepared?: (prepared: PreparedModelCall) => void;
     /**
      * Origin tag of this turn (the conversation's `TitleOrigin`, e.g.
      * "memory_consolidation"), threaded from `runBackgroundJob`. Exposed on
@@ -470,12 +564,12 @@ export async function runAgentLoopImpl(
   ctx.currentTurnIsNonInteractive = isNonInteractive;
 
   // Default user-initiated turns to the `mainAgent` call site; other invocation
-  // contexts (heartbeat, filing, analyze, etc.) pass their own `callSite`. The
-  // provider layer resolves provider/model/maxTokens via `resolveCallSiteConfig`,
-  // picking up any user overrides under `llm.callSites.<id>` (falling back to
-  // the shipped call-site defaults when absent). `resolveTurnCallSite` keeps subagent
-  // conversations on `subagentSpawn` when no call site is supplied.
+  // contexts pass their own semantic `callSite`. Provider configuration uses
+  // that site unless a caller supplies `inferenceCallSite` separately.
+  // `resolveTurnCallSite` keeps subagent conversations on `subagentSpawn` when
+  // no semantic call site is supplied.
   const turnCallSite = resolveTurnCallSite(options?.callSite, ctx);
+  const inferenceCallSite = options?.inferenceCallSite ?? turnCallSite;
   // Expose the turn's call site on the live conversation so the runtime
   // injection assembly self-resolves it for the turn's plugin contexts. Set
   // before the prompt sync below: the tool-gated reply section and the tool
@@ -580,7 +674,11 @@ export async function runAgentLoopImpl(
         isResolvableProvider: dispatchProviderResolvable,
       };
       const { config: resolved, profileName } =
-        resolveCallSiteConfigWithProfile(turnCallSite, config.llm, resolveOpts);
+        resolveCallSiteConfigWithProfile(
+          inferenceCallSite,
+          config.llm,
+          resolveOpts,
+        );
       let connectionName = resolved.provider_connection;
       try {
         connectionName =
@@ -615,7 +713,7 @@ export async function runAgentLoopImpl(
 
   const effectiveContextWindow = resolveEffectiveContextWindow({
     llm: config.llm,
-    callSite: turnCallSite,
+    callSite: inferenceCallSite,
     overrideProfile: turnOverrideProfile ?? undefined,
     forceOverrideProfile,
     selectionSeed: ctx.conversationId,
@@ -634,7 +732,7 @@ export async function runAgentLoopImpl(
   };
 
   let currentContextWindowConfig = contextWindowConfigFromEffective(
-    resolveCallSiteConfig(turnCallSite, config.llm, {
+    resolveCallSiteConfig(inferenceCallSite, config.llm, {
       overrideProfile: turnOverrideProfile ?? undefined,
       forceOverrideProfile,
       selectionSeed: ctx.conversationId,
@@ -650,13 +748,13 @@ export async function runAgentLoopImpl(
     if (currentOverrideProfile !== appliedOverrideProfile) {
       currentEffectiveContextWindow = resolveEffectiveContextWindow({
         llm: config.llm,
-        callSite: turnCallSite,
+        callSite: inferenceCallSite,
         overrideProfile: currentOverrideProfile,
         forceOverrideProfile,
         selectionSeed: ctx.conversationId,
       });
       currentContextWindowConfig = contextWindowConfigFromEffective(
-        resolveCallSiteConfig(turnCallSite, config.llm, {
+        resolveCallSiteConfig(inferenceCallSite, config.llm, {
           overrideProfile: currentOverrideProfile,
           forceOverrideProfile,
           onResolutionFallback: logResolutionFallback,
@@ -675,8 +773,6 @@ export async function runAgentLoopImpl(
     ctx.currentTurnOverrideProfile = currentOverrideProfile;
     return currentOverrideProfile;
   };
-  const resolveCurrentOverrideProfile = (): string | undefined =>
-    refreshCurrentProfileState();
   const resolveCurrentMaxInputTokens = (): number => {
     refreshCurrentProfileState();
     return currentEffectiveContextWindow.maxInputTokens;
@@ -702,7 +798,7 @@ export async function runAgentLoopImpl(
   };
 
   // Initial value for `createToolExecutor` to read into
-  // `ToolContext.overrideProfile`. `resolveCurrentOverrideProfile` refreshes
+  // `ToolContext.overrideProfile`. `refreshCurrentProfileState` refreshes
   // this between model calls so a confirmed profile session opened by a tool
   // applies to later tool executions and nested subagents in the same turn.
   ctx.currentTurnOverrideProfile = turnOverrideProfile;
@@ -913,6 +1009,7 @@ export async function runAgentLoopImpl(
     if (ctx.pendingReactionRecords?.length) {
       ownedReactionRecords.push(...ctx.pendingReactionRecords.splice(0));
     }
+    desktopAutomationLease.releaseForConversation(ctx.conversationId);
     ctx.abortController = null;
     ctx.setProcessing(false);
     unregisterInflightTurn(ctx.conversationId, state);
@@ -977,6 +1074,7 @@ export async function runAgentLoopImpl(
       publishConversationMessagesChanged(ctx.conversationId);
     }
   };
+  let eventHandlerDeps: EventHandlerDeps | undefined;
 
   try {
     closeTurnFinalization = beginTurnFinalization(ctx.conversationId);
@@ -1061,13 +1159,19 @@ export async function runAgentLoopImpl(
         if (!markSurfaceCompleted(ctx, surfaceId, "Dismissed")) {
           continue;
         }
+        ctx.pendingSurfaceActions.delete(surfaceId);
+        bestEffortModeSessionTracking("stale surface wait invalidation", () =>
+          ctx.modeSessions.invalidateStructuralWait({
+            kind: "surface",
+            responseId: surfaceId,
+          }),
+        );
         onEvent({
           type: "ui_surface_complete",
           conversationId: ctx.conversationId,
           surfaceId,
           summary: "Dismissed",
         });
-        ctx.pendingSurfaceActions.delete(surfaceId);
       }
     }
 
@@ -1302,13 +1406,13 @@ export async function runAgentLoopImpl(
     // a hand-rolled chain would credit profiles the resolver never consulted
     // (e.g. activeProfile on a non-mainAgent turn).
     const effectiveProfileKey =
-      selectWinningProfile(turnCallSite, config.llm, {
+      selectWinningProfile(inferenceCallSite, config.llm, {
         ...(turnOverrideProfile != null
           ? { overrideProfile: turnOverrideProfile }
           : {}),
         selectionSeed: ctx.conversationId,
       }).profileName ??
-      resolveProfilelessModelKey(turnCallSite, config.llm, {
+      resolveProfilelessModelKey(inferenceCallSite, config.llm, {
         ...(turnOverrideProfile != null
           ? { overrideProfile: turnOverrideProfile }
           : {}),
@@ -1409,6 +1513,7 @@ export async function runAgentLoopImpl(
       latencyTracker,
       errorAttribution: turnErrorAttribution,
     };
+    eventHandlerDeps = deps;
     const eventHandler = (event: AgentEvent): Promise<void> => {
       if (
         event.type === "agent_loop_exit" &&
@@ -1446,7 +1551,10 @@ export async function runAgentLoopImpl(
 
     turnStarted = true;
 
-    rlog.info({ callSite: turnCallSite }, "Starting agent loop run");
+    rlog.info(
+      { callSite: turnCallSite, inferenceCallSite },
+      "Starting agent loop run",
+    );
 
     // Trust snapshot the loop forwards to its mid-loop in-place compaction
     // (scoping the compactor's image manifest) and the post-compaction
@@ -1455,6 +1563,18 @@ export async function runAgentLoopImpl(
     // assembly resolves for the same turn. The loop's other turn-identity
     // fields self-resolve from its own conversation id.
     const loopTrust = ctx.getTurnOrRestingTrust() ?? FALLBACK_TURN_TRUST;
+
+    const notifyFirstModelCallPrepared = options?.onFirstModelCallPrepared;
+    let firstModelCallPrepared = false;
+    const onModelCallPrepared = notifyFirstModelCallPrepared
+      ? (prepared: PreparedModelCall): void => {
+          if (firstModelCallPrepared) {
+            return;
+          }
+          firstModelCallPrepared = true;
+          notifyFirstModelCallPrepared(prepared);
+        }
+      : undefined;
 
     /**
      * Shared closure: runs the agent loop with the wrapper's turn context and
@@ -1478,12 +1598,14 @@ export async function runAgentLoopImpl(
           requestId: reqId,
           onCheckpoint,
           callSite: turnCallSite,
+          inferenceCallSite,
           suppressAssistantText: sendUserMessageActive,
           supportsDynamicUi: conversationSupportsDynamicUi(ctx),
           trust: loopTrust,
           overrideProfile: turnOverrideProfile,
           ...(forceOverrideProfile ? { forceOverrideProfile: true } : {}),
-          resolveOverrideProfile: resolveCurrentOverrideProfile,
+          resolveOverrideProfile: refreshCurrentProfileState,
+          ...(onModelCallPrepared !== undefined ? { onModelCallPrepared } : {}),
           resolveContextWindow,
           compactInPlace,
           isNonInteractive,
@@ -1582,13 +1704,33 @@ export async function runAgentLoopImpl(
         userMessageInterface: capturedTurnInterfaceContext.userMessageInterface,
         assistantMessageInterface:
           capturedTurnInterfaceContext.assistantMessageInterface,
+        modeSession: ctx.modeSessions.getTurnOwner(reqId),
       };
-      await finalizePendingToolResultRow(
+      const toolResultRowId = await finalizePendingToolResultRow(
         state,
         ctx.conversationId,
         toolResultMetadata,
         rlog,
       );
+      if (toolResultRowId) {
+        bestEffortModeSessionTracking(
+          "remaining tool result finalization",
+          () => {
+            const toolResultRow = getMessageById(
+              toolResultRowId,
+              ctx.conversationId,
+            );
+            if (toolResultRow) {
+              ctx.modeSessions.trackPersistedRow(
+                reqId,
+                toolResultRowId,
+                toolResultRow.createdAt,
+                { startsDisplayBoundary: false },
+              );
+            }
+          },
+        );
+      }
     }
 
     // Persist the budget_yield_unrecovered notice now that any pending
@@ -1609,6 +1751,7 @@ export async function runAgentLoopImpl(
         userMessageInterface: capturedTurnInterfaceContext.userMessageInterface,
         assistantMessageInterface:
           capturedTurnInterfaceContext.assistantMessageInterface,
+        modeSession: ctx.modeSessions.getTurnOwner(reqId),
       };
       let yieldNoticePersistedId: string | null = null;
       try {
@@ -1619,6 +1762,13 @@ export async function runAgentLoopImpl(
           { metadata: yieldNoticeMetadata },
         );
         yieldNoticePersistedId = yieldRow.id;
+        bestEffortModeSessionTracking("budget yield notice persistence", () =>
+          ctx.modeSessions.trackPersistedRow(
+            reqId,
+            yieldRow.id,
+            yieldRow.createdAt,
+          ),
+        );
       } catch (err) {
         // Non-fatal — a DB hiccup must not escalate a budget-yield exit into
         // a turn-level throw. The live SSE event was already emitted, so the
@@ -1793,6 +1943,7 @@ export async function runAgentLoopImpl(
           messageKind: PROVIDER_ERROR_MESSAGE_KIND,
           providerErrorCode: state.providerErrorCode ?? undefined,
           providerErrorCategory: state.providerErrorCategory ?? undefined,
+          modeSession: ctx.modeSessions.getTurnOwner(reqId),
         };
         // The persisted row re-enters LLM history and is displayed as
         // assistant speech, so the managed-billing categories swap the
@@ -1819,6 +1970,13 @@ export async function runAgentLoopImpl(
         // (or a downstream handler) doesn't try to clean up an id that
         // already corresponds to a finalized row.
         state.lastAssistantMessageId = errorRow.id;
+        bestEffortModeSessionTracking("provider error notice persistence", () =>
+          ctx.modeSessions.trackPersistedRow(
+            reqId,
+            errorRow.id,
+            errorRow.createdAt,
+          ),
+        );
         state.assistantRowAwaitingFinalization = false;
         newMessages.push(errorAssistantMessage);
         // Pipe the just-assigned message id into any orphaned LLM request log
@@ -1895,10 +2053,10 @@ export async function runAgentLoopImpl(
       // contradicts itself. `forceOverrideProfile` floats it above the
       // call-site profile exactly as the fallback dispatch did.
       {
-        callSite: turnCallSite,
+        callSite: inferenceCallSite,
         overrideProfile:
           state.exchangeInferenceProfile ??
-          resolveCurrentOverrideProfile() ??
+          refreshCurrentProfileState() ??
           null,
         ...(state.exchangeInferenceProfile !== undefined
           ? { forceOverrideProfile: true }
@@ -1949,6 +2107,8 @@ export async function runAgentLoopImpl(
               state.lastAssistantMessageId,
             )
           : state.lastAssistantMessageId;
+      const computerUseScreenshotCandidate =
+        selectFinalComputerUseScreenshotCandidate(state);
       // Resolve attachments (only when not cancelled, this is expensive async I/O)
       const attachmentResult = await resolveAssistantAttachments(
         state.accumulatedDirectives,
@@ -1965,9 +2125,16 @@ export async function runAgentLoopImpl(
           ),
         attachmentTargetMessageId,
         state.toolContentBlockToolNames,
+        computerUseScreenshotCandidate,
       );
       const { assistantAttachments, emittedAttachments } = attachmentResult;
       persistedAttachmentFiles = attachmentResult.persistedFiles;
+      if (
+        attachmentTargetMessageId &&
+        attachmentResult.linkedAttachmentIds.length > 0
+      ) {
+        state.assistantMessageIdsToSync.add(attachmentTargetMessageId);
+      }
 
       ctx.lastAssistantAttachments = assistantAttachments;
       ctx.lastAttachmentWarnings = attachmentResult.directiveWarnings;
@@ -2000,6 +2167,7 @@ export async function runAgentLoopImpl(
           ...(state.lastAssistantMessageId
             ? { messageId: state.lastAssistantMessageId }
             : {}),
+          modeSession: ctx.modeSessions.getTurnOwner(reqId),
         });
         publishLoopMessagesChanged();
       } else {
@@ -2012,6 +2180,7 @@ export async function runAgentLoopImpl(
         onEvent({
           type: "message_complete",
           conversationId: ctx.conversationId,
+          modeSession: ctx.modeSessions.getTurnOwner(reqId),
           ...(emittedAttachments.length > 0
             ? { attachments: emittedAttachments }
             : {}),
@@ -2046,6 +2215,28 @@ export async function runAgentLoopImpl(
     // has to complete under the processing lock.
     await settlePendingPartialFlush(state, deps);
     await settleTurnContent({ ctx, state, rlog });
+
+    if (yieldedForHandoff) {
+      const nextRequestId = ctx.queue.snapshot()[0]?.requestId;
+      if (nextRequestId) {
+        ctx.modeSessions.transferTurn(reqId, nextRequestId);
+      } else {
+        settleModeSessionTurn(ctx, reqId, {
+          status: "completed",
+          endReason: "handoff_settled",
+        });
+      }
+    } else if (abortController.signal.aborted) {
+      settleModeSessionTurn(ctx, reqId, {
+        status: "interrupted",
+        endReason: "cancelled",
+      });
+    } else {
+      settleModeSessionTurn(ctx, reqId, {
+        status: "completed",
+        endReason: "turn_settled",
+      });
+    }
 
     // Content is settled, so the conversation is free. Release before the
     // deferred tail rather than in the `finally`: the tail's memory indexing is
@@ -2124,6 +2315,21 @@ export async function runAgentLoopImpl(
       onEvent(buildConversationErrorMessage(ctx.conversationId, classified));
       publishLoopMessagesChanged();
     }
+    try {
+      if (eventHandlerDeps) {
+        await settlePendingPartialFlush(state, eventHandlerDeps);
+      }
+      await settleTurnContent({ ctx, state, rlog });
+    } catch (settleErr) {
+      rlog.warn(
+        { err: settleErr },
+        "Failed to settle interrupted turn content before mode-session finalization",
+      );
+    }
+    settleModeSessionTurn(ctx, reqId, {
+      status: "interrupted",
+      endReason: isUserCancellation(err, errorCtx) ? "cancelled" : "error",
+    });
   } finally {
     // Backstop release for the cancel/error paths, which throw out of the try
     // before the happy path's release runs. Idempotent, so the happy path

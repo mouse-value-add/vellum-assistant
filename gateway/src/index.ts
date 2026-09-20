@@ -188,6 +188,11 @@ import {
   createChannelPermissionResolveHandler,
 } from "./http/routes/channel-permission-overrides.js";
 import { getLogger, initLogger } from "./logger.js";
+import {
+  bindPlatformIdentityCredentialCache,
+  ensurePlatformIdentityIds,
+  resolvePlatformAssistantIdOrUndefined,
+} from "./platform-identity.js";
 import { getPlatformBaseUrl } from "./platform-url.js";
 import { CircuitBreakerOpenError, uploadAttachment } from "./runtime/client.js";
 import {
@@ -248,6 +253,7 @@ import { admissionPolicyRoutes } from "./ipc/admission-policy-handlers.js";
 import { channelPermissionRoutes } from "./ipc/channel-permission-handlers.js";
 import { trustVerdictRoutes } from "./ipc/trust-verdict-handlers.js";
 import { guardianDeliveryRoutes } from "./ipc/guardian-delivery-handlers.js";
+import { createDebugExportRoutes } from "./ipc/debug-export-handlers.js";
 import { createLogTailRoutes } from "./ipc/log-tail-handlers.js";
 import { createChannelSocketHealthRoutes } from "./ipc/channel-socket-health-handlers.js";
 import { createCredentialRequestIpcRoutes } from "./ipc/credential-request-handlers.js";
@@ -436,6 +442,8 @@ async function main() {
   // Handlers read dynamic credentials and config.json values from these
   // caches at call time, with automatic TTL refresh.
   const credentialCache = new CredentialCache();
+  bindPlatformIdentityCredentialCache(credentialCache);
+  void ensurePlatformIdentityIds();
   const configFileCache = new ConfigFileCache();
   const velayTunnelClient = createVelayTunnelClient(config, {
     credentials: credentialCache,
@@ -581,9 +589,7 @@ async function main() {
   );
   const handleTwilioVoiceVerifyCallback =
     createTwilioVoiceVerifyCallbackHandler(config, twilioValidationCaches);
-  const handleTwilioMediaWs = createTwilioMediaWebsocketHandler(config, {
-    configFile: configFileCache,
-  });
+  const handleTwilioMediaWs = createTwilioMediaWebsocketHandler(config);
   const handlePluginWebhookWs = createPluginWebhookWebsocketHandler({
     config,
     resolve: resolveCachedPluginIngress,
@@ -2474,14 +2480,13 @@ async function main() {
     lastRecordActivityTs = now;
 
     try {
-      const [platformBaseUrl, assistantApiKey, assistantIdRaw] =
-        await Promise.all([
+      const [platformBaseUrl, assistantApiKey, assistantId] = await Promise.all(
+        [
           getPlatformBaseUrl(credentialCache),
           credentialCache.get(credentialKey("vellum", "assistant_api_key")),
-          credentialCache.get(credentialKey("vellum", "platform_assistant_id")),
-        ]);
-
-      const assistantId = assistantIdRaw?.trim() || undefined;
+          resolvePlatformAssistantIdOrUndefined(),
+        ],
+      );
 
       if (!platformBaseUrl || !assistantApiKey || !assistantId) return;
 
@@ -2677,7 +2682,7 @@ async function main() {
               attachmentIds = result.attachmentIds;
               normalized.event.message.content = appendFailedAttachmentNotice(
                 normalized.event.message.content,
-                result.failedAttachmentNames,
+                result,
               );
             }
 
@@ -2844,10 +2849,13 @@ async function main() {
 
     const vellumCreds = event.credentials.get("vellum");
     vellumReady = !!(
-      vellumCreds?.platform_base_url &&
-      vellumCreds?.assistant_api_key &&
-      vellumCreds?.platform_assistant_id
+      vellumCreds?.platform_base_url && vellumCreds?.assistant_api_key
     );
+    if (vellumReady) {
+      // Re-run validate when the API key / base URL change so a warm-pool
+      // claim does not keep the previous assistant's bound owner ids.
+      void ensurePlatformIdentityIds();
+    }
     const twilioCreds = event.credentials.get("twilio");
 
     // Side effects keyed by service name
@@ -3055,6 +3063,7 @@ async function main() {
     ...guardianDeliveryRoutes,
     ...riskClassificationRoutes,
     ...createLogTailRoutes(config),
+    ...createDebugExportRoutes(config),
     ...createChannelSocketHealthRoutes({
       slack: () => slackSocketClient,
       discord: () => discordGatewayClient,
@@ -3065,7 +3074,6 @@ async function main() {
     ...createCredentialRequestIpcRoutes(
       config,
       configFileCache,
-      credentialCache,
       ensurePublicIngressLiveForCredentialLink,
     ),
   ]);

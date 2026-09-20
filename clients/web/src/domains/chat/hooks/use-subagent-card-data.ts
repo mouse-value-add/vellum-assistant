@@ -238,6 +238,7 @@ export function mapToolEventToStep(
     title: label.title,
     info: label.info || content,
     activity: label.activity,
+    actionDisplayKey: label.actionDisplayKey,
     status: "running",
   };
 }
@@ -915,7 +916,13 @@ export function applyDetailEvent(
       payloads.map((payload, i) => ({
         toolCallId: payload.toolCallId,
         toolName: payload.toolName,
-        running: meta[i]!.running,
+        // The timeline never tracks a `web_fetch` as in flight, so a follow-up
+        // that names neither a tool id nor a tool must not close one here
+        // either: the two projections would close different calls.
+        running:
+          meta[i]!.running &&
+          (payload.toolName !== "web_fetch" ||
+            Boolean(event.toolUseId || event.toolName)),
       })),
       event,
     );

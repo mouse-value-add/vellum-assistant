@@ -157,6 +157,12 @@ export function mapRuntimeToDisplayMessage(
   if (m.mergedMessageIds?.length) {
     msg.mergedMessageIds = m.mergedMessageIds;
   }
+  if (m.modeSession) {
+    msg.modeSession = m.modeSession;
+  }
+  if (m.modeSessionActivity) {
+    msg.modeSessionActivity = m.modeSessionActivity;
+  }
   if (m.clientMessageId) {
     msg.clientMessageId = m.clientMessageId;
   }
@@ -189,6 +195,9 @@ export function mapRuntimeToDisplayMessage(
   }
   if (m.noResponse) {
     msg.isNoResponse = true;
+  }
+  if (m.cameraFrame) {
+    msg.isCameraFrame = true;
   }
   const assistantTextVisibility = readAssistantTextVisibility(m);
   if (assistantTextVisibility) {

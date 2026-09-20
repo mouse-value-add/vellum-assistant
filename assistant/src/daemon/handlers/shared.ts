@@ -32,6 +32,7 @@ import { unwrapExternalContentForDisplay } from "../../security/untrusted-conten
 import type { CredentialInjectionTemplate } from "../../tools/credentials/policy-types.js";
 import { getLogger } from "../../util/logger.js";
 import { joinWithSpacing } from "../../util/text-spacing.js";
+import { safeStringSlice } from "../../util/unicode.js";
 import { estimateBase64Bytes } from "../assistant-attachments.js";
 import { conversationSupportsDynamicUi } from "../channel-ui-capability.js";
 import { findConversation } from "../conversation-registry.js";
@@ -264,7 +265,7 @@ function clampAttachmentText(text: string): string {
   if (text.length <= HISTORY_ATTACHMENT_TEXT_LIMIT) {
     return text;
   }
-  return `${text.slice(0, HISTORY_ATTACHMENT_TEXT_LIMIT)}<truncated />`;
+  return `${safeStringSlice(text, 0, HISTORY_ATTACHMENT_TEXT_LIMIT)}<truncated />`;
 }
 
 interface FileBlockMetadata {
@@ -935,17 +936,24 @@ async function mintCollectionLinkFallback(
  *
  * Lifecycle state (resolver, timer) is registered in pendingInteractions — the
  * same tracker the in-conversation SecretPrompter uses — so `POST /v1/secret`
- * resolves the prompt generically. When a `conversationId` is supplied (the CLI
- * `credentials prompt` command forwards `__CONVERSATION_ID`), the broadcast is
- * scoped to that conversation so clients deliver it; otherwise it is
- * conversation-less. When that conversation's channel cannot render dynamic UI
- * (e.g. slack, telegram), resolves immediately with `unsupported_channel` —
- * carrying a one-time collection link when the gateway can mint one — instead
- * of broadcasting a request that can only time out.
+ * resolves the prompt generically. The broadcast is scoped to the supplied
+ * `conversationId` (the CLI `credentials prompt` command forwards
+ * `__CONVERSATION_ID`) so clients deliver it. Two cases have no surface that
+ * can render the card and resolve immediately with `unsupported_channel`,
+ * carrying a one-time collection link when the gateway can mint one, instead
+ * of broadcasting a request that can only time out:
+ *   - the conversation's channel cannot render dynamic UI (slack, telegram);
+ *   - there is no conversation at all (a headless exec such as Doctor's
+ *     `run_assistant_cli`). Clients drop conversation-scoped events without a
+ *     conversationId and `/v1/pending-interactions` is keyed by conversation,
+ *     so a conversation-less `secret_request` is invisible everywhere.
  */
 export function requestSecretStandalone(
   params: StandaloneSecretParams,
 ): Promise<SecretPromptResult> {
+  if (!params.conversationId) {
+    return mintCollectionLinkFallback(params);
+  }
   const conversation = findConversation(params.conversationId);
   if (conversation && !conversationSupportsDynamicUi(conversation)) {
     return mintCollectionLinkFallback(params);

@@ -12,10 +12,16 @@ export type WebSearchProviderId =
   | "tavily"
   | "keenable"
   | "firecrawl"
-  | "fastcrw";
+  | "fastcrw"
+  | "searxng"
+  | "tinyfish";
 
 /** Provider that backed a `web_fetch` call. `default` is the built-in fetcher. */
-export type WebFetchProviderId = "default" | "firecrawl" | "fastcrw";
+export type WebFetchProviderId =
+  | "default"
+  | "firecrawl"
+  | "fastcrw"
+  | "tinyfish";
 
 export interface WebSearchResultItem {
   rank: number; // 1-indexed

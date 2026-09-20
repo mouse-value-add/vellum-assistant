@@ -1,4 +1,9 @@
 {
+  "documentChat": {
+    "saveFailed": "No se pudo guardar el documento. Tu mensaje sigue aquí. Intenta enviarlo de nuevo.",
+    "viewConversation": "Ver conversación",
+    "reopenDocument": "Reabrir documento"
+  },
   "acpChatPlanBlock": {
     "plan": "Plan"
   },
@@ -18,6 +23,7 @@
   },
   "acpConnectAffordance": {
     "connectButton": "Conectar",
+    "dismissButton": "Descartar",
     "errorFallback": "No se pudo conectar Claude. Inténtalo de nuevo.",
     "pastePlaceholder": "Pega tu clave",
     "saveButton": "Guardar",
@@ -35,6 +41,7 @@
     "closeRunDetail": "Cerrar el detalle de la ejecución",
     "goToNewest": "Ir al más reciente",
     "inputLabel": "Entrada",
+    "modelLabel": "Modelo",
     "objective": "Objetivo",
     "outputLabel": "Salida",
     "sendSteerAria": "Enviar instrucción de orientación",
@@ -54,12 +61,24 @@
     "takingLonger": "Tu asistente está tardando más de lo esperado.",
     "tryAgain": "Reintentar"
   },
+  "mobileDetailSheet": {
+    "title": "Detalles de la actividad"
+  },
   "activityStepsPanel": {
     "backAria": "Volver a todos los pasos",
     "backTooltip": "Todos los pasos",
     "closeSteps": "Cerrar pasos",
+    "screenshotAria": "Vista previa de la captura de pantalla de {activity}",
+    "screenshotFallbackAria": "Vista previa de la captura de pantalla del ordenador",
+    "screenshotFallbackTitle": "Captura de pantalla del ordenador",
+    "screenshotTitle": "Captura de pantalla de {activity}",
     "thinkingTitle": "Pensando",
     "viewThinkingAria": "Ver razonamiento"
+  },
+  "computerUseScreenshotPreview": {
+    "unavailable": "La captura de pantalla más reciente no está disponible.",
+    "unavailableShowingPrevious": "La captura de pantalla más reciente no está disponible. Se muestra la captura anterior.",
+    "updating": "Actualizando la captura de pantalla..."
   },
   "addToChatSheet": {
     "camera": "Cámara",
@@ -87,22 +106,69 @@
   "assistantContentDisclosure": {
     "earlierActivity": "Actividad anterior"
   },
+  "actionDisplay": {
+    "click": "Haciendo clic",
+    "type": "Escribiendo",
+    "keyPress": "Pulsando una tecla",
+    "scroll": "Desplazando",
+    "drag": "Arrastrando",
+    "hover": "Pasando el cursor",
+    "observe": "Observando",
+    "navigate": "Navegando",
+    "terminal": "Ejecutando un comando"
+  },
+  "sessionGroupRow": {
+    "mode": {
+      "computerUse": "Sesión de ordenador",
+      "browser": "Sesión del navegador",
+      "liveVision": "Sesión de visión en directo",
+      "ambient": "Sesión ambiental"
+    },
+    "durationSeconds": "{count, plural, one {# s} other {# s}}",
+    "durationMinutes": "{count, plural, one {# min} other {# min}}",
+    "working": "Trabajando",
+    "workingWithDuration": "Trabajando · {duration}",
+    "waiting": "Esperando",
+    "waitingWithDuration": "Esperando · {duration}",
+    "finishing": "Finalizando",
+    "finishingWithDuration": "Finalizando · {duration}",
+    "completedWithDurationAndEnd": "{duration} · Finalizó a las {endTime}",
+    "completedWithDuration": "{duration}",
+    "completedWithEnd": "Finalizó a las {endTime}",
+    "interrupted": "Interrumpida",
+    "interruptedWithDurationAndEnd": "Interrumpida · {duration} · Finalizó a las {endTime}",
+    "interruptedWithDurationAndLastActivity": "Interrumpida · {duration} · Última actividad a las {lastActivityTime}",
+    "interruptedWithLastActivity": "Interrumpida · Última actividad a las {lastActivityTime}",
+    "interruptedWithEnd": "Interrumpida · Finalizó a las {endTime}",
+    "disconnected": "Conexión perdida",
+    "disconnectedWithDurationAndLastActivity": "Conexión perdida · {duration} · Última actividad a las {lastActivityTime}",
+    "disconnectedWithLastActivity": "Conexión perdida · Última actividad a las {lastActivityTime}",
+    "timingUnavailable": "Horario no disponible"
+  },
   "assistantDesktop": {
-    "busy": "Otro usuario está usando el escritorio.",
-    "connecting": "Conectando con el escritorio…",
-    "failed": "No se pudo iniciar el escritorio.",
-    "lost": "Se perdió la conexión con el escritorio.",
-    "openAria": "Abrir escritorio",
+    "fitView": "Ajustar",
+    "panView": "Desplazar",
+    "controlView": "Controlar",
+    "panHint": "Arrastra para desplazarte. Toca para hacer clic.",
+    "hideAria": "Ocultar escritorio virtual",
+    "closeAria": "Cerrar vista previa del escritorio virtual",
+    "moveAria": "Mover vista previa del escritorio virtual (teclas de flecha)",
+    "resizeAria": "Cambiar tamaño de la vista previa del escritorio virtual (teclas de flecha)",
+    "expandAria": "Ampliar escritorio virtual",
+    "busy": "Otro usuario está usando el escritorio virtual.",
+    "connecting": "Conectando con el escritorio virtual…",
+    "failed": "No se pudo iniciar el escritorio virtual.",
+    "lost": "Se perdió la conexión con el escritorio virtual.",
+    "openAria": "Abrir el escritorio virtual de {name}",
+    "openUnnamedAria": "Abrir escritorio virtual",
     "reconnectButton": "Reconectar",
     "title": "Escritorio",
-    "unavailable": "El escritorio no está disponible en este asistente.",
-    "installButton": "Instalar escritorio",
-    "installDescription": "Instala Google Chrome y los componentes necesarios para el escritorio de tu asistente. Esto puede tardar unos minutos.",
-    "checkingSetup": "Comprobando el escritorio…",
-    "installingPackages": "Instalando componentes del escritorio…",
+    "unavailable": "El escritorio virtual no está disponible en este asistente.",
+    "installButton": "Instalar escritorio virtual",
+    "checkingSetup": "Comprobando el escritorio virtual…",
+    "installingPackages": "Instalando componentes del escritorio virtual…",
     "installingChrome": "Instalando Google Chrome…",
     "checkingInstall": "Comprobando la instalación…",
-    "installBackground": "La instalación continúa si cierras esta ventana.",
     "installFailed": "La instalación falló. Inténtalo de nuevo para terminar.",
     "setupRequestFailed": "No se pudo comprobar la instalación. Vuelve a conectar para intentarlo de nuevo.",
     "setupUnsupported": "La instalación requiere un contenedor Linux x64 o ARM64 con acceso de administrador."
@@ -415,7 +481,17 @@
     "seeAllAppsAria": "Ver todas las apps",
     "seeAllFilesAria": "Ver todos los documentos e imágenes",
     "seeAllFramesAria": "Ver todos los fotogramas de la cámara",
-    "title": "Información del chat"
+    "title": "Información del chat",
+    "retry": "Reintentar",
+    "retrySourceAria": "Reintentar {source}",
+    "documentsSource": "Documentos",
+    "attachmentsSource": "Archivos adjuntos",
+    "sourceLoading": "Cargando {source}…",
+    "sourceLoadFailed": "No se pudo cargar: {source}.",
+    "sourceRefreshFailed": "No se pudo actualizar: {source}. Se muestran los resultados guardados.",
+    "sourcePageFailed": "No se pudieron cargar más elementos de {source}.",
+    "framesUnsupported": "La clasificación de fotogramas de cámara no está disponible en esta versión del asistente.",
+    "loadedHistory": "Los archivos adjuntos solo incluyen el historial de chat cargado."
   },
   "chatLayout": {
     "navigationAria": "Navegación"
@@ -660,7 +736,12 @@
     "ariaLabelUnavailable": "Recursos de la conversación, no se pudieron cargar",
     "ariaLabelUnseen": "Recursos de la conversación, {count, plural, one {# elemento} other {# elementos}} (cambios sin ver)",
     "label": "{count, plural, one {# recurso} other {# recursos}}",
-    "labelUnavailable": "No se pudieron cargar los recursos"
+    "labelUnavailable": "No se pudieron cargar los recursos",
+    "labelPartial": "No se pudieron cargar algunos recursos",
+    "ariaLabelPartial": "Recursos de la conversación, algunos no se pudieron cargar",
+    "labelLoaded": "{count, plural, one {# recurso cargado} other {# recursos cargados}}",
+    "ariaLabelLoaded": "Recursos de la conversación, {count, plural, one {# elemento cargado} other {# elementos cargados}}",
+    "ariaLabelLoadedUnseen": "Recursos de la conversación, {count, plural, one {# elemento cargado} other {# elementos cargados}} (cambios sin ver)"
   },
   "conversationStarterDock": {
     "caption": "Prueba algunas sugerencias:"
@@ -671,10 +752,6 @@
   "copyBlockSurface": {
     "copied": "Copiado",
     "copy": "Copiar"
-  },
-  "copyButton": {
-    "copied": "Copiado",
-    "copyFailed": "No se pudo copiar al portapapeles."
   },
   "copyIdToClipboard": {
     "conversationCopied": "ID de conversación copiado al portapapeles.",
@@ -760,6 +837,16 @@
     "saved": "Guardado",
     "saving": "Guardando…",
     "wordCount": "{count, plural, one {# palabra} other {# palabras}}"
+  },
+  "documentConversation": {
+    "unavailable": "No se puede abrir la conversación del documento. Inténtalo de nuevo.",
+    "updateRequired": "Actualiza tu asistente para iniciar una conversación vinculada.",
+    "prepareFailed": "No se pudo preparar la conversación del documento. Tus cambios siguen disponibles.",
+    "feedbackPrompt": "Revisa y atiende mis comentarios sobre \"{title}\".",
+    "missing": "La conversación de este documento no está disponible. Puedes seguir editando o iniciar una nueva conversación vinculada.",
+    "start": "Iniciar una conversación vinculada",
+    "retry": "Intentar de nuevo",
+    "back": "Volver"
   },
   "documentViewerPage": {
     "exportFailed": "No se pudo exportar el PDF",
@@ -907,7 +994,8 @@
     "muted": "Silenciado",
     "reconnecting": "Reconectando…",
     "speaking": "Hablando…",
-    "thinking": "Pensando…"
+    "thinking": "Pensando…",
+    "working": "Trabajando en ello…"
   },
   "llmCallErrorCard": {
     "chipCode": "Código",
@@ -926,7 +1014,13 @@
     "pictureInPictureUnavailable": "Imagen sobre imagen no está disponible"
   },
   "localFileLink": {
-    "unavailable": "Este archivo no está disponible aquí"
+    "closePreview": "Cerrar vista previa: {filename}",
+    "fileOptions": "Opciones del archivo: {filename}",
+    "openInWorkspace": "Abrir en el espacio de trabajo: {filename}",
+    "openPreview": "Abrir vista previa: {filename}",
+    "unavailable": "Este archivo no está disponible aquí",
+    "unavailableLabel": "Archivo no disponible: {filename}",
+    "viewImage": "Ver imagen: {filename}"
   },
   "localFileMenu": {
     "download": "Descargar",
@@ -1218,6 +1312,7 @@
     "defaultDescription": "Conecta {name} para que pueda usarlo en esta tarea.",
     "dismiss": "Descartar",
     "missingDetails": "Faltan detalles del asistente o del proveedor.",
+    "tenantHostInvalid": "Introduce un {label} válido, por ejemplo {placeholder}",
     "thisAccount": "esta cuenta",
     "waiting": "Esperando...",
     "yourAssistant": "Tu asistente"
@@ -1300,6 +1395,7 @@
   },
   "preferencesMenu": {
     "admin": "Admin",
+    "earnCredits": "Gana créditos gratis",
     "preferences": "Preferencias",
     "settings": "Ajustes",
     "shareFeedback": "Compartir comentarios"
@@ -1497,6 +1593,8 @@
     "submitFailed": "No se pudo enviar el secreto. Inténtalo de nuevo."
   },
   "secretPromptCard": {
+    "showValue": "Mostrar valor",
+    "hideValue": "Ocultar valor",
     "cancel": "Cancelar",
     "domains": "Dominios: {list}",
     "placeholder": "Introduce el valor secreto...",
@@ -1540,10 +1638,6 @@
   "singleActivity": {
     "webSearch": "Búsqueda web"
   },
-  "skillCreatedCard": {
-    "view": "Ver",
-    "viewAria": "Ver {name}"
-  },
   "skillDetailPanel": {
     "actionsAria": "Acciones de habilidad",
     "closeDetails": "Cerrar detalles de la habilidad",
@@ -1554,16 +1648,18 @@
     "titleFallback": "Habilidad"
   },
   "skillExecuteDetail": {
-    "parameters": "Parámetros",
-    "rawInput": "Entrada sin procesar",
     "runningSuffix": " · en ejecución"
   },
   "skillLoadCard": {
     "view": "Ver"
   },
   "skillLoadDetail": {
+    "failed": "No se pudo cargar",
+    "loading": "Cargando habilidad…",
     "loadingAria": "Cargando habilidad",
+    "notApproved": "No aprobada",
     "provides": "Proporciona",
+    "unnamedSkill": "Habilidad",
     "usedSkill": "Habilidad usada"
   },
   "skillLoadOutput": {
@@ -1638,7 +1734,9 @@
   "tableSurface": {
     "copied": "Copiado",
     "copy": "Copiar",
-    "copyAria": "Copiar tabla como markdown"
+    "copyAria": "Copiar tabla como markdown",
+    "copyFailed": "No se pudo copiar la tabla.",
+    "table": "Tabla"
   },
   "taskPreferencesSurface": {
     "continue": "Continuar",
@@ -1686,10 +1784,21 @@
     "command": "Comando",
     "denied": "Esta llamada a la herramienta no se aprobó, así que no se ejecutó.",
     "emptyOutput": "La herramienta no devolvió ninguna salida.",
-    "input": "Entrada",
     "output": "Salida",
     "requestedChanges": "Cambios solicitados",
     "running": "Ejecutando…"
+  },
+  "toolInputParameters": {
+    "parameters": "Parámetros",
+    "rawInput": "Entrada sin procesar",
+    "moreCount": "{count, plural, one {# más en Entrada sin procesar} other {# más en Entrada sin procesar}}"
+  },
+  "toolOutputSection": {
+    "moreCount": "{count, plural, one {# más en Salida sin procesar} other {# más en Salida sin procesar}}",
+    "rawOutput": "Salida sin procesar"
+  },
+  "valueFields": {
+    "copyValue": "Copiar {label}"
   },
   "toolStepPill": {
     "openAria": "Abrir {label}",
@@ -1895,6 +2004,26 @@
     "failedReplacementRejected": "Vellum rechazó la credencial de reemplazo. Inicia sesión en la plataforma Vellum y vuelve a intentarlo.",
     "failedUnconfirmed": "El reemplazo se guardó, pero no se pudo confirmar con Vellum. Puede que empiece a funcionar en breve.",
     "failedGeneric": "No se pudo restaurar el acceso. Inténtalo de nuevo en un momento."
+  },
+  "sidebarExpandRow": {
+    "expand": "Expandir",
+    "collapse": "Contraer"
+  },
+  "cameraFrameGrid": {
+    "count": "{count, plural, one {# fotograma de cámara} other {# fotogramas de cámara}}",
+    "timeRange": "Guardados de {first} a {last}",
+    "savedTime": "Guardado: {time}",
+    "pendingAria": "Fotograma de cámara, la imagen aún se está cargando. {time}",
+    "timeUnavailable": "Hora no disponible"
+  },
+  "desktopHelpCard": {
+    "showPreview": "Mostrar vista previa en directo",
+    "needsHelp": "El escritorio virtual necesita tu ayuda.",
+    "stepIn": "Intervenir",
+    "done": "Listo",
+    "skip": "Omitir",
+    "showMore": "Mostrar más",
+    "showLess": "Mostrar menos"
   },
   "desktopApps": {
     "title": "Añadir apps",

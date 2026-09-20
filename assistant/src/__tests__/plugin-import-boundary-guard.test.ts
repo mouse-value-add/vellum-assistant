@@ -129,6 +129,9 @@ const BASELINE: Record<string, readonly string[]> = {
     "../../../../daemon/embedding-reconcile.js",
     "../../../../daemon/trust-context.js",
     "../../../../daemon/turn-latency-sub-spans.js",
+    // mcp-setup capability cards list configured server names from the
+    // workspace mcp.json document. No plugin-api equivalent.
+    "../../../../mcp/workspace-mcp-config.js",
     "../../../../notifications/background-failure-signal.js",
     "../../../../persistence/checkpoints.js",
     "../../../../persistence/conversation-types.js",
@@ -269,6 +272,12 @@ const BASELINE: Record<string, readonly string[]> = {
     "zod",
   ],
   "platform-hosted": ["node:fs/promises", "node:path"],
+  // Host-internal surface snapshot and task_progress parser. UI surfaces
+  // stay host-owned, so there is no plugin-api equivalent.
+  "task-progress": [
+    "../../../../daemon/conversation-surface-snapshots.js",
+    "../../../../runtime/task-progress.js",
+  ],
   session: [
     "../../../config/loader.js",
     "../../types.js",

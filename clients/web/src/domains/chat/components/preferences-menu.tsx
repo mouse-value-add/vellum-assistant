@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleUser,
+  Gift,
   List,
   MessageSquareText,
   Settings as SettingsIcon,
@@ -32,6 +33,7 @@ import { useBillingBalanceStatus } from "@/hooks/use-billing-balance-status";
 import { useTouchMobile } from "@/hooks/use-touch-mobile";
 import { usePlatformGate } from "@/hooks/use-platform-gate";
 import { displayedCreditsUsd } from "@/lib/billing/displayed-credits";
+import { prefetchRoute } from "@/lib/prefetch-route";
 import { isElectron } from "@/runtime/is-electron";
 import { useAuthStore, useIsAuthenticated } from "@/stores/auth-store";
 import { openUrl } from "@/runtime/browser";
@@ -48,6 +50,14 @@ import { useTranslation } from "@/i18n";
 const AddCreditsModal = lazy(() =>
   import("@/components/add-credits-modal").then((m) => ({
     default: m.AddCreditsModal,
+  })),
+);
+
+// The referral modal only opens from the earn-credits row, so its chunk stays
+// out of the initial bundle until then.
+const ReferralModal = lazy(() =>
+  import("@/components/referral-modal").then((m) => ({
+    default: m.ReferralModal,
   })),
 );
 
@@ -116,17 +126,22 @@ export function PreferencesMenu({
      both unmount their content on close, and the strip closes the menu as it
      opens the checkout. */
   const [isAddCreditsOpen, setIsAddCreditsOpen] = useState(false);
+  const [isEarnCreditsOpen, setIsEarnCreditsOpen] = useState(false);
 
-  /* Warm the feedback chunk as the menu opens rather than on the click that
-     needs it, so the dialog is usually already there by the time it is asked
-     for. Once per mount: the chunk is cached after the first fetch. */
-  const hasPrefetchedFeedback = useRef(false);
+  /* Warm the chunks this menu leads to as it opens rather than on the click
+     that needs them, so they are usually already there by the time they are
+     asked for. Settings is the expensive one: it is two lazy chunks, the
+     layout and its landing page, and the router resolves both before it will
+     commit, holding the previous screen with no feedback for the whole wait.
+     Once per mount: chunks are module-cached after the first fetch. */
+  const hasPrefetchedMenuTargets = useRef(false);
   useEffect(() => {
-    if (!isOpen || hasPrefetchedFeedback.current) {
+    if (!isOpen || hasPrefetchedMenuTargets.current) {
       return;
     }
-    hasPrefetchedFeedback.current = true;
+    hasPrefetchedMenuTargets.current = true;
     prefetchShareFeedbackModal();
+    prefetchRoute(routes.settings.root);
   }, [isOpen]);
 
   if (!isAuthenticated) {
@@ -210,6 +225,7 @@ export function PreferencesMenu({
       onClose={closeMenu}
       onShareFeedback={() => setIsFeedbackOpen(true)}
       onAddCredits={() => setIsAddCreditsOpen(true)}
+      onEarnCredits={() => setIsEarnCreditsOpen(true)}
       activeConversationId={activeConversationId}
     />
   );
@@ -266,6 +282,15 @@ export function PreferencesMenu({
           />
         </LazyBoundary>
       ) : null}
+
+      {isEarnCreditsOpen ? (
+        <LazyBoundary>
+          <ReferralModal
+            open={isEarnCreditsOpen}
+            onOpenChange={setIsEarnCreditsOpen}
+          />
+        </LazyBoundary>
+      ) : null}
     </>
   );
 }
@@ -274,6 +299,7 @@ interface PreferencesMenuContentProps {
   onClose: () => void;
   onShareFeedback: () => void;
   onAddCredits: () => void;
+  onEarnCredits: () => void;
   activeConversationId?: string | null;
 }
 
@@ -281,6 +307,7 @@ function PreferencesMenuContent({
   onClose,
   onShareFeedback,
   onAddCredits,
+  onEarnCredits,
   activeConversationId,
 }: PreferencesMenuContentProps) {
   const { t } = useTranslation("chat");
@@ -333,6 +360,21 @@ function PreferencesMenuContent({
             }}
           />
         </div>
+      ) : null}
+
+      {/* The row rides the billing gate like the credits card above it. The
+          modal itself says whether the account can earn, so the menu does not
+          ask ahead of time and no referral code is minted until someone opens
+          it. */}
+      {showBillingRows ? (
+        <PanelItem
+          icon={Gift}
+          label={t("preferencesMenu.earnCredits")}
+          onSelect={() => {
+            onClose();
+            onEarnCredits();
+          }}
+        />
       ) : null}
 
       {activationListId !== null ? (
