@@ -9,7 +9,8 @@ export type WebSearchProviderId =
   | "firecrawl"
   | "fastcrw"
   | "searxng"
-  | "tinyfish";
+  | "tinyfish"
+  | "youcom";
 
 export type WebFetchProviderId =
   | "default"

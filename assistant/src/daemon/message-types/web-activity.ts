@@ -14,7 +14,8 @@ export type WebSearchProviderId =
   | "firecrawl"
   | "fastcrw"
   | "searxng"
-  | "tinyfish";
+  | "tinyfish"
+  | "youcom";
 
 /** Provider that backed a `web_fetch` call. `default` is the built-in fetcher. */
 export type WebFetchProviderId =

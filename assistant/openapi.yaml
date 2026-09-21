@@ -21218,6 +21218,7 @@ paths:
                                           - fastcrw
                                           - searxng
                                           - tinyfish
+                                          - youcom
                                       resultCount:
                                         type: number
                                       durationMs:
@@ -21738,6 +21739,7 @@ paths:
                                                   - fastcrw
                                                   - searxng
                                                   - tinyfish
+                                                  - youcom
                                               resultCount:
                                                 type: number
                                               durationMs:

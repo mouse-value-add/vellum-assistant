@@ -187,6 +187,17 @@ export const SEARCH_PROVIDER_CATALOG: readonly SearchProviderCatalogEntry[] = [
     supportsApiBase: true,
     defaultApiBase: "https://api.search.tinyfish.ai",
   },
+  {
+    id: "youcom",
+    displayName: "You.com",
+    displayNameLong: "You.com Search",
+    kind: "byok",
+    apiKeyPrefix: "ydc-...",
+    envVar: "YDC_API_KEY",
+    secretKey: "youcom",
+    fallbackOrder: 9,
+    privacyPolicyUrl: "https://you.com/privacy",
+  },
 ];
 
 /** Provider ids accepted by the web-search config schema. */

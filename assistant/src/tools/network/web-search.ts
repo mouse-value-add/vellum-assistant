@@ -50,6 +50,9 @@ const TINYFISH_DEFAULT_SEARCH_API_BASE = "https://api.search.tinyfish.ai";
 const KEENABLE_API_BASE_URL = "https://api.keenable.ai";
 const KEENABLE_PUBLIC_SEARCH_PATH = "/v1/search/public";
 const KEENABLE_KEYED_SEARCH_PATH = "/v1/search";
+// You.com Search API. GET with an `X-API-Key` header; `query` plus optional
+// `count` and `offset`.
+const YOUCOM_API_URL = "https://api.ydc-index.io/search";
 
 type WebSearchProvider =
   | "perplexity"
@@ -59,7 +62,8 @@ type WebSearchProvider =
   | "keenable"
   | "fastcrw"
   | "searxng"
-  | "tinyfish";
+  | "tinyfish"
+  | "youcom";
 
 /**
  * Arguments passed to every {@link WebSearchAdapter}. The full superset is
@@ -195,6 +199,20 @@ interface TinyfishSearchResponse {
   results?: TinyfishSearchResult[];
   total_results?: number;
   page?: number;
+}
+
+interface YoucomSearchResult {
+  title?: string;
+  url?: string;
+  /** Query-relevant passages extracted from the page. */
+  snippets?: string[];
+  snippet?: string;
+  /** Publisher timestamp, when available. */
+  published_date?: string;
+}
+
+interface YoucomSearchResponse {
+  hits?: YoucomSearchResult[];
 }
 
 const SEARXNG_MISSING_INSTANCE_MESSAGE =
@@ -710,6 +728,83 @@ function buildTinyfishMetadata(
   return {
     query,
     provider: "tinyfish",
+    resultCount: items.length,
+    durationMs,
+    results: items,
+  };
+}
+
+/**
+ * You.com sends query-relevant passages in `snippets` (an array) on every
+ * hit; some payloads carry a single `snippet` string instead. Join the array
+ * passages with an ellipsis and cap the total to keep one result from
+ * dominating the context, mirroring the Keenable page-text cap.
+ */
+const YOUCOM_SNIPPET_MAX_LENGTH = 500;
+
+function youcomSnippet(result: YoucomSearchResult): string | undefined {
+  const passages = result.snippets?.length
+    ? result.snippets
+    : result.snippet
+      ? [result.snippet]
+      : [];
+  const text = passages.join(" … ").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return undefined;
+  }
+  return safeStringSlice(text, 0, YOUCOM_SNIPPET_MAX_LENGTH);
+}
+
+function formatYoucomResults(
+  data: YoucomSearchResponse,
+  query: string,
+): string {
+  const results = data.hits ?? [];
+  if (results.length === 0) {
+    return `No results found for "${query}".`;
+  }
+
+  const lines: string[] = [`Web search results for "${query}":\n`];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const title = r.title?.trim() || r.url?.trim() || "Untitled result";
+    lines.push(`${i + 1}. ${title}`);
+    if (r.url) {
+      lines.push(`   URL: ${r.url}`);
+    }
+    const snippet = youcomSnippet(r);
+    if (snippet) {
+      lines.push(`   ${snippet}`);
+    }
+    if (r.published_date) {
+      lines.push(`   Published: ${r.published_date}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function buildYoucomMetadata(
+  data: YoucomSearchResponse,
+  query: string,
+  durationMs: number,
+): WebSearchMetadata {
+  const results = data.hits ?? [];
+  const items: WebSearchResultItem[] = results.map((r, i) => {
+    const url = r.url ?? "";
+    const domain = extractDomain(url);
+    return {
+      rank: i + 1,
+      title: r.title?.trim() || url.trim() || "Untitled result",
+      url,
+      domain,
+      faviconUrl: faviconUrlForDomain(domain),
+      snippet: youcomSnippet(r),
+    };
+  });
+  return {
+    query,
+    provider: "youcom",
     resultCount: items.length,
     durationMs,
     results: items,
@@ -1801,6 +1896,109 @@ async function executeTinyfishSearch(
   );
 }
 
+async function executeYoucomSearch(
+  query: string,
+  count: number,
+  offset: number,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ToolExecutionResult> {
+  const url = new URL(YOUCOM_API_URL);
+  url.searchParams.set("query", query);
+  url.searchParams.set("count", String(count));
+  if (offset > 0) {
+    url.searchParams.set("offset", String(offset));
+  }
+
+  const headers = {
+    Accept: "application/json",
+    "X-API-Key": apiKey.trim(),
+  };
+
+  const startedAt = Date.now();
+
+  for (let attempt = 0; attempt <= DEFAULT_MAX_RETRIES; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), { headers, signal });
+    } catch (err) {
+      return networkFailureResult(query, "youcom", startedAt, err, signal);
+    }
+
+    const bodyText = await response.text();
+    if (response.ok) {
+      let data: YoucomSearchResponse;
+      try {
+        data = JSON.parse(bodyText) as YoucomSearchResponse;
+      } catch {
+        return errorResult(
+          query,
+          "youcom",
+          startedAt,
+          "You.com Search returned an invalid JSON payload.",
+        );
+      }
+      if (data.hits && data.hits.length > count) {
+        data.hits = data.hits.slice(0, count);
+      }
+      const durationMs = Date.now() - startedAt;
+      return {
+        content:
+          wrapUntrustedContent(formatYoucomResults(data, query), {
+            source: "search",
+            sourceDetail: "youcom",
+          }) + CITATION_INSTRUCTION,
+        isError: false,
+        activityMetadata: {
+          webSearch: buildYoucomMetadata(data, query, durationMs),
+        },
+      };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return errorResult(
+        query,
+        "youcom",
+        startedAt,
+        "Invalid or expired You.com API key",
+      );
+    }
+
+    if (response.status === 429 && attempt < DEFAULT_MAX_RETRIES) {
+      const delayMs = getHttpRetryDelay(
+        response,
+        attempt,
+        DEFAULT_BASE_DELAY_MS,
+      );
+      log.warn(
+        { attempt: attempt + 1, delayMs },
+        "You.com Search rate limited, retrying",
+      );
+      await sleep(delayMs);
+      continue;
+    }
+
+    log.warn({ status: response.status }, "You.com Search API error");
+    return backendFailureResult(
+      query,
+      "youcom",
+      startedAt,
+      { statusCode: response.status, error: rawBodyDetail(bodyText) },
+      response.status === 429
+        ? "You.com Search rate limit exceeded after retries. Try again shortly."
+        : `You.com Search API returned status ${response.status}`,
+    );
+  }
+
+  return backendFailureResult(
+    query,
+    "youcom",
+    startedAt,
+    { statusCode: 429 },
+    "You.com Search rate limit exceeded after retries. Try again shortly.",
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Adapter registry
 //
@@ -1884,6 +2082,14 @@ const tinyfishSearchAdapter: WebSearchAdapter = {
     executeTinyfishSearch(query, count, freshness, apiKey, signal),
 };
 
+const youcomSearchAdapter: WebSearchAdapter = {
+  id: "youcom",
+  providerKeyName: "youcom",
+  fallbackOrder: 9,
+  execute: ({ query, count, offset, apiKey, signal }) =>
+    executeYoucomSearch(query, count, offset, apiKey, signal),
+};
+
 /**
  * All built-in web-search adapters keyed by provider id. The
  * `Record<WebSearchProvider, ...>` shape forces TypeScript to flag any
@@ -1898,6 +2104,7 @@ const WEB_SEARCH_ADAPTERS: Record<WebSearchProvider, WebSearchAdapter> = {
   fastcrw: fastcrwSearchAdapter,
   searxng: searxngSearchAdapter,
   tinyfish: tinyfishSearchAdapter,
+  youcom: youcomSearchAdapter,
 };
 
 /**
@@ -1929,7 +2136,7 @@ export const webSearchTool = {
       count: {
         type: "number",
         description:
-          "Number of results to return (1-20, default 10). Used with Brave, Tavily, Firecrawl, Keenable, fastCRW, SearXNG, and TinyFish providers.",
+          "Number of results to return (1-20, default 10). Used with Brave, Tavily, Firecrawl, Keenable, fastCRW, SearXNG, TinyFish, and You.com providers.",
       },
       offset: {
         type: "number",
@@ -1939,7 +2146,7 @@ export const webSearchTool = {
       freshness: {
         type: "string",
         description:
-          'Filter by recency: "pd" (past day), "pw" (past week), "pm" (past month), "py" (past year). Used with Brave, Tavily, Firecrawl, Keenable, fastCRW, SearXNG, and TinyFish providers. SearXNG maps day/month/year and omits week.',
+          'Filter by recency: "pd" (past day), "pw" (past week), "pm" (past month), "py" (past year). Used with Brave, Tavily, Firecrawl, Keenable, fastCRW, SearXNG, and TinyFish providers. SearXNG maps day/month/year and omits week. You.com does not support a recency filter.',
       },
     },
     required: ["query"],
@@ -2055,7 +2262,7 @@ export const webSearchTool = {
           query,
           provider,
           startedAt,
-          "No web search API key configured. Set it via `keys set perplexity <key>`, `keys set brave <key>`, `keys set tavily <key>`, `keys set firecrawl <key>`, or `keys set fastcrw <key>`, or `keys set tinyfish <key>`, or configure it from the Settings page under API Keys. Or switch the web-search provider to Keenable, which works without a key, or SearXNG with your instance URL.",
+          "No web search API key configured. Set it via `keys set perplexity <key>`, `keys set brave <key>`, `keys set tavily <key>`, `keys set firecrawl <key>`, or `keys set fastcrw <key>`, or `keys set tinyfish <key>`, or `keys set youcom <key>`, or configure it from the Settings page under API Keys. Or switch the web-search provider to Keenable, which works without a key, or SearXNG with your instance URL.",
         );
       }
     }
