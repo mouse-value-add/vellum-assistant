@@ -4988,6 +4988,25 @@ function buildDesktopControlSchema(): Record<string, unknown> {
         summary: "Add or open a desktop app",
         operationId: "desktopAppsAction",
         security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  appId: {
+                    type: "string",
+                    enum: ["calculator", "text-editor"],
+                  },
+                  action: { type: "string", enum: ["add", "open"] },
+                },
+                required: ["appId", "action"],
+                additionalProperties: false,
+              },
+            },
+          },
+        },
         responses: {
           "200": {
             description: "Current desktop application availability",
