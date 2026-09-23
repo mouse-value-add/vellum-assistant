@@ -12,7 +12,7 @@ let mockKeenableSecureKey: string | undefined;
 let mockFastcrwSecureKey: string | undefined;
 let mockSearxngSecureKey: string | undefined;
 let mockTinyfishSecureKey: string | undefined;
-let mockExaSecureKey: string | undefined;
+let mockYoucomSecureKey: string | undefined;
 let mockManagedSearchProxyResult: any;
 let mockManagedSearchAvailable = true;
 let mockManagedSearchProxyCalls: Array<{
@@ -66,8 +66,8 @@ mock.module("../../../security/secure-keys.js", () => ({
     if (provider === "tinyfish") {
       return mockTinyfishSecureKey;
     }
-    if (provider === "exa") {
-      return mockExaSecureKey;
+    if (provider === "youcom") {
+      return mockYoucomSecureKey;
     }
     return undefined;
   },
@@ -115,7 +115,7 @@ describe("web_search tool", () => {
     mockFastcrwSecureKey = undefined;
     mockSearxngSecureKey = undefined;
     mockTinyfishSecureKey = undefined;
-    mockExaSecureKey = undefined;
+    mockYoucomSecureKey = undefined;
     mockManagedSearchProxyCalls = [];
     mockManagedSearchAvailable = true;
     mockManagedSearchProxyResult = {
