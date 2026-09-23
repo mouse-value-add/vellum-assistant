@@ -188,15 +188,14 @@ export const SEARCH_PROVIDER_CATALOG: readonly SearchProviderCatalogEntry[] = [
     defaultApiBase: "https://api.search.tinyfish.ai",
   },
   {
-    id: "youcom",
-    displayName: "You.com",
-    displayNameLong: "You.com Search",
+    id: "exa",
+    displayName: "Exa",
     kind: "byok",
-    apiKeyPrefix: "ydc-...",
-    envVar: "YDC_API_KEY",
-    secretKey: "youcom",
+    apiKeyPrefix: "Exa API key...",
+    envVar: "EXA_API_KEY",
+    secretKey: "exa",
     fallbackOrder: 9,
-    privacyPolicyUrl: "https://you.com/privacy",
+    privacyPolicyUrl: "https://exa.ai/privacy-policy",
   },
 ];
 

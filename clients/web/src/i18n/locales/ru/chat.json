@@ -1,4 +1,7 @@
 {
+  "askQuestionDetail": {
+    "heading": "{count, plural, one {Вопрос} few {Вопроса} many {Вопросов} other {Вопроса}}"
+  },
   "secretPromptCard": {
     "showValue": "Показать значение",
     "hideValue": "Скрыть значение"
@@ -34,8 +37,7 @@
     "screenshotAria": "Открыть снимок экрана: {activity}",
     "screenshotFallbackAria": "Открыть снимок экрана компьютера",
     "screenshotFallbackTitle": "Снимок экрана компьютера",
-    "screenshotTitle": "Снимок экрана: {activity}",
-    "thinkingTitle": "Размышление"
+    "screenshotTitle": "Снимок экрана: {activity}"
   },
   "computerUseScreenshotPreview": {
     "unavailable": "Последний снимок экрана недоступен.",
@@ -990,6 +992,9 @@
   "tableSurface": {
     "table": "Таблица"
   },
+  "thinkingDetail": {
+    "title": "Размышление"
+  },
   "toolDefinitionsContent": {
     "defaultValue": "по умолчанию: {value}",
     "inputSchema": "Схема ввода",
@@ -1081,12 +1086,12 @@
     "workflowFinished": "Рабочий процесс завершён"
   },
   "wakeDetailPanel": {
-    "close": "Закрыть",
     "details": "Подробности",
     "result": "Результат",
     "runStatus": "Статус запуска",
     "title": "Разговор возобновлён",
-    "workflow": "Рабочий процесс"
+    "workflow": "Рабочий процесс",
+    "closeAria": "Закрыть подробности"
   },
   "watchRetroSurface": {
     "doneDiscarded": "Не сохранено",
@@ -1153,5 +1158,17 @@
   "recallLabels": {
     "source": "{source, select, memory {Память} conversations {Беседы} workspace {Файлы рабочей области} other {{source}}}",
     "depth": "{depth, select, fast {Быстрый поиск} standard {Обычный поиск} deep {Глубокий поиск} other {Поиск}}"
+  },
+  "skillExecuteDetail": {
+    "unnamedTool": "Инструмент навыка"
+  },
+  "chatsSection": {
+    "doneEmptyBody": "Чаты, отмеченные как выполненные, ждут вас в разделе «Все чаты».",
+    "doneEmptyTitle": "Всё разобрано.",
+    "emptyBody": "Начните новый чат, и он появится здесь.",
+    "emptyTitle": "Чатов пока нет."
+  },
+  "sidebarSectionViewAll": {
+    "label": "Все чаты"
   }
 }

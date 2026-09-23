@@ -60,7 +60,7 @@ function ThinkingDetailBody({
   return (
     <DetailShell
       Glyph={Brain}
-      title={detail.title}
+      title={t("thinkingDetail.title")}
       closeLabel={t("toolDetailPanel.closeAria")}
       closeVariant="outlined"
       onClose={onClose}
@@ -100,6 +100,7 @@ export function ToolDetailBody({
   const liveTc = useLiveToolCall(source, detail.toolCallId);
   const result = liveTc?.result ?? detail.result;
   const activityMetadata = liveTc?.activityMetadata ?? detail.activityMetadata;
+  const answeredQuestion = liveTc?.answeredQuestion ?? detail.answeredQuestion;
   const streamedOutput = liveTc?.streamedOutput ?? detail.streamedOutput;
 
   const isRunning = liveTc
@@ -133,8 +134,16 @@ export function ToolDetailBody({
       ? result
       : null;
 
+  // One root owns the spacing between sections, so a host that lays the body
+  // out in a flex column of its own cannot add its gap to the body's.
+  //
+  // Keyed by the call: a drawer swaps `detail` without unmounting this body,
+  // and what the body holds about what it is showing belongs to the call it
+  // was shown for. Keying the root rather than the renderer alone covers the
+  // shared Output fold and the raw disclosures too, not just a renderer's own
+  // state, so a call opened after another starts the way it would on its own.
   return (
-    <>
+    <div key={detail.toolCallId} className="flex flex-col gap-5">
       {/* Tool-specific body when the tool has one, else the call's parameters
           with its raw input behind a disclosure. The header names the tool and
           shows its risk, so neither is repeated here. */}
@@ -143,6 +152,7 @@ export function ToolDetailBody({
           detail={detail}
           result={result}
           activityMetadata={activityMetadata}
+          answeredQuestion={answeredQuestion}
           streamedOutput={streamedOutput}
           isRunning={isRunning}
           isError={isError}
@@ -150,33 +160,29 @@ export function ToolDetailBody({
           assistantId={assistantId}
         />
       ) : (
-        <div className="flex flex-col gap-5">
-          <ToolInputParameters params={toolCallParams(detail.input)} />
-        </div>
+        <ToolInputParameters params={toolCallParams(detail.input)} />
       )}
 
       {/* Output, laid out like the input when the result is structured.
           Suppressed for tools whose renderer already presents the result. */}
       {output === "shared" && (
-        <div className="mt-5 flex flex-col gap-5">
-          <ToolOutputSection
-            result={result}
-            layout={layout}
-            streamedOutput={streamedOutput}
-            isDenied={isDenied}
-            isRunning={isRunning}
-            isError={isError}
-          />
-        </div>
+        <ToolOutputSection
+          result={result}
+          layout={layout}
+          streamedOutput={streamedOutput}
+          isDenied={isDenied}
+          isRunning={isRunning}
+          isError={isError}
+        />
       )}
 
       {/* Every call's raw data, in one place under the same names whatever
           renders the call above, so no renderer can leave it out. */}
-      <div className="mt-5 flex flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <RawDisclosure side="input" text={() => jsonText(detail.input)} />
         {rawOutput && <RawDisclosure side="output" text={() => rawOutput} />}
       </div>
-    </>
+    </div>
   );
 }
 
